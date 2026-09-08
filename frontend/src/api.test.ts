@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { arcsecPerPixel, errorMessage, formatBytes, isBusy, statusLabel } from './api'
+import { ApiError, arcsecPerPixel, errorMessage, formatBytes, isBusy, parseBody, statusLabel } from './api'
 
 describe('api helpers', () => {
   it('labels every solve status', () => {
@@ -31,5 +31,13 @@ describe('api helpers', () => {
   it('computes the plate scale hint', () => {
     expect(arcsecPerPixel(400, 3.76)).toBeCloseTo(1.939, 3)
     expect(arcsecPerPixel(0, 3.76)).toBeNull()
+  })
+
+  it('rejects a non-JSON success body instead of returning null', () => {
+    expect(parseBody(200, true, '[{"id": "a"}]')).toEqual([{ id: 'a' }])
+    expect(parseBody(200, true, '')).toBeNull()
+    expect(() => parseBody(200, true, '<!doctype html><html></html>')).toThrow(ApiError)
+    expect(() => parseBody(409, false, '{"detail": "busy"}')).toThrow('busy')
+    expect(() => parseBody(502, false, '<html>bad gateway</html>')).toThrow('HTTP 502')
   })
 })
