@@ -2,7 +2,11 @@
 
 Usage (from backend/):
 
-    python scripts/record_nova_fixtures.py path/to/image.jpg
+    python scripts/record_nova_fixtures.py path/to/image.jpg [output-dir]
+
+The output directory defaults to tests/fixtures/nova/ (the Orion set the tests replay); pass
+another directory, e.g. tests/fixtures/nova-narrow/, to record a second field without
+overwriting it.
 
 The API key comes from NOVA_API_KEY, ASTROMETRY_API_KEY or data/config.json (the same lookup
 the app uses). The image is downscaled exactly like the app does (≤ 3000 px solve copy) so the
@@ -202,7 +206,7 @@ async def record(
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
+    if len(argv) not in (2, 3):
         print(__doc__)
         return 2
     settings = load_settings()
@@ -211,7 +215,10 @@ def main(argv: list[str]) -> int:
             "No API key: set NOVA_API_KEY / ASTROMETRY_API_KEY or data/config.json", file=sys.stderr
         )
         return 2
-    return asyncio.run(record(Path(argv[1]), settings.nova_api_key, settings.nova_base_url))
+    out = Path(argv[2]) if len(argv) == 3 else FIXTURES
+    return asyncio.run(
+        record(Path(argv[1]), settings.nova_api_key, settings.nova_base_url, fixtures_dir=out)
+    )
 
 
 if __name__ == "__main__":
