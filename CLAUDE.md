@@ -53,7 +53,7 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
 
 ## Coding conventions
 
-- Python 3.13+ (dev host runs 3.14; Docker image pins python:3.13-slim), type hints everywhere, ruff defaults, pytest. Pydantic models for every request/response.
+- Python 3.13+ (dev host, CI and the Docker image run 3.14 via python:3.14-slim), type hints everywhere, ruff defaults, pytest. Pydantic models for every request/response.
 - TypeScript strict. Function components + hooks. Zustand for editor state. No Redux.
 - Coordinates: annotation geometry is stored in **original image pixels**, never in screen pixels.
   The canvas applies a single view transform (zoom, pan). Convert at the edges only.

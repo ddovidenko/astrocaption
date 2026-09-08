@@ -45,7 +45,7 @@ No multi-user, no roles, no invites in v1.
 | State | Zustand | Small, no boilerplate. |
 | Export render | Pillow (server) | Guarantees full-res output regardless of client GPU/memory. |
 | Auth | Signed session cookie (itsdangerous), bcrypt password | Light, no external dependency. |
-| Container | Multi-stage Dockerfile, `python:3.13-slim` final | Node only in build stage. |
+| Container | Multi-stage Dockerfile, `python:3.14-slim` final | Node only in build stage. |
 | CI | GitHub Actions → GHCR | Public image `ghcr.io/ddovidenko/astrocaption`. |
 
 ## 5. Core flows
