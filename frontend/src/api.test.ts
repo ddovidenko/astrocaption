@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ApiError, arcsecPerPixel, errorMessage, formatBytes, isBusy, parseBody, statusLabel } from './api'
+import { ApiError, arcsecPerPixel, errorMessage, formatBytes, isBusy, isSessionLoss, parseBody, statusLabel } from './api'
 
 describe('api helpers', () => {
   it('labels every solve status', () => {
@@ -39,5 +39,13 @@ describe('api helpers', () => {
     expect(() => parseBody(200, true, '<!doctype html><html></html>')).toThrow(ApiError)
     expect(() => parseBody(409, false, '{"detail": "busy"}')).toThrow('busy')
     expect(() => parseBody(502, false, '<html>bad gateway</html>')).toThrow('HTTP 502')
+  })
+
+  it('treats a 401 as session loss everywhere except the login call', () => {
+    expect(isSessionLoss('/api/images', 401)).toBe(true)
+    expect(isSessionLoss('/api/config', 401)).toBe(true)
+    expect(isSessionLoss('/api/login', 401)).toBe(false)
+    expect(isSessionLoss('/api/images', 403)).toBe(false)
+    expect(isSessionLoss('/api/images', 200)).toBe(false)
   })
 })

@@ -1,4 +1,4 @@
-// Typed client for the milestone-1 API. Mirrors backend/app/models.py.
+// Typed client for the API. Mirrors backend/app/models.py.
 
 export type SolveStatus = 'pending' | 'solving' | 'solved' | 'failed'
 
@@ -41,8 +41,23 @@ export interface HealthOut {
   status: 'ok'
   version: string
   site_title: string
-  nova_api_key_set: boolean
+  setup_required: boolean
+  authenticated: boolean
   config_error: string | null
+}
+
+export interface ConfigOut {
+  site_title: string
+  max_upload_mb: number
+  nova_api_key_set: boolean
+  default_style: Record<string, unknown>
+  locked: string[]
+}
+
+export interface SetupRequest {
+  password: string
+  nova_api_key?: string
+  site_title?: string
 }
 
 export interface ExportOut {
@@ -101,8 +116,26 @@ export function parseBody(status: number, ok: boolean, text: string): unknown {
   return body
 }
 
+let onUnauthorized: (() => void) | null = null
+
+/** Called once per 401 outside the login call, so the shell can send the user to /login. */
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  onUnauthorized = fn
+}
+
+export function isSessionLoss(url: string, status: number): boolean {
+  return status === 401 && url !== '/api/login'
+}
+
+export function describeError(err: unknown): string {
+  if (err instanceof ApiError) return err.message
+  if (err instanceof Error) return err.message
+  return 'Something went wrong.'
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init)
+  if (isSessionLoss(url, res.status)) onUnauthorized?.()
   if (res.status === 204) return undefined as T
   return parseBody(res.status, res.ok, await res.text()) as T
 }
@@ -115,6 +148,10 @@ const json = (method: string, body?: unknown): RequestInit => ({
 
 export const api = {
   health: () => request<HealthOut>('/api/health'),
+  setup: (body: SetupRequest) => request<void>('/api/setup', json('POST', body)),
+  login: (password: string) => request<void>('/api/login', json('POST', { password })),
+  logout: () => request<void>('/api/logout', json('POST')),
+  config: () => request<ConfigOut>('/api/config'),
   listImages: () => request<ImageOut[]>('/api/images'),
   upload(file: File, title: string): Promise<ImageOut> {
     const form = new FormData()

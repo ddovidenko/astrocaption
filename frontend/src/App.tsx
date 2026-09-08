@@ -1,13 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, ApiError, formatBytes, isBusy, statusLabel, type ExportOut, type HealthOut, type ImageOut } from './api'
+import { api, describeError, formatBytes, isBusy, statusLabel, type ExportOut, type HealthOut, type ImageOut } from './api'
 
 const POLL_MS = 3000
-
-function describeError(err: unknown): string {
-  if (err instanceof ApiError) return err.message
-  if (err instanceof Error) return err.message
-  return 'Something went wrong.'
-}
 
 export default function App() {
   const [health, setHealth] = useState<HealthOut | null>(null)
@@ -67,13 +61,6 @@ export default function App() {
         {health?.config_error && (
           <div className="notice error">
             <code>data/config.json</code> was ignored: {health.config_error}
-          </div>
-        )}
-        {health && !health.nova_api_key_set && (
-          <div className="notice">
-            No nova.astrometry.net API key is configured. Set <code>NOVA_API_KEY</code> (or{' '}
-            <code>nova_api_key</code> in <code>data/config.json</code>); no restart is needed, and
-            solves fail until a key is present.
           </div>
         )}
         <UploadPanel onUploaded={refresh} />
