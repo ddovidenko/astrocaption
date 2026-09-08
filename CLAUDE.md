@@ -21,6 +21,7 @@ data/         (runtime, volume-mounted) sqlite db, uploads, renders, config. Nev
 ```
 make install      # backend venv (backend/.venv) + frontend node_modules; run by make dev/test/lint as needed
 make dev          # backend on :8000 (uvicorn --reload) + vite on :5173 with proxy
+make dev-service  # the same at boot, as a systemd unit (Linux/WSL); stop it before running make dev by hand
 make test         # pytest + vitest
 make lint         # ruff + mypy + eslint + tsc --noEmit
 make build        # docker build -t astrocaption:local .

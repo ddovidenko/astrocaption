@@ -105,3 +105,17 @@ make lint           # ruff + mypy + eslint + tsc
 ```
 
 The dev server uses `./data` in the repo (git-ignored).
+
+To have the dev servers come up whenever the machine (or the WSL distro) boots, on a host with
+systemd:
+
+```sh
+make dev-service          # installs and enables /etc/systemd/system/astrocaption-dev.service (sudo)
+journalctl -u astrocaption-dev -f
+sudo systemctl stop astrocaption-dev    # before running make dev by hand; start it again afterwards
+make dev-service-remove   # undo
+```
+
+The unit runs `make dev` from this checkout as your user. Under WSL the distro itself only starts
+when something launches it; to bring it up at Windows sign-in, add a Task Scheduler entry that runs
+`wsl.exe -d <distro> --exec /bin/true`.

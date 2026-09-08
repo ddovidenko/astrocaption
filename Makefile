@@ -6,7 +6,7 @@ VENV      := backend/.venv
 PY        := $(VENV)/bin/python
 NPM       := npm --prefix frontend
 
-.PHONY: help install dev dev-backend dev-frontend test test-backend test-frontend lint lint-backend lint-frontend format build up placement-vectors names-catalog record-fixtures clean
+.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up placement-vectors names-catalog record-fixtures clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -31,6 +31,39 @@ dev-backend:
 
 dev-frontend:
 	$(NPM) run dev
+
+# `make dev` at boot, for Linux/WSL hosts with systemd. Generated from this checkout and user.
+define DEV_SERVICE_UNIT
+[Unit]
+Description=AstroCaption dev servers (uvicorn :8000 + vite :5173) in $(CURDIR)
+After=network.target
+
+[Service]
+User=$(shell id -un)
+WorkingDirectory=$(CURDIR)
+Environment=HOME=$(HOME)
+Environment=PATH=$(HOME)/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/make dev
+Restart=always
+RestartSec=3
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target
+endef
+export DEV_SERVICE_UNIT
+
+dev-service: install ## Run `make dev` at boot via systemd (Linux/WSL with systemd; uses sudo)
+	@printf '%s\n' "$$DEV_SERVICE_UNIT" | sudo tee /etc/systemd/system/astrocaption-dev.service >/dev/null
+	sudo systemctl daemon-reload
+	sudo systemctl enable --now astrocaption-dev
+	@echo "astrocaption-dev is enabled. Logs: journalctl -u astrocaption-dev -f"
+	@echo "Stop it before running make dev by hand: sudo systemctl stop astrocaption-dev"
+
+dev-service-remove: ## Disable and remove the boot service
+	-sudo systemctl disable --now astrocaption-dev
+	sudo rm -f /etc/systemd/system/astrocaption-dev.service
+	sudo systemctl daemon-reload
 
 test: test-backend test-frontend ## pytest + vitest
 
