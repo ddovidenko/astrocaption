@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import CONFIG_NOT_JSON, ConfigError
 from tests.conftest import env_app_client, login
 
 PASSWORD = "config-page-pw1"
@@ -161,3 +162,17 @@ def test_put_500_on_unwritable_data_dir(tmp_path: Path, monkeypatch: pytest.Monk
             )
         }
         assert str(tmp_path) not in resp.text
+
+
+def test_put_409_on_config_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    with owner_client(tmp_path, monkeypatch) as client:
+
+        def _boom(*args: object, **kwargs: object) -> None:
+            raise ConfigError(CONFIG_NOT_JSON)
+
+        monkeypatch.setattr("app.api.config.update_config", _boom)
+        resp = client.put("/api/config", json={"site_title": "X"})
+        assert resp.status_code == 409
+        assert resp.json() == {"detail": CONFIG_NOT_JSON}
+        assert str(tmp_path) not in resp.text
+        assert "Traceback" not in resp.text
