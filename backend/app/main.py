@@ -85,6 +85,7 @@ def create_app(
     app.state.settings_source = source
     app.state.db = db
     app.state.worker = worker
+    app.add_middleware(images.UploadSizeGuard, settings_source=source)
 
     app.include_router(health.router)
     app.include_router(fonts.router)
