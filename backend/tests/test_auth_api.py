@@ -1,37 +1,67 @@
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.routing import BaseRoute
 
 from app.auth import LoginLimiter, hash_password
 from app.config import update_config
 from app.main import create_app
 from tests.conftest import TEST_PASSWORD, login
 
-OWNER_ROUTES = [
-    ("GET", "/api/images"),
-    ("POST", "/api/images"),
-    ("GET", "/api/images/x"),
-    ("DELETE", "/api/images/x"),
-    ("POST", "/api/images/x/solve"),
-    ("GET", "/api/images/x/objects"),
-    ("GET", "/api/images/x/annotations"),
-    ("POST", "/api/images/x/export"),
-    ("GET", "/api/images/x/export"),
-    ("GET", "/api/images/x/files/preview"),
-    ("GET", "/api/fonts"),
-    ("GET", "/api/config"),
-]
+# Routes that must stay reachable while logged out: health for the Docker healthcheck,
+# setup/login/logout because a session cookie is exactly what they exist to obtain.
+PUBLIC_API_ROUTES = {"/api/health", "/api/setup", "/api/login", "/api/logout"}
 
 
-@pytest.mark.parametrize(("method", "path"), OWNER_ROUTES)
-def test_owner_routes_need_a_session(anon_client: TestClient, method: str, path: str) -> None:
-    resp = anon_client.request(method, path)
-    assert resp.status_code == 401, (method, path, resp.text)
-    assert resp.json() == {"detail": "Sign in to continue."}
+def _flatten_routes(routes: Iterable[BaseRoute]) -> Iterator[BaseRoute]:
+    """FastAPI wraps ``include_router`` results in an internal router-of-routers; unwrap it."""
+    for route in routes:
+        original_router = getattr(route, "original_router", None)
+        if original_router is not None:
+            yield from _flatten_routes(original_router.routes)
+        else:
+            yield route
+
+
+def owner_routes(app: FastAPI) -> list[tuple[str, str]]:
+    """Every (method, path) under ``/api`` except the public allowlist, derived from the
+    live app so a newly added route is covered automatically instead of relying on a
+    hand-maintained list."""
+    found: list[tuple[str, str]] = []
+    for route in _flatten_routes(app.routes):
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", None)
+        if not path or not methods or not path.startswith("/api/"):
+            continue
+        if path in PUBLIC_API_ROUTES:
+            continue
+        concrete_path = re.sub(r"\{[^/}]+\}", "x", path)
+        for method in sorted(methods - {"HEAD"}):
+            found.append((method, concrete_path))
+    return found
+
+
+def test_owner_routes_need_a_session(anon_client: TestClient) -> None:
+    routes = owner_routes(anon_client.app)  # type: ignore[arg-type]
+    assert routes  # the derivation itself must find something, or this test proves nothing
+    assert ("GET", "/api/docs") in routes
+    assert ("GET", "/api/openapi.json") in routes
+    for method, path in routes:
+        resp = anon_client.request(method, path)
+        assert resp.status_code == 401, (method, path, resp.text)
+        assert resp.json() == {"detail": "Sign in to continue."}
+
+
+def test_openapi_docs_are_reachable_once_logged_in(client: TestClient) -> None:
+    assert client.get("/api/openapi.json").status_code == 200
+    assert client.get("/api/docs").status_code == 200
 
 
 def test_public_routes_stay_public(anon_client: TestClient) -> None:
@@ -125,6 +155,8 @@ def test_headless_setup_ignores_a_short_password(
 def test_login_cooldown_after_five_failures(anon_client: TestClient) -> None:
     for _ in range(5):
         assert anon_client.post("/api/login", json={"password": "nope"}).status_code == 401
+    # The fifth wrong password already locked the account: a *correct* password right
+    # after must still be turned away with 429, not allowed through.
     blocked = anon_client.post("/api/login", json={"password": TEST_PASSWORD})
     assert blocked.status_code == 429
     assert blocked.headers["retry-after"] == "60"

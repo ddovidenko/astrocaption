@@ -62,8 +62,13 @@ async def login(
             f"Too many failed sign-ins. Try again in {wait} seconds.",
             headers={"Retry-After": str(wait)},
         )
+    # Claim the attempt before verifying, not after: verify_password runs in a worker
+    # thread, so recording the failure only on a bad result would let N concurrent
+    # requests all pass the retry_after() check first and each get a free guess. A
+    # correct password below undoes this via reset() (which also clears any earlier
+    # failures in the window), so the cooldown itself is unaffected by this ordering.
+    limiter.record_failure()
     if not await asyncio.to_thread(verify_password, body.password, settings.password_hash):
-        limiter.record_failure()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Wrong password.")
     limiter.reset()
     response.set_cookie(

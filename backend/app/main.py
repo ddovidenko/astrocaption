@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .api import auth, config, fonts, health, images
+from .api import auth, config, docs, fonts, health, images
 from .auth import MIN_PASSWORD_LENGTH, LoginLimiter, perform_setup
 from .config import Settings, SettingsSource
 from .db import Database
@@ -83,8 +83,8 @@ def create_app(
         title="AstroCaption",
         version=__version__,
         lifespan=lifespan,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        docs_url=None,
+        openapi_url=None,
         redoc_url=None,
     )
     app.state.settings_source = source
@@ -96,6 +96,7 @@ def create_app(
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(config.router)
+    app.include_router(docs.router)
     app.include_router(fonts.router)
     app.include_router(images.router)
 
