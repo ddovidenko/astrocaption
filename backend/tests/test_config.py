@@ -159,3 +159,30 @@ def test_perform_setup_skips_env_locked_fields(
     assert written["site_title"] == "My Sky"
     assert "setup: nova_api_key ignored, pinned by the environment" in caplog.text
     assert "typed-key" not in caplog.text and "site_title ignored" not in caplog.text
+
+
+def test_settings_source_reload_reads_a_same_stamp_write(tmp_path: Path) -> None:
+    from app.config import SettingsSource, update_config
+
+    env = env_for(tmp_path)
+    path = tmp_path / "config.json"
+    update_config(path, {"site_title": "AAAA"})
+    source = SettingsSource(env=env)
+    assert source.current().site_title == "AAAA"
+    # Same length, and force the same mtime so the stamp cannot notice the change.
+    update_config(path, {"site_title": "BBBB"})
+    os.utime(path, ns=(source._stamp[0], source._stamp[0]))  # type: ignore[index]
+    assert source.current().site_title == "AAAA"  # stamp unchanged: stale by design
+    assert source.reload().site_title == "BBBB"
+    assert source.current().site_title == "BBBB"
+
+
+def test_env_var_for_covers_every_lockable_field(tmp_path: Path) -> None:
+    from app.config import ENV_VAR_FOR
+
+    s = load_settings(
+        env_for(
+            tmp_path, NOVA_API_KEY="k", ASTROCAPTION_MAX_UPLOAD_MB="7", ASTROCAPTION_SITE_TITLE="T"
+        )
+    )
+    assert set(ENV_VAR_FOR) == s.env_locked == {"nova_api_key", "max_upload_mb", "site_title"}

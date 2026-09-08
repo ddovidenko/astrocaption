@@ -25,6 +25,18 @@ DEFAULT_MAX_UPLOAD_MB = 60
 DEFAULT_SITE_TITLE = "AstroCaption"
 DEFAULT_NOVA_BASE_URL = "https://nova.astrometry.net"
 
+ENV_VAR_FOR = {
+    "nova_api_key": "NOVA_API_KEY",
+    "max_upload_mb": "ASTROCAPTION_MAX_UPLOAD_MB",
+    "site_title": "ASTROCAPTION_SITE_TITLE",
+}
+"""Env var that pins each lockable config.json field (read-only in the UI when set).
+
+The keys of ``ENV_VAR_FOR`` are exactly the fields ``load_settings`` may report in
+``env_locked``; the nova key also accepts the legacy ``ASTROMETRY_API_KEY``, so its presence
+check stays explicit below rather than a lookup through this map.
+"""
+
 CONFIG_UNREADABLE = "config.json could not be read; fix or remove it and restart"
 CONFIG_NOT_JSON = "config.json is not valid JSON; fix or remove it and restart"
 CONFIG_NOT_OBJECT = "config.json must contain a JSON object"
@@ -143,9 +155,12 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     env_locked = frozenset(
         name
         for name, present in (
+            # nova_api_key also accepts the legacy ASTROMETRY_API_KEY, so it stays explicit
+            # rather than a plain ENV_VAR_FOR[name] lookup; ENV_VAR_FOR's keys are exactly
+            # the fields tested here.
             ("nova_api_key", bool(e.get("NOVA_API_KEY") or e.get("ASTROMETRY_API_KEY"))),
-            ("max_upload_mb", bool(e.get("ASTROCAPTION_MAX_UPLOAD_MB"))),
-            ("site_title", bool(e.get("ASTROCAPTION_SITE_TITLE"))),
+            ("max_upload_mb", bool(e.get(ENV_VAR_FOR["max_upload_mb"]))),
+            ("site_title", bool(e.get(ENV_VAR_FOR["site_title"]))),
         )
         if present
     )
@@ -203,6 +218,14 @@ class SettingsSource:
         if stamp != self._stamp:
             self._stamp = stamp
             self._current = load_settings(self._env)
+        return self._current
+
+    def reload(self) -> Settings:
+        """Re-read config.json now, whatever the stamp says (after the app itself wrote it)."""
+        if self._fixed is not None:
+            return self._fixed
+        self._current = load_settings(self._env)
+        self._stamp = _file_stamp(self._current.config_path)
         return self._current
 
 

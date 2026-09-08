@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 def utcnow_iso() -> str:
@@ -414,6 +414,47 @@ class ConfigOut(BaseModel):
     nova_api_key_set: bool
     default_style: dict[str, object]
     locked: list[str]  # fields pinned by environment variables
+    style_defaults: dict[str, object]  # built-in font/colours/booleans for fields with no override
+
+
+HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
+
+
+class StyleOverrides(BaseModel):
+    """The owner's ``default_style``: only the fields they chose; the rest stay size-relative.
+
+    Bounds mirror ``StyleConfig``. Colours are ``#RRGGBB`` (what ``<input type="color">``
+    produces and what Pillow accepts). Unknown fields are refused so a typo cannot be stored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    font_file: str | None = Field(default=None, max_length=100)
+    font_size: int | None = Field(default=None, ge=MIN_FONT_SIZE, le=MAX_FONT_SIZE)
+    text_color: str | None = Field(default=None, pattern=HEX_COLOR)
+    marker_color: str | None = Field(default=None, pattern=HEX_COLOR)
+    leader_color: str | None = Field(default=None, pattern=HEX_COLOR)
+    halo: bool | None = None
+    halo_color: str | None = Field(default=None, pattern=HEX_COLOR)
+    halo_width: int | None = Field(default=None, ge=0, le=MAX_STROKE_WIDTH)
+    marker_width: int | None = Field(default=None, ge=1, le=MAX_STROKE_WIDTH)
+    marker_min_radius: int | None = Field(default=None, ge=1, le=MAX_MARKER_MIN_RADIUS)
+    show_aliases: bool | None = None
+    name_preference: NamePreference | None = None
+
+    def overrides(self) -> dict[str, object]:
+        return {k: v for k, v in self.model_dump().items() if v is not None}
+
+
+class ConfigUpdate(BaseModel):
+    """Partial update: absent fields are kept; ``nova_api_key: null`` clears the key."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    site_title: str | None = Field(default=None, min_length=1, max_length=200)
+    max_upload_mb: int | None = Field(default=None, ge=1, le=1024)
+    nova_api_key: str | None = Field(default=None, max_length=200)
+    default_style: StyleOverrides | None = None
 
 
 # A custom ``@field_validator`` message is echoed verbatim by the 422 handler in main.py,

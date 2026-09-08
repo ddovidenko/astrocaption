@@ -1,0 +1,56 @@
+from __future__ import annotations
+
+import pytest
+from pydantic import ValidationError
+
+from app.models import ConfigUpdate, StyleConfig, StyleOverrides
+
+
+def test_style_overrides_keeps_only_set_fields() -> None:
+    o = StyleOverrides.model_validate({"text_color": "#ff8800", "font_size": 30, "halo": None})
+    assert o.overrides() == {"text_color": "#ff8800", "font_size": 30}
+    assert StyleOverrides().overrides() == {}
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"text_color": "red"},
+        {"marker_color": "#FFF"},
+        {"halo_color": "#12345G"},
+        {"font_size": 5},
+        {"marker_min_radius": 0},
+        {"name_preference": "messier_first"},
+        {"unknown_field": 1},
+    ],
+)
+def test_style_overrides_rejects_bad_values_without_echoing_them(bad: dict[str, object]) -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        StyleOverrides.model_validate(bad)
+    text = "; ".join(str(e["msg"]) for e in excinfo.value.errors())
+    for value in bad.values():
+        assert str(value) not in text
+
+
+def test_config_update_distinguishes_absent_from_null() -> None:
+    absent = ConfigUpdate.model_validate({"site_title": "Sky"})
+    cleared = ConfigUpdate.model_validate({"site_title": "Sky", "nova_api_key": None})
+    assert "nova_api_key" not in absent.model_fields_set
+    assert "nova_api_key" in cleared.model_fields_set and cleared.nova_api_key is None
+
+
+def test_config_update_bounds() -> None:
+    with pytest.raises(ValidationError):
+        ConfigUpdate.model_validate({"max_upload_mb": 0})
+    with pytest.raises(ValidationError):
+        ConfigUpdate.model_validate({"site_title": ""})
+    with pytest.raises(ValidationError):
+        ConfigUpdate.model_validate({"bogus": 1})
+
+
+def test_style_defaults_exclude_size_relative_fields() -> None:
+    from app.api.config import style_defaults
+
+    d = style_defaults()
+    assert d["text_color"] == StyleConfig().text_color and d["font_file"] == "Inter-Regular.ttf"
+    assert not {"font_size", "halo_width", "marker_width", "marker_min_radius"} & set(d)

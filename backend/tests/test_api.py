@@ -13,6 +13,7 @@ from PIL import Image
 from app.config import Settings
 from app.db import Database
 from app.main import create_app
+from app.models import StyleConfig
 from tests.conftest import (
     NOVA_NARROW_FIXTURES,
     TEST_PASSWORD_HASH,
@@ -44,12 +45,15 @@ def test_health_and_fonts(client: TestClient) -> None:
         "locked": [],
     }
     config = client.get("/api/config").json()
+    size_relative = {"font_size", "halo_width", "marker_width", "marker_min_radius"}
+    style_defaults = {k: v for k, v in StyleConfig().model_dump().items() if k not in size_relative}
     assert config == {
         "site_title": "Test Site",
         "max_upload_mb": 5,
         "nova_api_key_set": False,
         "default_style": {},
         "locked": [],
+        "style_defaults": style_defaults,
     }
     fonts = client.get("/api/fonts").json()
     assert len(fonts) == 24
