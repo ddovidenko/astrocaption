@@ -2,7 +2,13 @@ import { useState } from 'react'
 import { Link, Navigate } from 'react-router'
 import { api, describeError, type HealthOut } from '../api'
 
-export default function SetupPage({ health, onDone }: { health: HealthOut; onDone: () => Promise<void> }) {
+export default function SetupPage({
+  health,
+  onDone,
+}: {
+  health: HealthOut
+  onDone: () => Promise<HealthOut | null>
+}) {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [novaKey, setNovaKey] = useState('')
@@ -14,6 +20,11 @@ export default function SetupPage({ health, onDone }: { health: HealthOut; onDon
   // "already set up" branch below renders for one frame between the health refresh landing
   // (setup_required flips to false) and setDone(true) (done flips to true).
   const [submitted, setSubmitted] = useState(false)
+
+  // An environment variable wins over anything typed here, so offer it read-only and do
+  // not send it: a value parked in config.json would never take effect.
+  const novaLocked = health.locked.includes('nova_api_key')
+  const titleLocked = health.locked.includes('site_title')
 
   if (done) return <Navigate to="/login" replace />
   if (!health.setup_required) {
@@ -40,12 +51,17 @@ export default function SetupPage({ health, onDone }: { health: HealthOut; onDon
     setBusy(true)
     setError(null)
     try {
-      await api.setup({ password, nova_api_key: novaKey.trim() || undefined, site_title: siteTitle.trim() || undefined })
+      await api.setup({
+        password,
+        nova_api_key: novaLocked ? undefined : novaKey.trim() || undefined,
+        site_title: titleLocked ? undefined : siteTitle.trim() || undefined,
+      })
       setSubmitted(true)
-      // Refresh health before navigating: if we sent the user to /login while health.setup_required
-      // was still stale (true), LoginPage's own guard would bounce them straight back to /setup.
-      await onDone()
-      setDone(true)
+      // Navigate on what health now says, not on the 204 alone: if we sent the user to
+      // /login while setup_required was still true, LoginPage would bounce them back here.
+      const fresh = await onDone()
+      if (fresh && !fresh.setup_required) setDone(true)
+      else setError('Setup was saved, but the page could not confirm it. Reload and sign in.')
     } catch (err) {
       setError(describeError(err))
     } finally {
@@ -68,11 +84,13 @@ export default function SetupPage({ health, onDone }: { health: HealthOut; onDon
         </label>
         <label>
           nova.astrometry.net API key (optional)
-          <input type="text" value={novaKey} autoComplete="off" onChange={(e) => setNovaKey(e.target.value)} />
+          <input type="text" value={novaKey} autoComplete="off" disabled={novaLocked} onChange={(e) => setNovaKey(e.target.value)} />
+          {novaLocked && <span className="meta">set by the environment</span>}
         </label>
         <label>
           Site title (optional)
-          <input type="text" value={siteTitle} placeholder="AstroCaption" onChange={(e) => setSiteTitle(e.target.value)} />
+          <input type="text" value={siteTitle} placeholder={health.site_title} disabled={titleLocked} onChange={(e) => setSiteTitle(e.target.value)} />
+          {titleLocked && <span className="meta">set by the environment</span>}
         </label>
         {error && <p className="error">{error}</p>}
         <button type="submit" disabled={busy}>

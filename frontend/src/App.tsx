@@ -8,14 +8,20 @@ import SetupPage from './pages/SetupPage'
 export default function App() {
   const [health, setHealth] = useState<HealthOut | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [sessionEnded, setSessionEnded] = useState(false)
   const navigate = useNavigate()
 
-  const refreshHealth = useCallback(async () => {
+  /** Re-read health and hand it back, so a caller can act on what the server actually says
+   *  instead of on the state it hoped for. Null means the call failed (the banner says why). */
+  const refreshHealth = useCallback(async (): Promise<HealthOut | null> => {
     try {
-      setHealth(await api.health())
+      const fresh = await api.health()
+      setHealth(fresh)
       setError(null)
+      return fresh
     } catch (err) {
       setError(describeError(err))
+      return null
     }
   }, [])
 
@@ -41,11 +47,14 @@ export default function App() {
 
   useEffect(() => {
     setUnauthorizedHandler(() => {
-      setHealth((h) => (h ? { ...h, authenticated: false } : h))
+      // Ask the server what is true now rather than patching `authenticated: false` onto a
+      // stale copy: config_error and setup_required may have moved on too.
+      setSessionEnded(true)
+      void refreshHealth()
       navigate('/login', { replace: true })
     })
     return () => setUnauthorizedHandler(null)
-  }, [navigate])
+  }, [navigate, refreshHealth])
 
   useEffect(() => {
     if (health?.site_title) document.title = health.site_title
@@ -54,9 +63,16 @@ export default function App() {
   async function logout() {
     try {
       await api.logout()
-    } finally {
-      await refreshHealth()
+    } catch (err) {
+      setError(`Could not sign out: ${describeError(err)}. You are still signed in.`)
+      return
+    }
+    const fresh = await refreshHealth()
+    if (fresh && !fresh.authenticated) {
+      setSessionEnded(false)
       navigate('/login', { replace: true })
+    } else if (fresh) {
+      setError('Could not sign out: the browser kept the session cookie. You are still signed in.')
     }
   }
 
@@ -74,12 +90,38 @@ export default function App() {
         )}
       </header>
       <main>
-        {error && <p className="error">{error}</p>}
+        {error && (
+          <p className="error">
+            {error}{' '}
+            {!health && (
+              <button className="secondary" onClick={() => void refreshHealth()}>
+                Try again
+              </button>
+            )}
+          </p>
+        )}
         {health && (
           <Routes>
             <Route path="/setup" element={<SetupPage health={health} onDone={refreshHealth} />} />
-            <Route path="/login" element={<LoginPage health={health} onDone={refreshHealth} />} />
-            <Route path="/" element={<Guard health={health}><ImagesPage health={health} /></Guard>} />
+            <Route
+              path="/login"
+              element={
+                <LoginPage
+                  health={health}
+                  onDone={refreshHealth}
+                  sessionEnded={sessionEnded}
+                  onSignedIn={() => setSessionEnded(false)}
+                />
+              }
+            />
+            <Route
+              path="/"
+              element={
+                <Guard health={health}>
+                  <ImagesPage health={health} onHealthChange={refreshHealth} />
+                </Guard>
+              }
+            />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         )}

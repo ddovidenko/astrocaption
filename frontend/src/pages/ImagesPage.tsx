@@ -14,19 +14,29 @@ import {
 
 const POLL_MS = 3000
 
-export default function ImagesPage({ health }: { health: HealthOut }) {
+export default function ImagesPage({
+  health,
+  onHealthChange,
+}: {
+  health: HealthOut
+  onHealthChange: () => Promise<HealthOut | null>
+}) {
   const [images, setImages] = useState<ImageOut[]>([])
   const [config, setConfig] = useState<ConfigOut | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // One refresh covers all three: a nova key added in config.json, or a config.json that
+  // just broke, must reach the banners as promptly as the image rows do.
   const refresh = useCallback(async () => {
     try {
-      setImages(await api.listImages())
+      const [list, cfg] = await Promise.all([api.listImages(), api.config(), onHealthChange()])
+      setImages(list)
+      setConfig(cfg)
       setError(null)
     } catch (err) {
       if (!isSessionLossError(err)) setError(describeError(err))
     }
-  }, [])
+  }, [onHealthChange])
 
   useEffect(() => {
     let cancelled = false
@@ -43,7 +53,9 @@ export default function ImagesPage({ health }: { health: HealthOut }) {
       .then((c) => {
         if (!cancelled) setConfig(c)
       })
-      .catch(() => undefined)
+      .catch((err: unknown) => {
+        if (!cancelled && !isSessionLossError(err)) setError(describeError(err))
+      })
     return () => {
       cancelled = true
     }

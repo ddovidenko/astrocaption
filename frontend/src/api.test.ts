@@ -34,8 +34,10 @@ describe('api helpers', () => {
 
   it('extracts FastAPI error details', () => {
     expect(errorMessage(409, { detail: 'Image is not solved yet.' })).toBe('Image is not solved yet.')
-    expect(errorMessage(422, { detail: [{ msg: 'bad', loc: ['body'] }] })).toBe('bad')
     expect(errorMessage(500, null)).toBe('Request failed (HTTP 500)')
+    // The backend's 422 handler always answers with a plain string; a list is not a shape
+    // the API produces any more, so it falls through to the generic message.
+    expect(errorMessage(422, { detail: [{ msg: 'bad', loc: ['body'] }] })).toBe('Request failed (HTTP 422)')
   })
 
   it('computes the plate scale hint', () => {
@@ -60,8 +62,27 @@ describe('api helpers', () => {
   })
 
   it('identifies the ApiError a page should not show because the shell is redirecting', () => {
-    expect(isSessionLossError(new ApiError(401, 'Sign in to continue.'))).toBe(true)
+    // The flag is set once, by request(), from isSessionLoss(url, status); the status alone
+    // cannot tell a lost session from the 401 that a wrong password on /api/login earns.
+    expect(isSessionLossError(new ApiError(401, 'Sign in to continue.', true))).toBe(true)
+    expect(isSessionLossError(new ApiError(401, 'Wrong password.'))).toBe(false)
     expect(isSessionLossError(new ApiError(403, 'Forbidden.'))).toBe(false)
     expect(isSessionLossError(new Error('network down'))).toBe(false)
+  })
+
+  it('carries the session-loss decision from parseBody into the thrown error', () => {
+    expect(() => parseBody(401, false, '{"detail": "Sign in to continue."}', true)).toThrow(
+      'Sign in to continue.',
+    )
+    try {
+      parseBody(401, false, '{"detail": "Sign in to continue."}', true)
+    } catch (err) {
+      expect(isSessionLossError(err)).toBe(true)
+    }
+    try {
+      parseBody(401, false, '{"detail": "Wrong password."}')
+    } catch (err) {
+      expect(isSessionLossError(err)).toBe(false)
+    }
   })
 })

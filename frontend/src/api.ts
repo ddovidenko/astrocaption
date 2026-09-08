@@ -44,6 +44,8 @@ export interface HealthOut {
   setup_required: boolean
   authenticated: boolean
   config_error: string | null
+  /** Field names pinned by environment variables; the setup page shows them disabled. */
+  locked: string[]
 }
 
 export interface ConfigOut {
@@ -78,30 +80,28 @@ export interface SolveHints {
 
 export class ApiError extends Error {
   readonly status: number
-  constructor(status: number, message: string) {
+  /** Decided once, in `request()`: this 401 is the shell's cue to send the user to /login. */
+  readonly sessionLost: boolean
+  constructor(status: number, message: string, sessionLost = false) {
     super(message)
     this.status = status
+    this.sessionLost = sessionLost
   }
 }
 
-/** Extract a human-readable message from a FastAPI error body. */
+/** Extract a human-readable message from a FastAPI error body. The backend's 422 handler
+ *  always answers with a plain string detail, so there is no list form to unpack. */
 export function errorMessage(status: number, body: unknown): string {
   if (body && typeof body === 'object' && 'detail' in body) {
     const detail = (body as { detail: unknown }).detail
     if (typeof detail === 'string') return detail
-    if (Array.isArray(detail)) {
-      const msgs = detail
-        .map((d) => (d && typeof d === 'object' && 'msg' in d ? String((d as { msg: unknown }).msg) : ''))
-        .filter(Boolean)
-      if (msgs.length) return msgs.join('; ')
-    }
   }
   return `Request failed (HTTP ${status})`
 }
 
 /** Parse a response body; a 2xx that is not JSON (e.g. the dev server answering with
  *  index.html when the API is unreachable) is an error, not a silent null. */
-export function parseBody(status: number, ok: boolean, text: string): unknown {
+export function parseBody(status: number, ok: boolean, text: string, sessionLost = false): unknown {
   let body: unknown = null
   if (text) {
     try {
@@ -112,7 +112,7 @@ export function parseBody(status: number, ok: boolean, text: string): unknown {
       }
     }
   }
-  if (!ok) throw new ApiError(status, errorMessage(status, body))
+  if (!ok) throw new ApiError(status, errorMessage(status, body), sessionLost)
   return body
 }
 
@@ -128,9 +128,10 @@ export function isSessionLoss(url: string, status: number): boolean {
 }
 
 /** True when `err` is the ApiError the shell's 401 handler is about to act on; callers that
- *  display page-level errors should skip setting one for it (the shell is already redirecting). */
+ *  display page-level errors should skip setting one for it (the shell is already redirecting).
+ *  It reads the flag `request()` set, so the rule lives in exactly one place. */
 export function isSessionLossError(err: unknown): boolean {
-  return err instanceof ApiError && err.status === 401
+  return err instanceof ApiError && err.sessionLost
 }
 
 export function describeError(err: unknown): string {
@@ -141,9 +142,10 @@ export function describeError(err: unknown): string {
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init)
-  if (isSessionLoss(url, res.status)) onUnauthorized?.()
+  const lost = isSessionLoss(url, res.status)
+  if (lost) onUnauthorized?.()
   if (res.status === 204) return undefined as T
-  return parseBody(res.status, res.ok, await res.text()) as T
+  return parseBody(res.status, res.ok, await res.text(), lost) as T
 }
 
 const json = (method: string, body?: unknown): RequestInit => ({
