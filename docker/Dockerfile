@@ -26,7 +26,9 @@ RUN useradd --uid 1000 --user-group --create-home app \
 WORKDIR /app
 COPY backend/pyproject.toml /app/src/pyproject.toml
 COPY backend/app /app/src/app
-RUN pip install /app/src && rm -rf /app/src /root/.cache
+# pip is only needed to install; dropping it removes its vendored packages from the
+# runtime image (and from vulnerability scans) and trims a few MB.
+RUN pip install /app/src && pip uninstall -y pip && rm -rf /app/src /root/.cache
 
 COPY fonts /app/fonts
 COPY --from=frontend /src/backend/static /app/static
