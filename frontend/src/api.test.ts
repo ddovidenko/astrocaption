@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { ApiError, arcsecPerPixel, errorMessage, formatBytes, isBusy, isSessionLoss, parseBody, statusLabel } from './api'
+import {
+  ApiError,
+  arcsecPerPixel,
+  errorMessage,
+  formatBytes,
+  isBusy,
+  isSessionLoss,
+  isSessionLossError,
+  parseBody,
+  statusLabel,
+} from './api'
 
 describe('api helpers', () => {
   it('labels every solve status', () => {
@@ -47,5 +57,11 @@ describe('api helpers', () => {
     expect(isSessionLoss('/api/login', 401)).toBe(false)
     expect(isSessionLoss('/api/images', 403)).toBe(false)
     expect(isSessionLoss('/api/images', 200)).toBe(false)
+  })
+
+  it('identifies the ApiError a page should not show because the shell is redirecting', () => {
+    expect(isSessionLossError(new ApiError(401, 'Sign in to continue.'))).toBe(true)
+    expect(isSessionLossError(new ApiError(403, 'Forbidden.'))).toBe(false)
+    expect(isSessionLossError(new Error('network down'))).toBe(false)
   })
 })

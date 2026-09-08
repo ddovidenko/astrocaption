@@ -127,6 +127,12 @@ export function isSessionLoss(url: string, status: number): boolean {
   return status === 401 && url !== '/api/login'
 }
 
+/** True when `err` is the ApiError the shell's 401 handler is about to act on; callers that
+ *  display page-level errors should skip setting one for it (the shell is already redirecting). */
+export function isSessionLossError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 401
+}
+
 export function describeError(err: unknown): string {
   if (err instanceof ApiError) return err.message
   if (err instanceof Error) return err.message
