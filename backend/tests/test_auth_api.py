@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Iterable, Iterator
 from pathlib import Path
@@ -74,6 +75,29 @@ def test_forged_cookie_is_ignored(anon_client: TestClient) -> None:
     anon_client.cookies.set("astrocaption_session", "1.deadbeef")
     assert anon_client.get("/api/images").status_code == 401
     assert anon_client.get("/api/health").json()["authenticated"] is False
+
+
+def test_non_ascii_cookie_signature_is_ignored_not_a_500(anon_client: TestClient) -> None:
+    """hmac.compare_digest() raises TypeError on a non-ASCII str; a junk cookie must not
+    turn every route into a 500."""
+    # Sent as raw bytes: httpx refuses a non-ASCII cookie, but a browser (or curl) will
+    # happily put one on the wire, and Starlette decodes headers as latin-1.
+    junk = {b"cookie": "astrocaption_session=1700000000.\u00e9abc".encode("latin-1")}
+    resp = anon_client.get("/api/health", headers=junk)
+    assert resp.status_code == 200 and resp.json()["authenticated"] is False
+    assert anon_client.get("/api/images", headers=junk).status_code == 401
+
+
+def test_failed_sign_ins_are_logged_without_the_password(
+    anon_client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="app.api.auth"):
+        for _ in range(5):
+            resp = anon_client.post("/api/login", json={"password": "not-the-password"})
+            assert resp.status_code == 401
+    assert caplog.text.count("failed sign-in attempt") == 5
+    assert "sign-in cooldown started after 5 failures" in caplog.text
+    assert "not-the-password" not in caplog.text
 
 
 def fresh_app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **env: str) -> TestClient:

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 
@@ -15,8 +17,11 @@ from ..auth import (
     perform_setup,
     verify_password,
 )
+from ..config import Settings
 from ..models import LoginRequest, SetupRequest
 from .deps import SettingsDep
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
@@ -24,6 +29,21 @@ router = APIRouter(prefix="/api", tags=["auth"])
 def get_limiter(request: Request) -> LoginLimiter:
     limiter: LoginLimiter = request.app.state.login_limiter
     return limiter
+
+
+def session_cookie_params(settings: Settings, *, with_max_age: bool = False) -> dict[str, Any]:
+    """The cookie attributes in one place: a browser only drops a cookie when the path,
+    ``Secure`` and ``SameSite`` of the deletion match the ones it was set with, so ``login``
+    and ``logout`` must not be able to drift apart."""
+    params: dict[str, Any] = {
+        "path": "/",
+        "httponly": True,
+        "samesite": "lax",
+        "secure": settings.trust_proxy,
+    }
+    if with_max_age:
+        params["max_age"] = SESSION_TTL_SECONDS
+    return params
 
 
 @router.post("/setup", status_code=status.HTTP_204_NO_CONTENT)
@@ -67,23 +87,21 @@ async def login(
     # requests all pass the retry_after() check first and each get a free guess. A
     # correct password below undoes this via reset() (which also clears any earlier
     # failures in the window), so the cooldown itself is unaffected by this ordering.
-    limiter.record_failure()
+    just_locked = limiter.record_failure()
     if not await asyncio.to_thread(verify_password, body.password, settings.password_hash):
+        # Never the password itself, and no caller detail: one owner, one global cooldown.
+        log.warning("failed sign-in attempt")
+        if just_locked:
+            log.warning("sign-in cooldown started after %d failures", limiter.max_failures)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Wrong password.")
     limiter.reset()
     response.set_cookie(
         COOKIE_NAME,
         issue_session(settings.session_secret, settings.password_hash),
-        max_age=SESSION_TTL_SECONDS,
-        path="/",
-        httponly=True,
-        samesite="lax",
-        secure=settings.trust_proxy,
+        **session_cookie_params(settings, with_max_age=True),
     )
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(response: Response, settings: SettingsDep) -> None:
-    response.delete_cookie(
-        COOKIE_NAME, path="/", httponly=True, samesite="lax", secure=settings.trust_proxy
-    )
+    response.delete_cookie(COOKIE_NAME, **session_cookie_params(settings))
