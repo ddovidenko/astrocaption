@@ -14,6 +14,8 @@ import secrets
 import time
 from collections.abc import Callable
 
+from .config import Settings, update_config
+
 SCRYPT_N = 2**15
 SCRYPT_R = 8
 SCRYPT_P = 1
@@ -128,3 +130,22 @@ class LoginLimiter:
     def reset(self) -> None:
         self._failures = 0
         self._locked_until = 0.0
+
+
+def perform_setup(
+    settings: Settings,
+    password: str,
+    *,
+    nova_api_key: str | None = None,
+    site_title: str | None = None,
+) -> None:
+    """Write the owner password hash and a fresh session secret (SPEC § 5.1 step 4)."""
+    updates: dict[str, object | None] = {
+        "password_hash": hash_password(password),
+        "session_secret": secrets.token_urlsafe(32),
+    }
+    if nova_api_key and nova_api_key.strip():
+        updates["nova_api_key"] = nova_api_key.strip()
+    if site_title and site_title.strip():
+        updates["site_title"] = site_title.strip()
+    update_config(settings.config_path, updates)

@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
+from app.auth import hash_password
 from app.config import REPO_ROOT, Settings
 from app.db import Database
 from app.main import create_app
@@ -22,6 +23,10 @@ from app.worker import SolveWorker
 FONTS_DIR = REPO_ROOT / "fonts"
 NOVA_FIXTURES = Path(__file__).parent / "fixtures" / "nova"  # 3.9° Orion field, no hd
 NOVA_NARROW_FIXTURES = Path(__file__).parent / "fixtures" / "nova-narrow"  # 1° Pelican, hd
+
+TEST_PASSWORD = "correct horse battery"
+TEST_PASSWORD_HASH = hash_password(TEST_PASSWORD)  # once per session; scrypt is deliberately slow
+TEST_SESSION_SECRET = "test-session-secret"
 
 
 def load_fixture(name: str, fixtures_dir: Path = NOVA_FIXTURES) -> Any:
@@ -48,6 +53,8 @@ def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
         "site_title": "Test Site",
         "nova_base_url": "https://nova.example.test",
         "default_style": {},
+        "password_hash": TEST_PASSWORD_HASH,
+        "session_secret": TEST_SESSION_SECRET,
     }
     values.update(overrides)
     return Settings(**values)

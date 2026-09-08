@@ -1,7 +1,7 @@
 """Runtime configuration.
 
-Sources, in order of precedence: environment variables, then ``data/config.json`` (written
-by the setup flow in milestone 2), then built-in defaults. Environment-derived values (the
+Sources, in order of precedence: environment variables, then ``data/config.json`` (written by
+the setup flow and the config page), then built-in defaults. Environment-derived values (the
 paths, the nova base URL) are fixed for the life of the process; everything in config.json is
 live: ``SettingsSource`` re-reads the file whenever its size or mtime changes. Secrets are
 read here and nowhere else; nothing in this module is ever logged or returned by an API
@@ -41,6 +41,10 @@ class Settings:
     nova_base_url: str = DEFAULT_NOVA_BASE_URL
     default_style: dict[str, object] = field(default_factory=dict)
     config_error: str | None = None  # why config.json was ignored, if it was
+    password_hash: str | None = field(default=None, repr=False)
+    session_secret: str | None = field(default=None, repr=False)
+    trust_proxy: bool = False
+    env_locked: frozenset[str] = frozenset()  # settings an env var overrides (read-only in the UI)
 
     @property
     def uploads_dir(self) -> Path:
@@ -61,6 +65,15 @@ class Settings:
     @property
     def nova_api_key_set(self) -> bool:
         return bool(self.nova_api_key)
+
+    @property
+    def setup_required(self) -> bool:
+        """No owner password yet. A corrupt config.json is *not* setup-required (SPEC § 5.1)."""
+        return self.password_hash is None and self.config_error is None
+
+    @property
+    def auth_ready(self) -> bool:
+        return bool(self.password_hash and self.session_secret)
 
     def ensure_dirs(self) -> None:
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -106,6 +119,18 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     raw_style = cfg.get("default_style")
     default_style = dict(raw_style) if isinstance(raw_style, dict) else {}
 
+    env_locked = frozenset(
+        name
+        for name, present in (
+            ("nova_api_key", bool(e.get("NOVA_API_KEY") or e.get("ASTROMETRY_API_KEY"))),
+            ("max_upload_mb", bool(e.get("ASTROCAPTION_MAX_UPLOAD_MB"))),
+            ("site_title", bool(e.get("ASTROCAPTION_SITE_TITLE"))),
+        )
+        if present
+    )
+    password_hash = cfg.get("password_hash")
+    session_secret = cfg.get("session_secret")
+
     return Settings(
         data_dir=data_dir,
         fonts_dir=fonts_dir,
@@ -116,6 +141,12 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         nova_base_url=e.get("NOVA_BASE_URL", DEFAULT_NOVA_BASE_URL).rstrip("/"),
         default_style=default_style,
         config_error=config_error,
+        password_hash=password_hash if isinstance(password_hash, str) and password_hash else None,
+        session_secret=session_secret
+        if isinstance(session_secret, str) and session_secret
+        else None,
+        trust_proxy=e.get("TRUST_PROXY", "").strip().lower() in {"1", "true", "yes"},
+        env_locked=env_locked,
     )
 
 
@@ -147,3 +178,29 @@ class SettingsSource:
             self._stamp = stamp
             self._current = load_settings(self._env)
         return self._current
+
+
+def update_config(path: Path, updates: Mapping[str, object | None]) -> None:
+    """Merge ``updates`` into config.json atomically. ``None`` removes a key.
+
+    Written as a private file (0600): it holds the password hash and the session secret.
+    A file that cannot be parsed is left untouched and reported, never replaced.
+    """
+    current: dict[str, object] = _parse_config(path) if path.is_file() else {}
+    for key, value in updates.items():
+        if value is None:
+            current.pop(key, None)
+        else:
+            current[key] = value
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(current, fh, indent=2)
+            fh.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    os.chmod(path, 0o600)
