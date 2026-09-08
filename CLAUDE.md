@@ -29,6 +29,7 @@ make up           # docker compose up (uses ./data as volume)
 make reset-password   # see docs/LOCKOUT.md
 make placement-vectors   # regenerate tests/fixtures/placement/*.json from the Python placer
 make names-catalog       # rebuild backend/app/catalog/names.json from OpenNGC (network)
+make favicons            # regenerate frontend/public/ icons from frontend/icon/icon-source.png
 make record-fixtures IMAGE=path.jpg   # re-record backend/tests/fixtures/nova/ from a real solve (network, needs the key)
 ```
 

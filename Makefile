@@ -6,7 +6,7 @@ VENV      := backend/.venv
 PY        := $(VENV)/bin/python
 NPM       := npm --prefix frontend
 
-.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up placement-vectors names-catalog record-fixtures clean
+.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up placement-vectors names-catalog record-fixtures favicons clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -96,6 +96,9 @@ placement-vectors: $(VENV)/.installed ## Regenerate tests/fixtures/placement/*.j
 
 names-catalog: $(VENV)/.installed ## Rebuild backend/app/catalog/names.json from OpenNGC (network)
 	cd backend && .venv/bin/python scripts/build_names_catalog.py
+
+favicons: $(VENV)/.installed ## Regenerate frontend/public/ icons from frontend/icon/icon-source.png
+	cd backend && .venv/bin/python scripts/make_favicons.py
 
 record-fixtures: $(VENV)/.installed ## Re-record backend/tests/fixtures/nova/ from a real solve: make record-fixtures IMAGE=path.jpg
 	@test -n "$(IMAGE)" || { echo "usage: make record-fixtures IMAGE=path/to/image.jpg"; exit 2; }
