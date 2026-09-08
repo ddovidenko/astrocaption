@@ -24,7 +24,10 @@ live in `./data` on the host; back that directory up and nothing else.
 ## First run
 
 The first visit to <http://localhost:8080> shows the setup page: choose the owner password
-(at least 8 characters), optionally paste the nova API key and a site title. That writes
+(at least 8 characters), optionally paste the nova API key and a site title. An input whose
+value is already pinned by an environment variable (`NOVA_API_KEY`, `ASTROCAPTION_SITE_TITLE`)
+is shown disabled and marked "set by the environment": the variable wins either way, so there
+is nothing to type. That writes
 `data/config.json` (password hash, a random session secret, the key, the title) with owner-only
 permissions and sends you to the sign-in page. Setup is closed from then on.
 
@@ -124,7 +127,10 @@ server {
 ```
 
 Set `TRUST_PROXY=1` in `compose.yml` once the proxy terminates HTTPS, so the session cookie is
-marked Secure.
+marked Secure. A `Secure` cookie is only kept by the browser over https: with `TRUST_PROXY=1`
+set, signing in over plain http (the LAN address, or `http://localhost:8080` straight at the
+container) succeeds and then immediately looks signed out, because the browser discarded the
+cookie. Reach the site over https, or leave the variable unset until the proxy is in place.
 
 ## Running from source (development)
 

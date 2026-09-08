@@ -60,8 +60,13 @@ No multi-user, no roles, no invites in v1.
 5. `/setup` returns 404 forever after.
 6. Headless installs set `ASTROCAPTION_PASSWORD` instead: at startup, when `config.json` has no
    password hash, the app performs step 4 with that password. The variable is read once and never stored.
-7. A `config.json` that exists but cannot be parsed is **not** "not set up": setup stays closed, login is
-   refused, and `/api/health` carries `config_error` so the owner can fix or delete the file.
+7. A `config.json` that exists but cannot be parsed is **not** "not set up": setup stays closed
+   (`POST /setup` answers 409), login is refused, and `/api/health` carries `config_error` so the owner can
+   fix or delete the file. `config_error` is a fixed plain sentence ("config.json is not valid JSON; fix or
+   remove it and restart"); the parser's reason and the file's path go to the server log only.
+8. A `config.json` holding only one of `password_hash`/`session_secret` cannot authenticate anybody, so it
+   reopens setup; setup writes both halves fresh and merges them into whatever else the file holds.
+   Concurrent setup submissions are serialised: the first wins, the rest get the 404 of step 5.
 
 ### 5.2 Upload & solve
 
@@ -240,7 +245,9 @@ Owner (cookie session):
 - `GET /images/{id}/files/{original|preview|thumb|annotated-preview}` → the file itself
 - `GET /fonts` → list of bundled fonts {file, family, weight, sample}; the files are served at `/fonts/<file>`
 - `GET /health` (public, used by the Docker healthcheck) → {status, version, site_title, setup_required,
-  authenticated, config_error}; `config_error` explains an unreadable `config.json`. Everything owner-facing
+  authenticated, config_error, locked}; `config_error` is a fixed plain sentence about an unreadable
+  `config.json` (details in the server log) and `locked` lists the field names pinned by environment
+  variables, never their values, so the setup page can disable those inputs. Everything owner-facing
   (`nova_api_key_set`) lives in `GET /config`. Image payloads carry `original_format` (JPEG/PNG/TIFF) and the
   nova status/job-log URLs.
 
@@ -265,7 +272,10 @@ renders "NGC 1976" in each and compares bounding boxes within 1 px at 100 px siz
   the issue time and a fingerprint of the password hash, so a password reset invalidates every session
   without a session table. SameSite=Lax plus JSON request bodies is the CSRF protection; there is no token.
 - Rate limit login: 5 failures → 60 s cooldown, in-memory and global (one owner; per-IP is meaningless
-  behind a proxy).
+  behind a proxy). A failed sign-in and the start of a cooldown are logged (never the password).
+- `POST /logout` is client-side only: the design is stateless, so it clears the cookie and nothing more.
+  A token captured before logout stays valid until it expires (30 days) or the password changes, which
+  re-keys every token. That is the trade for having no session table.
 - Lockout recovery (`docs/LOCKOUT.md`): `docker compose exec app python -m app.cli reset-password`
   prompts for a new password and rewrites the hash in `config.json`. Also documents deleting
   `config.json` to re-run setup while keeping images (images are not tied to the password).
