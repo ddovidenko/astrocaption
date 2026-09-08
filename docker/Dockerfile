@@ -2,7 +2,7 @@
 # Build context is the repo root:  docker build -f docker/Dockerfile -t astrocaption:local .
 
 # ---- stage 1: frontend -------------------------------------------------------------
-FROM node:24-alpine AS frontend
+FROM node:26-alpine AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
