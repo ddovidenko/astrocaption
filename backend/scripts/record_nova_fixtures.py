@@ -6,17 +6,23 @@ Usage (from backend/):
 
 The API key comes from NOVA_API_KEY, ASTROMETRY_API_KEY or data/config.json (the same lookup
 the app uses). The image is downscaled exactly like the app does (≤ 3000 px solve copy) so the
-recorded pixel coordinates match what the worker receives, and the upload is marked not
-publicly visible on nova. Session tokens and the nova user id are scrubbed before writing.
+recorded pixel coordinates match what the worker receives.
 
-This is the only code path that talks to nova outside the app itself; the test suite never
-runs it.
+The recorder does not speak the nova protocol itself: it runs the app's own ``NovaSolver``
+through a ``RecordingTransport`` that names, scrubs and writes every response on its way
+back to the client. Whatever the client sends is what gets recorded, so the fixtures cannot
+drift from the code that replays them. Session tokens, the account e-mail and the nova user
+id are scrubbed before writing.
+
+This is the only code path that talks to nova outside the app itself; the test suite runs it
+against a replay of the committed fixtures only.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 import tempfile
 from datetime import UTC, datetime
@@ -28,122 +34,171 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import load_settings
+from app.solver import JobState, SolveRequest, SolverError
+from app.solver.nova import NovaSolver, job_log_url, status_url
 from app.storage import make_solve_copy
 
 FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "nova"
 FAKE_SESSION = "3lzjzcyqcyaf9ykx2ka2m3ei4mpk9v6h"
-POLL_SECONDS = 5
+POLL_SECONDS = 5.0
+
+_SUBMISSION = re.compile(r"^/api/submissions/\d+/?$")
+_JOB = re.compile(r"^/api/jobs/\d+/?$")
+_JOB_INFO = re.compile(r"^/api/jobs/\d+/info/?$")
+_JOB_ANNOTATIONS = re.compile(r"^/api/jobs/\d+/annotations/?$")
+_WCS = re.compile(r"^/wcs_file/\d+/?$")
+_SESSION_IN_MESSAGE = re.compile(r"(no session with key: )\S+")
 
 
-def _save(name: str, payload: Any) -> None:
-    path = FIXTURES / name
-    if isinstance(payload, bytes | bytearray):
-        path.write_bytes(payload)
-    else:
-        path.write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
-    print("wrote", path.name)
+def _fixture_name(request: httpx.Request, payload: Any) -> str | None:
+    """Which fixture file a response belongs to, or ``None`` if it is not one we keep."""
+    path = request.url.path
+    is_json = isinstance(payload, dict)
+    if request.method == "POST" and path == "/api/login" and is_json:
+        return "login.json" if payload.get("status") == "success" else "login_bad_key.json"
+    if request.method == "POST" and path == "/api/upload" and is_json:
+        if payload.get("status") == "success":
+            return "upload.json"
+        if "session" in str(payload.get("errormessage", "")).lower():
+            return "upload_bad_session.json"
+        return "upload_error.json"
+    if request.method != "GET":
+        return None
+    if _SUBMISSION.match(path) and is_json:
+        jobs = payload.get("jobs") or []
+        if any(j is not None for j in jobs):
+            return "submission_ready.json"
+        return "submission_pending.json" if jobs else "submission_queued.json"
+    if _JOB.match(path) and is_json:
+        return {"success": "job_success.json", "failure": "job_failure.json"}.get(
+            str(payload.get("status")), "job_solving.json"
+        )
+    if _JOB_INFO.match(path) and is_json:
+        return "job_info.json"
+    if _JOB_ANNOTATIONS.match(path) and is_json:
+        return "annotations.json"
+    if _WCS.match(path) and isinstance(payload, bytes):
+        return "wcs.fits"
+    return None
 
 
-async def record(image: Path, api_key: str, base: str) -> int:
+def _scrub(payload: Any) -> Any:
+    """Strip the account e-mail, session tokens and the nova user id from a response body."""
+    if not isinstance(payload, dict):
+        return payload
+    out = dict(payload)
+    if "session" in out:
+        out["session"] = FAKE_SESSION
+    if str(out.get("message", "")).startswith("authenticated user:"):
+        out["message"] = "authenticated user: "
+    if "errormessage" in out:
+        out["errormessage"] = _SESSION_IN_MESSAGE.sub(rf"\g<1>{FAKE_SESSION}", out["errormessage"])
+    if "user" in out:
+        out["user"] = 0
+    return out
+
+
+class RecordingTransport(httpx.AsyncBaseTransport):
+    """Pass requests to ``inner`` and write each recognised response to ``fixtures_dir``.
+
+    The first response of each kind wins, so a long poll records one ``job_solving.json``
+    rather than dozens. The client receives the untouched response.
+    """
+
+    def __init__(self, inner: httpx.AsyncBaseTransport, fixtures_dir: Path) -> None:
+        self._inner = inner
+        self._dir = fixtures_dir
+        self.recorded: list[str] = []
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        response = await self._inner.handle_async_request(request)
+        content = await response.aread()
+        if response.is_success:
+            self._record(request, content)
+        return httpx.Response(
+            response.status_code,
+            headers=response.headers,
+            content=content,
+            request=request,
+        )
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
+
+    def _record(self, request: httpx.Request, content: bytes) -> None:
+        payload: Any
+        try:
+            payload = json.loads(content)
+        except ValueError:
+            payload = content
+        name = _fixture_name(request, payload)
+        if name is None or name in self.recorded:
+            return
+        self._dir.mkdir(parents=True, exist_ok=True)
+        path = self._dir / name
+        if isinstance(payload, bytes):
+            path.write_bytes(payload)
+        else:
+            path.write_text(json.dumps(_scrub(payload), indent=1) + "\n", encoding="utf-8")
+        self.recorded.append(name)
+        print("wrote", path.name)
+
+
+async def record(
+    image: Path,
+    api_key: str,
+    base: str,
+    *,
+    fixtures_dir: Path = FIXTURES,
+    transport: httpx.AsyncBaseTransport | None = None,
+    poll_seconds: float = POLL_SECONDS,
+) -> int:
     solve_copy = Path(tempfile.mkdtemp(prefix="astrocaption-record-")) / "solve.jpg"
     scale = make_solve_copy(image, solve_copy)
     print(f"solve copy {solve_copy} (scale {scale:.4f})")
-    recorded: list[str] = []
+    request = SolveRequest(solve_copy)
 
+    recorder = RecordingTransport(transport or httpx.AsyncHTTPTransport(), fixtures_dir)
     timeout = httpx.Timeout(30.0, read=300.0, write=300.0)
-    async with httpx.AsyncClient(timeout=timeout) as c:
-        bad = await c.post(
-            f"{base}/api/login", data={"request-json": json.dumps({"apikey": "not-a-real-key"})}
-        )
-        _save("login_bad_key.json", bad.json())
-        recorded.append("login_bad_key.json")
-
-        login = (
-            await c.post(
-                f"{base}/api/login", data={"request-json": json.dumps({"apikey": api_key})}
-            )
-        ).json()
-        # nova echoes the account e-mail in "message"; never write it to the repo
-        _save("login.json", {**login, "message": "authenticated user: ", "session": FAKE_SESSION})
-        recorded.append("login.json")
-        if login.get("status") != "success":
-            print("login failed:", login.get("errormessage"), file=sys.stderr)
-            return 1
-
-        params = {
-            "session": login["session"],
-            "publicly_visible": "n",
-            "allow_modifications": "d",
-            "allow_commercial_use": "d",
-        }
-        with solve_copy.open("rb") as fh:
-            upload = (
-                await c.post(
-                    f"{base}/api/upload",
-                    data={"request-json": json.dumps(params)},
-                    files={"file": (solve_copy.name, fh, "image/jpeg")},
-                )
-            ).json()
-        _save("upload.json", upload)
-        recorded.append("upload.json")
-        if upload.get("status") != "success":
-            print("upload failed:", upload.get("errormessage"), file=sys.stderr)
-            return 1
-        subid = upload["subid"]
-        print(f"submission {subid}: {base}/status/{subid}")
-
-        job: int | None = None
-        seen: set[str] = set()
-        while job is None:
-            sub = {**(await c.get(f"{base}/api/submissions/{subid}")).json(), "user": 0}
-            jobs = [j for j in sub.get("jobs", []) if j is not None]
-            if jobs:
-                name = "submission_ready.json"
-                job = int(jobs[0])
-            else:
-                name = "submission_pending.json" if sub.get("jobs") else "submission_queued.json"
-            if name not in seen:
-                _save(name, sub)
-                recorded.append(name)
-                seen.add(name)
-            if job is None:
-                await asyncio.sleep(POLL_SECONDS)
-        print(f"job {job}: {base}/joblog/{job}")
-
-        while True:
-            st = (await c.get(f"{base}/api/jobs/{job}")).json()
-            status = st.get("status")
-            name = {"success": "job_success.json", "failure": "job_failure.json"}.get(
-                status, "job_solving.json"
-            )
-            if name not in seen:
-                _save(name, st)
-                recorded.append(name)
-                seen.add(name)
-            if status in ("success", "failure"):
-                break
-            await asyncio.sleep(POLL_SECONDS)
-
-        _save("job_info.json", (await c.get(f"{base}/api/jobs/{job}/info/")).json())
-        _save("annotations.json", (await c.get(f"{base}/api/jobs/{job}/annotations/")).json())
-        wcs = await c.get(f"{base}/wcs_file/{job}")
-        if wcs.is_success:
-            _save("wcs.fits", wcs.content)
-            recorded.append("wcs.fits")
+    async with httpx.AsyncClient(transport=recorder, timeout=timeout) as client:
+        try:
+            await NovaSolver("not-a-real-key", client, base).submit(request)
+        except SolverError:
+            pass  # expected: this probe only records login_bad_key.json
         else:
-            print(f"wcs_file returned HTTP {wcs.status_code}", file=sys.stderr)
-        recorded += ["job_info.json", "annotations.json"]
-        _save(
-            "provenance.json",
-            {
-                "recorded_at": datetime.now(UTC).replace(microsecond=0).isoformat(),
-                "nova_base_url": base,
-                "solve_copy_scale": scale,
-                "solve_status": status,
-                "recorded_files": sorted(set(recorded)),
-            },
-        )
-    return 0 if status == "success" else 1
+            print("nova accepted a bogus API key; login_bad_key.json not recorded", file=sys.stderr)
+
+        solver = NovaSolver(api_key, client, base)
+        subid = await solver.submit(request)
+        print(f"submission {subid}: {status_url(base, subid)}")
+
+        job = await solver.poll_submission(subid)
+        while job is None:
+            await asyncio.sleep(poll_seconds)
+            job = await solver.poll_submission(subid)
+        print(f"job {job}: {job_log_url(base, job)}")
+
+        state = await solver.poll_job(job)
+        while state == JobState.SOLVING:
+            await asyncio.sleep(poll_seconds)
+            state = await solver.poll_job(job)
+        if state == JobState.SUCCESS:
+            await solver.fetch_result(subid, job)
+
+    if "wcs.fits" not in recorder.recorded and state == JobState.SUCCESS:
+        print("wcs_file was not recorded", file=sys.stderr)
+    provenance = {
+        "recorded_at": datetime.now(UTC).replace(microsecond=0).isoformat(),
+        "nova_base_url": base,
+        "solve_copy_scale": scale,
+        "solve_status": state.value,
+        "recorded_files": sorted(recorder.recorded),
+    }
+    (fixtures_dir / "provenance.json").write_text(
+        json.dumps(provenance, indent=1) + "\n", encoding="utf-8"
+    )
+    print("wrote provenance.json")
+    return 0 if state == JobState.SUCCESS else 1
 
 
 def main(argv: list[str]) -> int:
