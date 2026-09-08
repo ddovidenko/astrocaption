@@ -1,0 +1,16 @@
+# Self-hosters:  docker compose up -d        (pulls ghcr.io/ddovidenko/astrocaption:latest once released)
+# From a clone:  docker compose up -d --build   (or `make up`)
+services:
+  app:
+    image: ghcr.io/ddovidenko/astrocaption:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8080:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      - TRUST_PROXY=0
+      - NOVA_API_KEY=${NOVA_API_KEY:-${ASTROMETRY_API_KEY:-}}
+    restart: unless-stopped

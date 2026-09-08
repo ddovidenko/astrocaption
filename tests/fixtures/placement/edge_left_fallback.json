@@ -1,0 +1,39 @@
+{
+ "name": "edge_left_fallback",
+ "width": 3000,
+ "height": 2000,
+ "items": [
+  {
+   "id": 1,
+   "x": 2950,
+   "y": 1000,
+   "radius": 30,
+   "w": 400,
+   "h": 70
+  },
+  {
+   "id": 2,
+   "x": 40,
+   "y": 1990,
+   "radius": 10,
+   "w": 200,
+   "h": 40
+  }
+ ],
+ "fixed_boxes": [],
+ "fixed_circles": [],
+ "expected": [
+  {
+   "id": 1,
+   "x": 2502.0,
+   "y": 965.0,
+   "collided": false
+  },
+  {
+   "id": 2,
+   "x": 59.798989873223334,
+   "y": 1930.2010101267767,
+   "collided": false
+  }
+ ]
+}

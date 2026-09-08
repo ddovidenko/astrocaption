@@ -1,0 +1,25 @@
+{
+ "name": "single_right",
+ "width": 3000,
+ "height": 2000,
+ "items": [
+  {
+   "id": 1,
+   "x": 1500,
+   "y": 1000,
+   "radius": 40,
+   "w": 300,
+   "h": 60
+  }
+ ],
+ "fixed_boxes": [],
+ "fixed_circles": [],
+ "expected": [
+  {
+   "id": 1,
+   "x": 1558.0,
+   "y": 970.0,
+   "collided": false
+  }
+ ]
+}
