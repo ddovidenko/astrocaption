@@ -1,0 +1,67 @@
+{
+ "name": "collision_forced",
+ "width": 400,
+ "height": 300,
+ "items": [
+  {
+   "id": 1,
+   "x": 200,
+   "y": 150,
+   "radius": 8,
+   "w": 390,
+   "h": 120
+  },
+  {
+   "id": 2,
+   "x": 200,
+   "y": 150,
+   "radius": 8,
+   "w": 390,
+   "h": 120
+  },
+  {
+   "id": 3,
+   "x": 200,
+   "y": 150,
+   "radius": 8,
+   "w": 390,
+   "h": 120
+  },
+  {
+   "id": 4,
+   "x": 200,
+   "y": 150,
+   "radius": 8,
+   "w": 390,
+   "h": 120
+  }
+ ],
+ "fixed_boxes": [],
+ "fixed_circles": [],
+ "expected": [
+  {
+   "id": 1,
+   "x": 5.0,
+   "y": 160.4,
+   "collided": false
+  },
+  {
+   "id": 2,
+   "x": 5.0,
+   "y": 19.599999999999994,
+   "collided": false
+  },
+  {
+   "id": 3,
+   "x": 210.4,
+   "y": 90.0,
+   "collided": true
+  },
+  {
+   "id": 4,
+   "x": 210.4,
+   "y": 90.0,
+   "collided": true
+  }
+ ]
+}

@@ -1,0 +1,52 @@
+{
+ "name": "fixed_obstacles",
+ "width": 3000,
+ "height": 2000,
+ "items": [
+  {
+   "id": 1,
+   "x": 1500,
+   "y": 1000,
+   "radius": 40,
+   "w": 300,
+   "h": 60
+  },
+  {
+   "id": 2,
+   "x": 1500,
+   "y": 1200,
+   "radius": 20,
+   "w": 300,
+   "h": 60
+  }
+ ],
+ "fixed_boxes": [
+  {
+   "left": 1560,
+   "top": 970,
+   "right": 1900,
+   "bottom": 1030
+  }
+ ],
+ "fixed_circles": [
+  {
+   "x": 1700,
+   "y": 1100,
+   "r": 90
+  }
+ ],
+ "expected": [
+  {
+   "id": 1,
+   "x": 1142.0,
+   "y": 970.0,
+   "collided": false
+  },
+  {
+   "id": 2,
+   "x": 1162.0,
+   "y": 1170.0,
+   "collided": false
+  }
+ ]
+}

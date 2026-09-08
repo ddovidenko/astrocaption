@@ -1,0 +1,67 @@
+{
+ "name": "stacked_same_position",
+ "width": 3000,
+ "height": 2000,
+ "items": [
+  {
+   "id": 1,
+   "x": 1500,
+   "y": 1000,
+   "radius": 120,
+   "w": 320,
+   "h": 64
+  },
+  {
+   "id": 2,
+   "x": 1500,
+   "y": 1000,
+   "radius": 40,
+   "w": 260,
+   "h": 64
+  },
+  {
+   "id": 3,
+   "x": 1500,
+   "y": 1000,
+   "radius": 20,
+   "w": 180,
+   "h": 40
+  },
+  {
+   "id": 4,
+   "x": 1500,
+   "y": 1000,
+   "radius": 12,
+   "w": 150,
+   "h": 40
+  }
+ ],
+ "fixed_boxes": [],
+ "fixed_circles": [],
+ "expected": [
+  {
+   "id": 1,
+   "x": 1638.0,
+   "y": 968.0,
+   "collided": false
+  },
+  {
+   "id": 2,
+   "x": 1062.0,
+   "y": 968.0,
+   "collided": false
+  },
+  {
+   "id": 3,
+   "x": 1410.0,
+   "y": 1158.0,
+   "collided": false
+  },
+  {
+   "id": 4,
+   "x": 1425.0,
+   "y": 810.0,
+   "collided": false
+  }
+ ]
+}
