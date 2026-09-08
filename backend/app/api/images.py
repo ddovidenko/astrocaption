@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ..config import Settings, SettingsSource
@@ -40,7 +41,7 @@ from ..storage import (
     probe_image,
     render_dir,
 )
-from .deps import DbDep, SettingsDep, WorkerDep, require_owner
+from .deps import DbDep, SettingsDep, WorkerDep, is_authenticated, require_owner
 
 router = APIRouter(prefix="/api/images", tags=["images"], dependencies=[Depends(require_owner)])
 
@@ -58,13 +59,16 @@ def _too_large_detail(settings: Settings) -> str:
     return f"File is larger than the {settings.max_upload_mb} MB upload limit."
 
 
-class UploadSizeGuard:
-    """Refuse an oversized upload from its Content-Length, before the body is spooled.
+class UploadGuard:
+    """Turn an upload away before its body is parsed: not signed in, or too large.
 
     FastAPI parses the multipart form before the route or its dependencies run, so a
     multi-gigabyte POST would otherwise fill temp space before ``upload_image`` could say
-    no. Requests without a usable Content-Length (chunked) fall through to the streaming
-    cap in ``_copy_limited``, which stays the backstop for everything.
+    no -- and an anonymous caller would have their body spooled, then learn the site's
+    upload limit from a 413, before ``require_owner`` ever ran. The sign-in check therefore
+    comes first, and answers exactly like ``require_owner`` does. Requests without a usable
+    Content-Length (chunked) fall through to the streaming cap in ``_copy_limited``, which
+    stays the backstop for everything.
     """
 
     def __init__(self, app: ASGIApp, settings_source: SettingsSource) -> None:
@@ -73,8 +77,15 @@ class UploadSizeGuard:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http" and scope["method"] == "POST" and scope["path"] == router.prefix:
-            declared = _declared_length(scope)
             settings = self._source.current()
+            if not is_authenticated(Request(scope), settings):
+                response: JSONResponse = JSONResponse(
+                    {"detail": "Sign in to continue."},
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                )
+                await response(scope, receive, send)
+                return
+            declared = _declared_length(scope)
             if declared is not None and declared > (
                 settings.max_upload_mb * 1024 * 1024 + UPLOAD_ENVELOPE_BYTES
             ):

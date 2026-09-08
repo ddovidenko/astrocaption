@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import mimetypes
 import os
@@ -92,13 +93,32 @@ def create_app(
     app.state.db = db
     app.state.worker = worker
     app.state.login_limiter = LoginLimiter()
-    app.add_middleware(images.UploadSizeGuard, settings_source=source)
+    app.state.setup_lock = asyncio.Lock()  # one first-run setup at a time (SPEC § 5.1)
+    app.add_middleware(images.UploadGuard, settings_source=source)
 
     @app.exception_handler(RequestValidationError)
     async def _plain_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
         """Plain-language 422s: the default FastAPI body echoes the submitted value (a
         password, here) in ``input`` and returns a list. Neither belongs in a response."""
-        messages = [f"{error['loc'][-1]}: {error['msg']}" for error in exc.errors()]
+        labels: list[str] = []
+        messages: list[str] = []
+        for error in exc.errors():
+            # loc holds ints too (a byte offset for a bad body, an index in a list), and
+            # its first element is the source; neither names anything a user would type.
+            named = [
+                part
+                for part in error.get("loc", ())
+                if isinstance(part, str) and part not in {"body", "query", "path"}
+            ]
+            label = ".".join(named) or "request"
+            labels.append(label)
+            msg = (
+                "the body is not valid JSON"
+                if error.get("type") == "json_invalid"
+                else str(error.get("msg", "is not valid"))
+            )
+            messages.append(f"{label}: {msg}")
+        log.info("request validation failed: %s", ", ".join(labels) or "request")
         detail = "; ".join(messages) or "Invalid request."
         return JSONResponse({"detail": detail}, status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
 
@@ -129,6 +149,10 @@ def _headless_setup(source: SettingsSource, password: str) -> None:
         )
         return
     if not current.setup_required:
+        log.info(
+            "ASTROCAPTION_PASSWORD ignored: an owner password is already set; remove the "
+            "variable, see docs/INSTALL.md to reset the password"
+        )
         return
     if len(password) < MIN_PASSWORD_LENGTH:
         log.error(

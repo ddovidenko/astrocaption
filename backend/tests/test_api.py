@@ -41,6 +41,7 @@ def test_health_and_fonts(client: TestClient) -> None:
         "setup_required": False,
         "authenticated": True,
         "config_error": None,
+        "locked": [],
     }
     config = client.get("/api/config").json()
     assert config == {
@@ -121,6 +122,41 @@ def test_upload_too_large_is_refused_before_the_body_is_read(
     assert resp.status_code == 413
     assert resp.json() == {"detail": "File is larger than the 1 MB upload limit."}
     assert list(settings.uploads_dir.iterdir()) == []
+
+
+def test_anonymous_upload_is_refused_before_the_body_is_parsed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not signed in comes before too large: an anonymous caller must not get their body
+    spooled, nor learn the site's upload limit from a 413."""
+    settings = make_settings(tmp_path, max_upload_mb=1)
+    noisy = _noisy_png(tmp_path)
+
+    def body_was_read(*args: object) -> int:
+        raise AssertionError("an anonymous upload body was spooled")
+
+    monkeypatch.setattr("app.api.images._copy_limited", body_was_read)
+    with make_client(settings, lambda: None) as client, noisy.open("rb") as fh:
+        resp = client.post("/api/images", files={"file": ("noise.png", fh, "image/png")})
+    assert resp.status_code == 401
+    assert resp.headers["content-type"] == "application/json"
+    assert resp.json() == {"detail": "Sign in to continue."}
+    assert list(settings.uploads_dir.iterdir()) == []
+
+
+def test_anonymous_oversized_upload_is_a_401_not_a_413(
+    anon_client: TestClient, client: TestClient
+) -> None:
+    headers = {
+        "content-length": str(50 * 1024 * 1024),
+        "content-type": "multipart/form-data; boundary=astrocaption",
+    }
+    resp = anon_client.post("/api/images", content=b"x", headers=headers)
+    assert resp.status_code == 401 and resp.json() == {"detail": "Sign in to continue."}
+    assert "MB" not in resp.text  # the upload limit is not public
+    # The same declared length from the owner still trips the size guard, which is what
+    # proves the header reached the middleware in the anonymous case above.
+    assert client.post("/api/images", content=b"x", headers=headers).status_code == 413
 
 
 def test_upload_too_large_without_content_length_is_refused_after_the_cap(
@@ -407,8 +443,11 @@ def test_health_reports_a_broken_config_file(env_client: tuple[TestClient, Path]
     (data_dir / "config.json").write_text('{"nova_api_key": "k",')
     body = client.get("/api/health").json()
     assert body["setup_required"] is False and body["authenticated"] is False
-    assert body["config_error"] and "not valid JSON" in body["config_error"]
-    assert client.post("/api/setup", json={"password": "hunter2hunter2"}).status_code == 404
+    assert body["config_error"] == "config.json is not valid JSON; fix or remove it and restart"
+    # No raw exception text and no server path reaches the page (CLAUDE.md).
+    assert "line 1" not in body["config_error"] and str(data_dir) not in body["config_error"]
+    broken = client.post("/api/setup", json={"password": "hunter2hunter2"})
+    assert broken.status_code == 409 and broken.json() == {"detail": body["config_error"]}
     (data_dir / "config.json").write_text(
         json.dumps(
             {"password_hash": TEST_PASSWORD_HASH, "session_secret": "s", "nova_api_key": "k"}

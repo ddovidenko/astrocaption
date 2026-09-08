@@ -17,7 +17,7 @@ from ..auth import (
     perform_setup,
     verify_password,
 )
-from ..config import Settings
+from ..config import ConfigError, Settings
 from ..models import LoginRequest, SetupRequest
 from .deps import SettingsDep
 
@@ -47,21 +47,38 @@ def session_cookie_params(settings: Settings, *, with_max_age: bool = False) -> 
 
 
 @router.post("/setup", status_code=status.HTTP_204_NO_CONTENT)
-async def setup(body: SetupRequest, settings: SettingsDep) -> None:
-    if not settings.setup_required:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Setup has already been completed.")
-    if len(body.password) < MIN_PASSWORD_LENGTH:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            f"Password must be at least {MIN_PASSWORD_LENGTH} characters.",
-        )
-    await asyncio.to_thread(
-        perform_setup,
-        settings,
-        body.password,
-        nova_api_key=body.nova_api_key,
-        site_title=body.site_title,
-    )
+async def setup(body: SetupRequest, request: Request) -> None:
+    lock: asyncio.Lock = request.app.state.setup_lock
+    async with lock:
+        # Re-read inside the lock: two browsers submitting the form at the same moment must
+        # not both write a password hash, each believing it owns the site.
+        settings: Settings = request.app.state.settings_source.current()
+        if settings.config_error is not None:
+            raise HTTPException(status.HTTP_409_CONFLICT, settings.config_error)
+        if not settings.setup_required:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Setup has already been completed.")
+        if len(body.password) < MIN_PASSWORD_LENGTH:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"Password must be at least {MIN_PASSWORD_LENGTH} characters.",
+            )
+        try:
+            await asyncio.to_thread(
+                perform_setup,
+                settings,
+                body.password,
+                nova_api_key=body.nova_api_key,
+                site_title=body.site_title,
+            )
+        except ConfigError as exc:  # the file grew unreadable between the check and the write
+            raise HTTPException(status.HTTP_409_CONFLICT, exc.public) from exc
+        except OSError as exc:
+            log.exception("setup could not write config.json")
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "The password could not be saved: the data directory is not writable. "
+                "Check the permissions on ./data and try again.",
+            ) from exc
 
 
 @router.post("/login", status_code=status.HTTP_204_NO_CONTENT)

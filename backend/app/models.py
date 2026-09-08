@@ -403,6 +403,7 @@ class HealthOut(BaseModel):
     setup_required: bool
     authenticated: bool
     config_error: str | None = None
+    locked: list[str] = []  # field names pinned by environment variables, never their values
 
 
 class ConfigOut(BaseModel):
@@ -415,6 +416,8 @@ class ConfigOut(BaseModel):
     locked: list[str]  # fields pinned by environment variables
 
 
+# A custom ``@field_validator`` message is echoed verbatim by the 422 handler in main.py,
+# so it must describe the rule and never include the submitted value (a password, here).
 class SetupRequest(BaseModel):
     password: str = Field(max_length=1024)
     nova_api_key: str | None = Field(default=None, max_length=200)

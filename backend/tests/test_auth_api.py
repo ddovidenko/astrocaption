@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from collections.abc import Iterable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -158,14 +160,60 @@ def test_secure_cookie_behind_a_proxy(tmp_path: Path, monkeypatch: pytest.Monkey
         assert "Secure" in ok.headers["set-cookie"]
 
 
-def test_headless_setup_from_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_headless_setup_from_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     with fresh_app_client(tmp_path, monkeypatch, ASTROCAPTION_PASSWORD="from-the-env") as client:
         assert client.get("/api/health").json()["setup_required"] is False
         assert client.post("/api/setup", json={"password": "hunter2hunter2"}).status_code == 404
         assert client.post("/api/login", json={"password": "from-the-env"}).status_code == 204
-    # A second start with the variable still set changes nothing.
-    with fresh_app_client(tmp_path, monkeypatch, ASTROCAPTION_PASSWORD="from-the-env") as client:
+    # A second start with the variable still set changes nothing, and says so.
+    with (
+        caplog.at_level(logging.INFO, logger="app.main"),
+        fresh_app_client(tmp_path, monkeypatch, ASTROCAPTION_PASSWORD="from-the-env") as client,
+    ):
         assert client.post("/api/login", json={"password": "from-the-env"}).status_code == 204
+    assert "an owner password is already set" in caplog.text
+    assert "docs/INSTALL.md" in caplog.text and "from-the-env" not in caplog.text
+
+
+def test_concurrent_setup_requests_leave_exactly_one_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two browsers submitting the form at once: one wins, the other is told setup is done."""
+    passwords = ["first-password-1", "second-password-2"]
+    with fresh_app_client(tmp_path, monkeypatch) as client:
+
+        def attempt(password: str) -> int:
+            code: int = client.post("/api/setup", json={"password": password}).status_code
+            return code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            codes = list(pool.map(attempt, passwords))
+        assert sorted(codes) == [204, 404]
+        winner, loser = passwords[codes.index(204)], passwords[codes.index(404)]
+        assert client.post("/api/login", json={"password": loser}).status_code == 401
+        assert client.post("/api/login", json={"password": winner}).status_code == 204
+
+
+def test_setup_reports_a_data_directory_it_cannot_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root writes into a read-only directory anyway")
+    with fresh_app_client(tmp_path, monkeypatch) as client:
+        data_dir = tmp_path / "data"
+        data_dir.chmod(0o500)
+        try:
+            resp = client.post("/api/setup", json={"password": "hunter2hunter2"})
+        finally:
+            data_dir.chmod(0o700)
+    assert resp.status_code == 500
+    assert resp.json() == {
+        "detail": "The password could not be saved: the data directory is not writable. "
+        "Check the permissions on ./data and try again."
+    }
+    assert str(data_dir) not in resp.text  # the server path stays in the log
 
 
 def test_headless_setup_ignores_a_short_password(
@@ -190,6 +238,37 @@ def test_validation_errors_are_plain_language_without_input_echo(anon_client: Te
     body2 = resp2.json()
     assert isinstance(body2["detail"], str)
     assert "password" in body2["detail"]
+
+
+def test_health_lists_the_fields_pinned_by_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with fresh_app_client(
+        tmp_path, monkeypatch, NOVA_API_KEY="secret-nova-key", ASTROCAPTION_SITE_TITLE="Env"
+    ) as client:
+        body = client.get("/api/health").json()
+    assert body["locked"] == ["nova_api_key", "site_title"]
+    assert "secret-nova-key" not in json.dumps(body)  # names only, never the values
+
+
+def test_a_body_that_is_not_json_gets_a_plain_422(
+    anon_client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.INFO, logger="app.main"):
+        resp = anon_client.post(
+            "/api/login", content=b"{bad", headers={"content-type": "application/json"}
+        )
+    assert resp.status_code == 422
+    assert resp.json() == {"detail": "request: the body is not valid JSON"}
+    assert "request validation failed: request" in caplog.text
+
+
+def test_a_list_body_gets_a_labelled_422_without_an_index(anon_client: TestClient) -> None:
+    """``loc`` holds ints as well as names; ``loc[-1]`` would put one in the message."""
+    resp = anon_client.post("/api/login", json=[{"password": "x"}])
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert isinstance(detail, str) and detail.startswith("request: ")
 
 
 def test_headless_setup_ignores_an_empty_password(
