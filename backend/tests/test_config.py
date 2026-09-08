@@ -151,7 +151,7 @@ def test_perform_setup_writes_hash_secret_and_optional_fields(tmp_path: Path) ->
     assert "site_title" not in written and "password" not in written
 
 
-def test_perform_setup_skips_env_locked_fields(
+def test_perform_setup_skips_fields_pinned_by_the_environment(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     before = load_settings(env_for(tmp_path, NOVA_API_KEY="from-env"))

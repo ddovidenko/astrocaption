@@ -318,6 +318,14 @@ def test_422_labels_cannot_forge_a_log_line_or_flood_the_message(
         label = long_resp.json()["detail"].split(":")[0]
         assert label == "x" * 60
 
+        with caplog.at_level(logging.INFO, logger="app.main"):
+            flood = client.put("/api/config", json={f"k{i}": 1 for i in range(40)})
+        assert flood.status_code == 422
+        problems = flood.json()["detail"].split("; ")
+        assert len(problems) == 6 and problems[-1] == "and 35 more problems"
+        last = [r for r in caplog.records if "request validation failed" in r.getMessage()][-1]
+        assert last.getMessage().count("k") == 5  # five labels logged, not forty
+
 
 def test_put_409_on_config_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     with owner_client(tmp_path, monkeypatch) as client:
