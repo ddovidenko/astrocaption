@@ -38,3 +38,8 @@ updates:
     directory: /docker
     schedule:
       interval: weekly
+    ignore:
+      # The build stage tracks Node LTS by hand (odd majors never become LTS; even
+      # majors only after their LTS date, see #25). Minor/patch alpine bumps still flow.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
