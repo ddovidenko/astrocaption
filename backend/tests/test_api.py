@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -83,15 +84,65 @@ def test_upload_rejections(client: TestClient, settings: Settings, tmp_path: Pat
     assert list(settings.uploads_dir.iterdir()) == []
 
 
-def test_upload_too_large(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path, max_upload_mb=1)
+def _noisy_png(tmp_path: Path) -> Path:
     noisy = tmp_path / "noise.png"
     Image.frombytes("RGB", (1200, 900), os.urandom(1200 * 900 * 3)).save(noisy)
     assert noisy.stat().st_size > 1024 * 1024
+    return noisy
+
+
+def test_upload_too_large_is_refused_before_the_body_is_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = make_settings(tmp_path, max_upload_mb=1)
+    noisy = _noisy_png(tmp_path)
+
+    def body_was_read(*args: object) -> int:
+        raise AssertionError("the upload body was spooled before the size check")
+
+    monkeypatch.setattr("app.api.images._copy_limited", body_was_read)
     with make_client(settings, lambda: None) as client, noisy.open("rb") as fh:
         resp = client.post("/api/images", files={"file": ("noise.png", fh, "image/png")})
-        assert resp.status_code == 413
-        assert list(settings.uploads_dir.iterdir()) == []
+    assert resp.status_code == 413
+    assert resp.json() == {"detail": "File is larger than the 1 MB upload limit."}
+    assert list(settings.uploads_dir.iterdir()) == []
+
+
+def test_upload_too_large_without_content_length_is_refused_after_the_cap(
+    tmp_path: Path,
+) -> None:
+    """A chunked upload carries no Content-Length; the streaming cap is the backstop."""
+    settings = make_settings(tmp_path, max_upload_mb=1)
+    noisy = _noisy_png(tmp_path)
+    boundary = b"astrocaption-test-boundary"
+    head = (
+        b"--" + boundary + b"\r\n"
+        b'Content-Disposition: form-data; name="file"; filename="noise.png"\r\n'
+        b"Content-Type: image/png\r\n\r\n"
+    )
+    tail = b"\r\n--" + boundary + b"--\r\n"
+
+    def chunks() -> Iterator[bytes]:
+        yield head
+        with noisy.open("rb") as fh:
+            while chunk := fh.read(65536):
+                yield chunk
+        yield tail
+
+    with make_client(settings, lambda: None) as client:
+        resp = client.post(
+            "/api/images",
+            content=chunks(),
+            headers={"content-type": f"multipart/form-data; boundary={boundary.decode()}"},
+        )
+    assert "content-length" not in resp.request.headers
+    assert resp.status_code == 413
+    assert list(settings.uploads_dir.iterdir()) == []
+
+
+def test_content_length_precheck_only_guards_the_upload_route(client: TestClient) -> None:
+    resp = client.get("/api/images", headers={"content-length": str(10**12)})
+    assert resp.status_code == 200
 
 
 def test_solve_objects_annotations_and_export(

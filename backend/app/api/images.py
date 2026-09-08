@@ -10,9 +10,10 @@ from typing import Annotated, BinaryIO, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Form, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
-from ..config import Settings
+from ..config import Settings, SettingsSource
 from ..db import Database
 from ..models import (
     Annotations,
@@ -44,11 +45,53 @@ from .deps import DbDep, SettingsDep, WorkerDep
 router = APIRouter(prefix="/api/images", tags=["images"])
 
 COPY_CHUNK = 1024 * 1024
+# Room for the multipart framing and the title field on top of the file itself.
+UPLOAD_ENVELOPE_BYTES = 64 * 1024
 FileKind = Literal["original", "preview", "thumb", "annotated-preview"]
 
 
 class UploadTooLargeError(ValueError):
     pass
+
+
+def _too_large_detail(settings: Settings) -> str:
+    return f"File is larger than the {settings.max_upload_mb} MB upload limit."
+
+
+class UploadSizeGuard:
+    """Refuse an oversized upload from its Content-Length, before the body is spooled.
+
+    FastAPI parses the multipart form before the route or its dependencies run, so a
+    multi-gigabyte POST would otherwise fill temp space before ``upload_image`` could say
+    no. Requests without a usable Content-Length (chunked) fall through to the streaming
+    cap in ``_copy_limited``, which stays the backstop for everything.
+    """
+
+    def __init__(self, app: ASGIApp, settings_source: SettingsSource) -> None:
+        self._app = app
+        self._source = settings_source
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["method"] == "POST" and scope["path"] == router.prefix:
+            declared = _declared_length(scope)
+            settings = self._source.current()
+            if declared is not None and declared > (
+                settings.max_upload_mb * 1024 * 1024 + UPLOAD_ENVELOPE_BYTES
+            ):
+                response = JSONResponse(
+                    {"detail": _too_large_detail(settings)},
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                )
+                await response(scope, receive, send)
+                return
+        await self._app(scope, receive, send)
+
+
+def _declared_length(scope: Scope) -> int | None:
+    for name, value in scope["headers"]:
+        if name == b"content-length":
+            return int(value) if value.isdigit() else None
+    return None
 
 
 def _copy_limited(src: BinaryIO, dest: Path, limit: int) -> int:
@@ -155,8 +198,7 @@ async def upload_image(
     except UploadTooLargeError:
         delete_image_files(settings, image_id)
         raise HTTPException(
-            status.HTTP_413_CONTENT_TOO_LARGE,
-            f"File is larger than the {settings.max_upload_mb} MB upload limit.",
+            status.HTTP_413_CONTENT_TOO_LARGE, _too_large_detail(settings)
         ) from None
     except UnsupportedImageError as exc:
         delete_image_files(settings, image_id)
