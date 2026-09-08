@@ -85,9 +85,12 @@ def session_is_valid(
     if not token or "." not in token:
         return False
     issued_text, signature = token.split(".", 1)
-    if not issued_text.isdigit():
+    if not (issued_text.isascii() and issued_text.isdigit() and len(issued_text) <= 12):
         return False
-    issued = int(issued_text)
+    try:
+        issued = int(issued_text)
+    except ValueError:
+        return False
     current = time.time() if now is None else now
     if issued > current + CLOCK_SKEW_SECONDS or current - issued > SESSION_TTL_SECONDS:
         return False

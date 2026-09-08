@@ -56,6 +56,8 @@ def test_session_rejects_tampering_other_secret_and_password_change() -> None:
     assert not session_is_valid("", "secret", HASH)
     assert not session_is_valid("garbage", "secret", HASH)
     assert not session_is_valid("abc.def", "secret", HASH)
+    assert not session_is_valid("²." + "a" * 64, "secret", HASH, now=1_000_100.0)
+    assert not session_is_valid("1" * 5000 + "." + "a" * 64, "secret", HASH, now=1_000_100.0)
 
 
 def test_login_limiter_locks_after_five_failures() -> None:
