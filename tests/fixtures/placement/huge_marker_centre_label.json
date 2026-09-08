@@ -1,0 +1,67 @@
+{
+ "name": "huge_marker_centre_label",
+ "width": 6248,
+ "height": 4176,
+ "items": [
+  {
+   "id": 1,
+   "x": 3185,
+   "y": 2119,
+   "radius": 3817,
+   "w": 900,
+   "h": 180
+  },
+  {
+   "id": 2,
+   "x": 2674,
+   "y": 3614,
+   "radius": 348,
+   "w": 600,
+   "h": 180
+  },
+  {
+   "id": 3,
+   "x": 2685,
+   "y": 1207,
+   "radius": 166,
+   "w": 500,
+   "h": 180
+  },
+  {
+   "id": 4,
+   "x": 6025,
+   "y": 96,
+   "radius": 37,
+   "w": 400,
+   "h": 180
+  }
+ ],
+ "fixed_boxes": [],
+ "fixed_circles": [],
+ "expected": [
+  {
+   "id": 1,
+   "x": 3222.488,
+   "y": 2029.0,
+   "collided": false
+  },
+  {
+   "id": 2,
+   "x": 3059.488,
+   "y": 3524.0,
+   "collided": false
+  },
+  {
+   "id": 3,
+   "x": 2888.488,
+   "y": 1117.0,
+   "collided": false
+  },
+  {
+   "id": 4,
+   "x": 5550.512,
+   "y": 6.0,
+   "collided": false
+  }
+ ]
+}

@@ -14,6 +14,7 @@ from app.placement import (
     PlacementItem,
     anchor_box,
     box_crosses_ring,
+    box_inside,
     boxes_overlap,
     place_labels,
     scale_unit,
@@ -96,6 +97,21 @@ def test_labels_inside_a_huge_marker_do_not_collide() -> None:
     ]
     placed = place_labels(w, h, items)
     assert not any(p.collided for p in placed)
+
+
+def test_marker_larger_than_the_frame_is_labelled_at_its_centre() -> None:
+    """M 31 on a 6248 × 4176 frame: its 3817 px ring leaves no slot outside it."""
+    w, h = 6248, 4176
+    s = scale_unit(w, h)
+    m31 = PlacementItem(1, 3185, 2119, 3817, 900, 180)
+    [p] = place_labels(w, h, [m31])
+    assert not p.collided
+    assert box_inside(Box(p.x, p.y, p.x + 900, p.y + 180), w, h)
+    assert p.x == pytest.approx(3185 + GAP_FACTOR * s)  # "right" of the centre point
+    assert p.y == pytest.approx(2119 - 90)
+    # a small crowded object still reports a collision rather than moving into its marker
+    crowd = [PlacementItem(i, 200, 150, 8, 390, 120) for i in range(1, 4)]
+    assert any(q.collided for q in place_labels(400, 300, crowd))
 
 
 def test_output_order_matches_input_order() -> None:
