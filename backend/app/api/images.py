@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Annotated, BinaryIO, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -40,9 +40,9 @@ from ..storage import (
     probe_image,
     render_dir,
 )
-from .deps import DbDep, SettingsDep, WorkerDep
+from .deps import DbDep, SettingsDep, WorkerDep, require_owner
 
-router = APIRouter(prefix="/api/images", tags=["images"])
+router = APIRouter(prefix="/api/images", tags=["images"], dependencies=[Depends(require_owner)])
 
 COPY_CHUNK = 1024 * 1024
 # Room for the multipart framing and the title field on top of the file itself.

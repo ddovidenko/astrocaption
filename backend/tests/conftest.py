@@ -137,8 +137,22 @@ def make_client(settings: Settings, solver_factory: Callable[[], Solver | None])
     return TestClient(app)
 
 
+def login(client: TestClient, password: str = TEST_PASSWORD) -> None:
+    resp = client.post("/api/login", json={"password": password})
+    assert resp.status_code == 204, resp.text
+
+
 @pytest.fixture
 def client(settings: Settings, fake_solver: FakeSolver) -> Iterator[TestClient]:
+    """Logged-in owner."""
+    with make_client(settings, lambda: fake_solver) as c:
+        login(c)
+        yield c
+
+
+@pytest.fixture
+def anon_client(settings: Settings, fake_solver: FakeSolver) -> Iterator[TestClient]:
+    """Same app, no session cookie."""
     with make_client(settings, lambda: fake_solver) as c:
         yield c
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,7 +15,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .api import fonts, health, images
+from .api import auth, config, fonts, health, images
+from .auth import MIN_PASSWORD_LENGTH, LoginLimiter, perform_setup
 from .config import Settings, SettingsSource
 from .db import Database
 from .solver import Solver
@@ -33,6 +35,7 @@ def create_app(
     solver_factory: Callable[[], Solver | None] | None = None,
     poll_interval: float = 5.0,
     solve_timeout: float = 15 * 60,
+    setup_password: str | None = None,
 ) -> FastAPI:
     source = SettingsSource(settings)  # config.json values stay live; paths are fixed
     cfg = source.current()
@@ -59,6 +62,8 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         nonlocal http_client
         cfg.ensure_dirs()
+        if setup_password is not None:
+            _headless_setup(source, setup_password)
         db.init()
         http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(30.0, read=300.0, write=300.0), follow_redirects=True
@@ -85,9 +90,12 @@ def create_app(
     app.state.settings_source = source
     app.state.db = db
     app.state.worker = worker
+    app.state.login_limiter = LoginLimiter()
     app.add_middleware(images.UploadSizeGuard, settings_source=source)
 
     app.include_router(health.router)
+    app.include_router(auth.router)
+    app.include_router(config.router)
     app.include_router(fonts.router)
     app.include_router(images.router)
 
@@ -95,6 +103,21 @@ def create_app(
         app.mount("/fonts", StaticFiles(directory=cfg.fonts_dir), name="fonts")
     _mount_spa(app, cfg.static_dir)
     return app
+
+
+def _headless_setup(source: SettingsSource, password: str) -> None:
+    """``ASTROCAPTION_PASSWORD``: complete first-run setup without the browser (SPEC § 11)."""
+    current = source.current()
+    if not current.setup_required:
+        return
+    if len(password) < MIN_PASSWORD_LENGTH:
+        log.error(
+            "ASTROCAPTION_PASSWORD ignored: shorter than %d characters; open /setup instead",
+            MIN_PASSWORD_LENGTH,
+        )
+        return
+    perform_setup(current, password)
+    log.info("owner password set from ASTROCAPTION_PASSWORD")
 
 
 def _mount_spa(app: FastAPI, static_dir: Path) -> None:
@@ -114,4 +137,4 @@ def _mount_spa(app: FastAPI, static_dir: Path) -> None:
         return FileResponse(index)
 
 
-app = create_app()
+app = create_app(setup_password=os.environ.get("ASTROCAPTION_PASSWORD"))
