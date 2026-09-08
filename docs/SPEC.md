@@ -187,6 +187,7 @@ images
   nova_submission_id, nova_job_id  int?
   wcs_text      text?
   calibration   json?  (nova's ra, dec, radius, pixscale, orientation, parity)
+  solve_hints   json?  (focal length / pixel size from the last Re-solve; kept so a restart reuses them)
   published     bool
   exported_at   text?
   updated_at
@@ -224,10 +225,12 @@ Owner (cookie session):
 - `GET /images/{id}/objects`
 - `GET/PUT /images/{id}/annotations` (PUT is autosaved by the editor, debounced 500 ms)
 - `POST /images/{id}/autoarrange` → new labels array (server runs the same placer)
-- `POST /images/{id}/export` {quality, scale} → job; `GET /images/{id}/export` → file
+- `POST /images/{id}/export` {quality: int|null, scale} → {export_url, annotated_preview_url, width, height, bytes, exported_at, encoding};
+  `quality: null` (the default) reuses the source JPEG's quantisation tables (§ 5.4). `GET /images/{id}/export` → file
 - `GET /images/{id}/files/{original|preview|thumb|annotated-preview}` → the file itself
 - `GET /fonts` → list of bundled fonts {file, family, weight, sample}; the files are served at `/fonts/<file>`
-- `GET /health` → {status, version, site_title, nova_api_key_set}
+- `GET /health` → {status, version, site_title, nova_api_key_set, config_error}; `config_error` explains an
+  unreadable `config.json`. Image payloads carry `original_format` (JPEG/PNG/TIFF) and the nova status/job-log URLs.
 
 *M1 note:* milestone 1 ships upload, list/get/delete, solve, objects, `GET` annotations, export and files
 without authentication; `PUT annotations` and `autoarrange` arrive with the editor in milestone 3, the
@@ -276,6 +279,8 @@ renders "NGC 1976" in each and compares bounding boxes within 1 px at 100 px siz
 Public repo. Using GitHub Pro where useful:
 
 - **Branch protection on `main`**: PR required, CI green required, linear history.
+  *Current state:* the repository allows squash merges only, so history is linear already; the PR-required
+  and CI-green rules are switched on in milestone 6.
 - **Actions**:
   - `ci.yml` on PR: lint, backend tests, frontend tests, docker build (no push).
   - `release.yml` on tag `v*`: build multi-arch image, push to GHCR, attach `compose.yml` and a
@@ -303,6 +308,7 @@ Later (not v1): local ASTAP solver option, custom object entries (user-added lab
 ## 14. Open questions
 
 - Nova rate limits: undocumented; we serialise solves (one at a time) and cache job results forever. Confirm behaviour under a burst of 5 uploads.
-- Object list size: wide fields can return 500+ HD stars. Default-hide `hd` type entirely? Current plan: hide by default, available in the list with a type filter.
+- Object list size: wide fields can return 500+ HD stars. Default-hide `hd` type entirely? Current plan: hide by default, available in the list with a type filter. (The recorded 2.4° field had no `hd` entries at all; nova seems to add them only for small fields.)
+- Non-stellar objects nova returns with radius 0 (NGC 206, the star cloud in M 31) are hidden by the size rule. Enable NGC/IC objects regardless of size? Decide with the editor (milestone 3), where a click toggles them anyway.
 - Should exports be stored or generated on demand? Plan: stored (cheap) so the gallery can show them without re-rendering.
 - Touch support in the editor: out of scope for v1, but Konva makes pinch-zoom cheap. Revisit after milestone 5.
