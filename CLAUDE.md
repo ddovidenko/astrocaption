@@ -76,7 +76,8 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
 - Library docs: the Context7 MCP server covers FastAPI, Starlette, Pydantic, Pillow, httpx, React, Vite,
   Konva and similar; query it before answering API questions from memory. It has no entry for
   nova.astrometry.net: use https://astrometry.net/doc/net/api.html and the recorded fixtures instead.
-- Flow: branch → `gh pr create` → `gh pr checks --watch` → `gh pr merge --squash --delete-branch`.
+- Flow: branch → `gh pr create` → `gh pr checks --watch` → `gh pr merge --squash` (the repo deletes
+  the remote branch on merge; `--delete-branch` errors on the already-gone ref). Then `git checkout main && git pull`.
   `main` allows squash merges only (branch protection arrives with milestone 6). Never push to `main`.
 - Review ritual before a milestone PR: `/code-review high`, then a silent-failure pass
   (pr-review-toolkit agent) on the diff, then `/simplify`; fix, re-run `make lint test`, and let the
