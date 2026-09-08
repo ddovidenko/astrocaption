@@ -100,9 +100,9 @@ names-catalog: $(VENV)/.installed ## Rebuild backend/app/catalog/names.json from
 favicons: $(VENV)/.installed ## Regenerate frontend/public/ icons from frontend/icon/icon-source.png
 	cd backend && .venv/bin/python scripts/make_favicons.py
 
-record-fixtures: $(VENV)/.installed ## Re-record backend/tests/fixtures/nova/ from a real solve: make record-fixtures IMAGE=path.jpg
-	@test -n "$(IMAGE)" || { echo "usage: make record-fixtures IMAGE=path/to/image.jpg"; exit 2; }
-	cd backend && .venv/bin/python scripts/record_nova_fixtures.py "$(IMAGE)"
+record-fixtures: $(VENV)/.installed ## Record nova fixtures from a real solve: make record-fixtures IMAGE=path.jpg [OUT=backend/tests/fixtures/nova-narrow]
+	@test -n "$(IMAGE)" || { echo "usage: make record-fixtures IMAGE=path/to/image.jpg [OUT=dir]"; exit 2; }
+	cd backend && .venv/bin/python scripts/record_nova_fixtures.py "$(abspath $(IMAGE))" $(if $(OUT),"$(abspath $(OUT))",)
 
 clean: ## Remove build artefacts (keeps data/)
 	rm -rf backend/static frontend/dist backend/.pytest_cache backend/.mypy_cache backend/.ruff_cache
