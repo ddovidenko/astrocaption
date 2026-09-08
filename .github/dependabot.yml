@@ -27,6 +27,12 @@ updates:
       npm-minor-and-patch:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # TypeScript 7 has no JS compiler API yet, so typescript-eslint pins
+      # typescript <6.1.0 and the whole npm job aborts on the 7.x bump.
+      # Remove when #27 (TypeScript 7 upgrade) lands.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: docker
     directory: /docker
