@@ -22,3 +22,4 @@ def test_verify_rejects_malformed_hashes() -> None:
     assert not verify_password("x", "bcrypt$whatever")
     assert not verify_password("x", "scrypt$32768$8$1$not-base64$zzz")
     assert not verify_password("x", "scrypt$32768$8$1$AAAA")
+    assert not verify_password("x", "scrypt$100000000000000000000$8$1$AAAA$AAAA")

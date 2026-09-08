@@ -57,6 +57,6 @@ def verify_password(password: str, stored: str) -> bool:
             return False
         expected = _unb64(digest_text)
         actual = _scrypt(password, _unb64(salt_text), int(n), int(r), int(p), len(expected))
-    except (ValueError, TypeError, binascii.Error, UnicodeEncodeError):
+    except (ValueError, TypeError, binascii.Error, UnicodeEncodeError, OverflowError):
         return False
     return hmac.compare_digest(actual, expected)
