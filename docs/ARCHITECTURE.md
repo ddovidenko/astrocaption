@@ -1,4 +1,4 @@
-# Architecture (milestone 1)
+# Architecture (milestone 2)
 
 One container, one process: uvicorn runs the FastAPI app, which serves the API, the bundled
 fonts, the built React page, and an in-process solve worker.
@@ -37,6 +37,15 @@ frontend/src/App.tsx ──fetch──▶ /api/images ...           (backend/app
 | `app/layout.py` | Default style per image size, enabled rule, placement glue, re-solve rematch. |
 | `app/render.py` | Pillow text metrics and the export renderer. Its layout rules are the parity contract for the canvas. |
 | `app/fonts.py` | Bundled font lookup by file name. |
+| `app/auth.py` | scrypt password hashes, stateless HMAC session tokens, login cooldown, first-run setup writer. Standard library only. |
+| `app/api/deps.py` | Request-scoped dependencies; `require_owner` gates every owner router on the session cookie. |
+| `app/api/auth.py` | `/api/setup`, `/api/login`, `/api/logout`. |
+| `app/api/config.py` | Owner settings (`GET`; `PUT` with the config page). |
+
+Every router except health carries the require_owner dependency; the cookie is validated per
+request against the secret and password hash in config.json, so a password reset logs everyone
+out. `/api/docs` and `/api/openapi.json` are mounted on their own gated router, so the API schema
+and Swagger UI are owner-only too.
 
 ## Coordinate contract
 
