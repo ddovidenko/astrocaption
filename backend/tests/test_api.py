@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -14,8 +15,10 @@ from app.db import Database
 from app.main import create_app
 from tests.conftest import (
     NOVA_NARROW_FIXTURES,
+    TEST_PASSWORD_HASH,
     FakeSolver,
     load_fixture,
+    login,
     make_client,
     make_settings,
     nova_result,
@@ -35,8 +38,18 @@ def test_health_and_fonts(client: TestClient) -> None:
         "status": "ok",
         "version": health["version"],
         "site_title": "Test Site",
-        "nova_api_key_set": False,
+        "setup_required": False,
+        "authenticated": True,
         "config_error": None,
+        "locked": [],
+    }
+    config = client.get("/api/config").json()
+    assert config == {
+        "site_title": "Test Site",
+        "max_upload_mb": 5,
+        "nova_api_key_set": False,
+        "default_style": {},
+        "locked": [],
     }
     fonts = client.get("/api/fonts").json()
     assert len(fonts) == 24
@@ -104,10 +117,46 @@ def test_upload_too_large_is_refused_before_the_body_is_read(
 
     monkeypatch.setattr("app.api.images._copy_limited", body_was_read)
     with make_client(settings, lambda: None) as client, noisy.open("rb") as fh:
+        login(client)
         resp = client.post("/api/images", files={"file": ("noise.png", fh, "image/png")})
     assert resp.status_code == 413
     assert resp.json() == {"detail": "File is larger than the 1 MB upload limit."}
     assert list(settings.uploads_dir.iterdir()) == []
+
+
+def test_anonymous_upload_is_refused_before_the_body_is_parsed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not signed in comes before too large: an anonymous caller must not get their body
+    spooled, nor learn the site's upload limit from a 413."""
+    settings = make_settings(tmp_path, max_upload_mb=1)
+    noisy = _noisy_png(tmp_path)
+
+    def body_was_read(*args: object) -> int:
+        raise AssertionError("an anonymous upload body was spooled")
+
+    monkeypatch.setattr("app.api.images._copy_limited", body_was_read)
+    with make_client(settings, lambda: None) as client, noisy.open("rb") as fh:
+        resp = client.post("/api/images", files={"file": ("noise.png", fh, "image/png")})
+    assert resp.status_code == 401
+    assert resp.headers["content-type"] == "application/json"
+    assert resp.json() == {"detail": "Sign in to continue."}
+    assert list(settings.uploads_dir.iterdir()) == []
+
+
+def test_anonymous_oversized_upload_is_a_401_not_a_413(
+    anon_client: TestClient, client: TestClient
+) -> None:
+    headers = {
+        "content-length": str(50 * 1024 * 1024),
+        "content-type": "multipart/form-data; boundary=astrocaption",
+    }
+    resp = anon_client.post("/api/images", content=b"x", headers=headers)
+    assert resp.status_code == 401 and resp.json() == {"detail": "Sign in to continue."}
+    assert "MB" not in resp.text  # the upload limit is not public
+    # The same declared length from the owner still trips the size guard, which is what
+    # proves the header reached the middleware in the anonymous case above.
+    assert client.post("/api/images", content=b"x", headers=headers).status_code == 413
 
 
 def test_upload_too_large_without_content_length_is_refused_after_the_cap(
@@ -132,6 +181,7 @@ def test_upload_too_large_without_content_length_is_refused_after_the_cap(
         yield tail
 
     with make_client(settings, lambda: None) as client:
+        login(client)
         resp = client.post(
             "/api/images",
             content=chunks(),
@@ -152,6 +202,7 @@ def test_narrow_field_hides_hd_stars_but_lists_them(tmp_path: Path) -> None:
     pelican = write_test_image(tmp_path / "pelican.jpg", 2160, 2880)
     solver = FakeSolver(nova_result(NOVA_NARROW_FIXTURES))
     with make_client(settings, lambda: solver) as client:
+        login(client)
         image_id = upload(client, pelican)["id"]
         solved = wait_for_status(client, image_id, {"solved", "failed"})
         assert solved["solve_status"] == "solved", solved["solve_error"]
@@ -232,6 +283,7 @@ def test_export_and_resolve_conflict_while_solving(tmp_path: Path, sample_jpeg: 
     settings = make_settings(tmp_path)
     stuck = FakeSolver(submission_polls=10**9)
     with make_client(settings, lambda: stuck) as client:
+        login(client)
         body = upload(client, sample_jpeg)
         image_id = body["id"]
         assert client.post(f"/api/images/{image_id}/export").status_code == 409
@@ -245,6 +297,7 @@ def test_failed_solve_then_resolve_with_hints(tmp_path: Path, sample_jpeg: Path)
     settings = make_settings(tmp_path)
     solver = FakeSolver(fail=True)
     with make_client(settings, lambda: solver) as client:
+        login(client)
         body = upload(client, sample_jpeg)
         failed = wait_for_status(client, body["id"], {"solved", "failed"})
         assert failed["solve_status"] == "failed"
@@ -265,6 +318,7 @@ def test_failed_solve_then_resolve_with_hints(tmp_path: Path, sample_jpeg: Path)
 def test_missing_key_gives_guidance(tmp_path: Path, sample_jpeg: Path) -> None:
     settings = make_settings(tmp_path)
     with make_client(settings, lambda: None) as client:
+        login(client)
         body = upload(client, sample_jpeg)
         failed = wait_for_status(client, body["id"], {"solved", "failed"})
         assert failed["solve_status"] == "failed" and "NOVA_API_KEY" in failed["solve_error"]
@@ -338,10 +392,20 @@ def test_resolve_persists_hints_on_the_row(
 
 def test_health_reflects_a_key_added_after_start(env_client: tuple[TestClient, Path]) -> None:
     client, data_dir = env_client
-    assert client.get("/api/health").json()["nova_api_key_set"] is False
-    (data_dir / "config.json").write_text('{"nova_api_key": "k"}')
-    assert client.get("/api/health").json()["nova_api_key_set"] is True
-    assert client.get("/api/health").json()["nova_api_key_set"] is True
+    assert client.get("/api/health").json()["setup_required"] is True
+    assert client.get("/api/config").status_code == 401
+    (data_dir / "config.json").write_text(
+        json.dumps({"password_hash": TEST_PASSWORD_HASH, "session_secret": "s"})
+    )
+    assert client.get("/api/health").json()["setup_required"] is False
+    login(client)
+    assert client.get("/api/config").json()["nova_api_key_set"] is False
+    (data_dir / "config.json").write_text(
+        json.dumps(
+            {"password_hash": TEST_PASSWORD_HASH, "session_secret": "s", "nova_api_key": "k"}
+        )
+    )
+    assert client.get("/api/config").json()["nova_api_key_set"] is True
 
 
 def test_truncated_jpeg_is_rejected_cleanly(
@@ -368,6 +432,7 @@ def test_upload_files_are_removed_when_the_row_cannot_be_written(
     monkeypatch.setattr(Database, "insert_image", boom)
     app = create_app(settings, solver_factory=lambda: None, poll_interval=0.01)
     with TestClient(app, raise_server_exceptions=False) as client, sample_jpeg.open("rb") as fh:
+        login(client)
         resp = client.post("/api/images", files={"file": ("orion.jpg", fh, "image/jpeg")})
         assert resp.status_code == 500
         assert list(settings.uploads_dir.iterdir()) == []
@@ -377,8 +442,16 @@ def test_health_reports_a_broken_config_file(env_client: tuple[TestClient, Path]
     client, data_dir = env_client
     (data_dir / "config.json").write_text('{"nova_api_key": "k",')
     body = client.get("/api/health").json()
-    assert body["nova_api_key_set"] is False
-    assert body["config_error"] and "not valid JSON" in body["config_error"]
-    (data_dir / "config.json").write_text('{"nova_api_key": "k"}')
+    assert body["setup_required"] is False and body["authenticated"] is False
+    assert body["config_error"] == "config.json is not valid JSON; fix or remove it and restart"
+    # No raw exception text and no server path reaches the page (CLAUDE.md).
+    assert "line 1" not in body["config_error"] and str(data_dir) not in body["config_error"]
+    broken = client.post("/api/setup", json={"password": "hunter2hunter2"})
+    assert broken.status_code == 409 and broken.json() == {"detail": body["config_error"]}
+    (data_dir / "config.json").write_text(
+        json.dumps(
+            {"password_hash": TEST_PASSWORD_HASH, "session_secret": "s", "nova_api_key": "k"}
+        )
+    )
     body = client.get("/api/health").json()
-    assert body["nova_api_key_set"] is True and body["config_error"] is None
+    assert body["setup_required"] is False and body["config_error"] is None

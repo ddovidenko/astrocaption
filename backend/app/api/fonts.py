@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from ..fonts import list_fonts
 from ..models import FontOut
-from .deps import SettingsDep
+from .deps import SettingsDep, require_owner
 
-router = APIRouter(prefix="/api", tags=["fonts"])
+router = APIRouter(prefix="/api", tags=["fonts"], dependencies=[Depends(require_owner)])
 
 
 @router.get("/fonts")

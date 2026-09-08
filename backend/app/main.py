@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import mimetypes
+import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .api import fonts, health, images
+from .api import auth, config, docs, fonts, health, images
+from .auth import MIN_PASSWORD_LENGTH, LoginLimiter, perform_setup
 from .config import Settings, SettingsSource
 from .db import Database
 from .solver import Solver
@@ -33,6 +37,7 @@ def create_app(
     solver_factory: Callable[[], Solver | None] | None = None,
     poll_interval: float = 5.0,
     solve_timeout: float = 15 * 60,
+    setup_password: str | None = None,
 ) -> FastAPI:
     source = SettingsSource(settings)  # config.json values stay live; paths are fixed
     cfg = source.current()
@@ -59,6 +64,7 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         nonlocal http_client
         cfg.ensure_dirs()
+        _headless_setup(source, setup_password)
         db.init()
         http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(30.0, read=300.0, write=300.0), follow_redirects=True
@@ -78,16 +84,23 @@ def create_app(
         title="AstroCaption",
         version=__version__,
         lifespan=lifespan,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        docs_url=None,
+        openapi_url=None,
         redoc_url=None,
     )
     app.state.settings_source = source
     app.state.db = db
     app.state.worker = worker
-    app.add_middleware(images.UploadSizeGuard, settings_source=source)
+    app.state.login_limiter = LoginLimiter()
+    app.state.setup_lock = asyncio.Lock()  # one first-run setup at a time (SPEC § 5.1)
+    app.add_middleware(images.UploadGuard, settings_source=source)
+
+    app.add_exception_handler(RequestValidationError, plain_validation_error)  # type: ignore[arg-type]
 
     app.include_router(health.router)
+    app.include_router(auth.router)
+    app.include_router(config.router)
+    app.include_router(docs.router)
     app.include_router(fonts.router)
     app.include_router(images.router)
 
@@ -95,6 +108,64 @@ def create_app(
         app.mount("/fonts", StaticFiles(directory=cfg.fonts_dir), name="fonts")
     _mount_spa(app, cfg.static_dir)
     return app
+
+
+async def plain_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+    """Plain-language 422s: the default FastAPI body echoes the submitted value (a
+    password, here) in ``input`` and returns a list. Neither belongs in a response."""
+    labels: list[str] = []
+    messages: list[str] = []
+    for error in exc.errors():
+        # loc holds ints too (a byte offset for a bad body, an index in a list), and
+        # its first element is the source; neither names anything a user would type.
+        named = [
+            part
+            for part in error.get("loc", ())
+            if isinstance(part, str) and part not in {"body", "query", "path"}
+        ]
+        label = ".".join(named) or "request"
+        labels.append(label)
+        msg = (
+            "the body is not valid JSON"
+            if error.get("type") == "json_invalid"
+            else str(error.get("msg", "is not valid"))
+        )
+        messages.append(f"{label}: {msg}")
+    log.info("request validation failed: %s", ", ".join(labels) or "request")
+    detail = "; ".join(messages) or "Invalid request."
+    return JSONResponse({"detail": detail}, status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
+
+
+def _headless_setup(source: SettingsSource, password: str | None) -> None:
+    """``ASTROCAPTION_PASSWORD``: complete first-run setup without the browser (SPEC § 11).
+
+    Unset and empty mean the same thing: nothing to do.
+    """
+    if not password:
+        return
+    current = source.current()
+    if current.config_error is not None:
+        log.error(
+            "ASTROCAPTION_PASSWORD ignored: %s cannot be read (%s); fix or remove it and "
+            "restart to run setup",
+            current.config_path.name,
+            current.config_error,
+        )
+        return
+    if not current.setup_required:
+        log.info(
+            "ASTROCAPTION_PASSWORD ignored: an owner password is already set; remove the "
+            "variable, see docs/INSTALL.md to reset the password"
+        )
+        return
+    if len(password) < MIN_PASSWORD_LENGTH:
+        log.error(
+            "ASTROCAPTION_PASSWORD ignored: shorter than %d characters; open /setup instead",
+            MIN_PASSWORD_LENGTH,
+        )
+        return
+    perform_setup(current, password)
+    log.info("owner password set from ASTROCAPTION_PASSWORD")
 
 
 def _mount_spa(app: FastAPI, static_dir: Path) -> None:
@@ -114,4 +185,4 @@ def _mount_spa(app: FastAPI, static_dir: Path) -> None:
         return FileResponse(index)
 
 
-app = create_app()
+app = create_app(setup_password=os.environ.get("ASTROCAPTION_PASSWORD"))

@@ -395,8 +395,34 @@ class FontOut(BaseModel):
 
 
 class HealthOut(BaseModel):
+    """Public: safe for the Docker healthcheck and the logged-out page."""
+
     status: Literal["ok"] = "ok"
     version: str
     site_title: str
-    nova_api_key_set: bool
+    setup_required: bool
+    authenticated: bool
     config_error: str | None = None
+    locked: list[str] = []  # field names pinned by environment variables, never their values
+
+
+class ConfigOut(BaseModel):
+    """Owner-facing settings. The nova key is write-only: only its presence is reported."""
+
+    site_title: str
+    max_upload_mb: int
+    nova_api_key_set: bool
+    default_style: dict[str, object]
+    locked: list[str]  # fields pinned by environment variables
+
+
+# A custom ``@field_validator`` message is echoed verbatim by the 422 handler in main.py,
+# so it must describe the rule and never include the submitted value (a password, here).
+class SetupRequest(BaseModel):
+    password: str = Field(max_length=1024)
+    nova_api_key: str | None = Field(default=None, max_length=200)
+    site_title: str | None = Field(default=None, max_length=200)
+
+
+class LoginRequest(BaseModel):
+    password: str = Field(max_length=1024)

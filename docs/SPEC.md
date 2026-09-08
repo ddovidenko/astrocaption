@@ -58,6 +58,15 @@ No multi-user, no roles, no invites in v1.
    (optional here, can be set later), site title. Submit.
 4. App writes `config.json` (password hash, random session secret, key, title) and redirects to login.
 5. `/setup` returns 404 forever after.
+6. Headless installs set `ASTROCAPTION_PASSWORD` instead: at startup, when `config.json` has no
+   password hash, the app performs step 4 with that password. The variable is read once and never stored.
+7. A `config.json` that exists but cannot be parsed is **not** "not set up": setup stays closed
+   (`POST /setup` answers 409), login is refused, and `/api/health` carries `config_error` so the owner can
+   fix or delete the file. `config_error` is a fixed plain sentence ("config.json is not valid JSON; fix or
+   remove it and restart"); the parser's reason and the file's path go to the server log only.
+8. A `config.json` holding only one of `password_hash`/`session_secret` cannot authenticate anybody, so it
+   reopens setup; setup writes both halves fresh and merges them into whatever else the file holds.
+   Concurrent setup submissions are serialised: the first wins, the rest get the 404 of step 5.
 
 ### 5.2 Upload & solve
 
@@ -218,8 +227,13 @@ Public:
 - `GET /images/{id}/public` → same for one image, 404 if unpublished
 
 Owner (cookie session):
-- `POST /setup`, `POST /login`, `POST /logout`
-- `GET/PUT /config` (key is write-only: response shows `nova_api_key_set: true`)
+- `POST /setup` {password, nova_api_key?, site_title?} → 404 once set up; `POST /login` {password} → sets the
+  cookie, 401 on a wrong password, 429 with `Retry-After` during the cooldown; `POST /logout` clears it.
+  Logged-out calls to any owner route get 401 with a plain message.
+- `GET/PUT /config` → {site_title, max_upload_mb, nova_api_key_set, default_style, locked}. The key is
+  write-only (`nova_api_key: null` in a PUT clears it, absent keeps it). `default_style` is validated against
+  the style model and the bundled fonts. `locked` lists the fields set by environment variables; a PUT that
+  changes one is rejected with a plain message.
 - `POST /images` (multipart) → id, starts solve
 - `GET /images`, `GET /images/{id}`, `DELETE /images/{id}`
 - `POST /images/{id}/solve` (re-solve, optional scale hints)
@@ -230,12 +244,16 @@ Owner (cookie session):
   `quality: null` (the default) reuses the source JPEG's quantisation tables (§ 5.4). `GET /images/{id}/export` → file
 - `GET /images/{id}/files/{original|preview|thumb|annotated-preview}` → the file itself
 - `GET /fonts` → list of bundled fonts {file, family, weight, sample}; the files are served at `/fonts/<file>`
-- `GET /health` → {status, version, site_title, nova_api_key_set, config_error}; `config_error` explains an
-  unreadable `config.json`. Image payloads carry `original_format` (JPEG/PNG/TIFF) and the nova status/job-log URLs.
+- `GET /health` (public, used by the Docker healthcheck) → {status, version, site_title, setup_required,
+  authenticated, config_error, locked}; `config_error` is a fixed plain sentence about an unreadable
+  `config.json` (details in the server log) and `locked` lists the field names pinned by environment
+  variables, never their values, so the setup page can disable those inputs. Everything owner-facing
+  (`nova_api_key_set`) lives in `GET /config`. Image payloads carry `original_format` (JPEG/PNG/TIFF) and the
+  nova status/job-log URLs.
 
-*M1 note:* milestone 1 ships upload, list/get/delete, solve, objects, `GET` annotations, export and files
-without authentication; `PUT annotations` and `autoarrange` arrive with the editor in milestone 3, the
-session-cookie gate with milestone 2.
+Public besides the two gallery routes: `/api/health`, the font files under `/fonts/`, and the SPA shell.
+
+*M1 note:* `PUT annotations` and `autoarrange` arrive with the editor in milestone 3.
 
 ## 9. Fonts
 
@@ -247,12 +265,22 @@ renders "NGC 1976" in each and compares bounding boxes within 1 px at 100 px siz
 
 ## 10. Auth & lockout
 
-- Single owner. bcrypt hash, cost 12. Session cookie: HttpOnly, SameSite=Lax, Secure when behind HTTPS (`TRUST_PROXY=1`).
-- Rate limit login: 5 failures → 60 s cooldown, in-memory.
+- Single owner. Password hashed with the standard library's `hashlib.scrypt` (n=2^15, r=8, p=1, random
+  32-byte salt), stored in `config.json` as `scrypt$n$r$p$salt$digest`; no bcrypt dependency.
+- Session cookie `astrocaption_session`: HttpOnly, SameSite=Lax, Secure when behind HTTPS (`TRUST_PROXY=1`),
+  30 days. The value is a stateless HMAC-SHA256 token (keyed by `session_secret` from `config.json`) over
+  the issue time and a fingerprint of the password hash, so a password reset invalidates every session
+  without a session table. SameSite=Lax plus JSON request bodies is the CSRF protection; there is no token.
+- Rate limit login: 5 failures → 60 s cooldown, in-memory and global (one owner; per-IP is meaningless
+  behind a proxy). A failed sign-in and the start of a cooldown are logged (never the password).
+- `POST /logout` is client-side only: the design is stateless, so it clears the cookie and nothing more.
+  A token captured before logout stays valid until it expires (30 days) or the password changes, which
+  re-keys every token. That is the trade for having no session table.
 - Lockout recovery (`docs/LOCKOUT.md`): `docker compose exec app python -m app.cli reset-password`
   prompts for a new password and rewrites the hash in `config.json`. Also documents deleting
   `config.json` to re-run setup while keeping images (images are not tied to the password).
-- Setup route is only reachable when `config.json` is absent.
+- Setup route is only reachable when `config.json` has no password hash (absent file, or a file with only
+  a key/title). Changing the password is done with the CLI, not from the config page.
 
 ## 11. Docker & distribution
 
@@ -298,7 +326,7 @@ Public repo. Using GitHub Pro where useful:
 Build in this order; each is shippable.
 
 1. **Solve & render (CLI parity)** — backend upload, nova solve, objects stored, Pillow export with auto-placement. No editor yet; a plain page shows the export. Docker image builds. *Proves the core.* **Done 2026-09-07.**
-2. **Setup & auth** — first-run setup, login, config page, lockout CLI, INSTALL.md.
+2. **Setup & auth** — first-run setup, login, config page, lockout CLI, INSTALL.md, browser smoke test in CI. *Design approved 2026-09-08.*
 3. **Editor v1** — canvas with zoom/pan, object list with checkboxes, hover/click to enable, drag labels, autosave, export button. Parity test between Konva and Pillow.
 4. **Styling** — fonts, colours, halo, per-label overrides, wheel-to-resize while dragging, undo/redo.
 5. **Gallery** — publish toggle, public gallery with hover overlay, responsive.

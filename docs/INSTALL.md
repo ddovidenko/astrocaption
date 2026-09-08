@@ -1,7 +1,7 @@
 # Installing AstroCaption
 
-> Status: milestone 1. Upload, solve and export work; **there is no login yet** (milestone 2).
-> Run it on a private network or behind your own authentication until then.
+> Status: milestone 2. Upload, solve, export and the owner login work; the config page and the
+> lockout CLI follow in this milestone.
 
 ## Requirements
 
@@ -21,6 +21,30 @@ live in `./data` on the host; back that directory up and nothing else.
 
 `make up` is the same as the last command when you have `make` installed.
 
+## First run
+
+The first visit to <http://localhost:8080> shows the setup page: choose the owner password
+(at least 8 characters), optionally paste the nova API key and a site title. An input whose
+value is already pinned by an environment variable (`NOVA_API_KEY`, `ASTROCAPTION_SITE_TITLE`)
+is shown disabled and marked "set by the environment": the variable wins either way, so there
+is nothing to type. That writes
+`data/config.json` (password hash, a random session secret, the key, the title) with owner-only
+permissions and sends you to the sign-in page. Setup is closed from then on.
+
+Until setup is completed, anyone who can reach the port can claim the site. Finish setup right
+after the first start, or set `ASTROCAPTION_PASSWORD` when the port is reachable from anywhere
+you don't trust.
+
+Headless installs set `ASTROCAPTION_PASSWORD` instead: on start, if no password has been set
+yet, the app performs setup with it. The variable is read once, so you can remove it afterwards.
+Passwords shorter than 8 characters are ignored with a log line.
+
+Sign-ins are rate-limited (five wrong passwords → 60 seconds). Forgot the password: stop the
+container, delete the `password_hash` line from `data/config.json` (or the whole file, which
+also drops the key and title), start it again and the setup page returns; images and the
+database are untouched. A `reset-password` command and `docs/LOCKOUT.md` arrive later in this
+milestone.
+
 ## Configuration
 
 | Setting | Where | Default |
@@ -30,8 +54,17 @@ live in `./data` on the host; back that directory up and nothing else.
 | Site title | `ASTROCAPTION_SITE_TITLE` env, or `"site_title"` | AstroCaption |
 | Data directory | `ASTROCAPTION_DATA_DIR` env | `/data` in the container |
 | Default label style | `"default_style"` object in `data/config.json` | size-relative defaults |
+| Owner password | setup page, or `ASTROCAPTION_PASSWORD` env at first start | required |
+| Secure cookies | `TRUST_PROXY=1` env when the app is served over HTTPS by a proxy | off |
 
-A minimal `data/config.json`:
+Values set by environment variables win over `data/config.json`; the config page (PR 2) shows
+them read-only.
+
+`data/config.json` is created by the app (uid 1000 inside the container) with owner-only
+permissions (0600); editing it directly on the host may need `sudo`.
+
+Setup adds `password_hash` and `session_secret` to this file; leave those two alone. A minimal
+`data/config.json`:
 
 ```json
 {
@@ -49,8 +82,8 @@ then common names) or `ngc_ic` (NGC and IC designations first). Stars show their
 first, then the Bayer letter, then the Flamsteed number. Other names appear on the alias line.
 
 The file is re-read whenever it changes, so every setting in it is live without a restart, and
-`/api/health` reports the key state and any parse error in the file. It is never
-logged and never returned by the API (`/api/health` only reports whether one is set).
+`/api/health` reports any parse error in the file. The key itself is never logged and never
+returned by the API; `GET /api/config` (owner-only) reports only whether one is set.
 
 ## Data directory layout
 
@@ -93,7 +126,11 @@ server {
 }
 ```
 
-`TRUST_PROXY=1` (secure cookies) becomes relevant with the login in milestone 2.
+Set `TRUST_PROXY=1` in `compose.yml` once the proxy terminates HTTPS, so the session cookie is
+marked Secure. A `Secure` cookie is only kept by the browser over https: with `TRUST_PROXY=1`
+set, signing in over plain http (the LAN address, or `http://localhost:8080` straight at the
+container) succeeds and then immediately looks signed out, because the browser discarded the
+cookie. Reach the site over https, or leave the variable unset until the proxy is in place.
 
 ## Running from source (development)
 

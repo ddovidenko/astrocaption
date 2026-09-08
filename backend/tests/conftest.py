@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
+from app.auth import hash_password
 from app.config import REPO_ROOT, Settings
 from app.db import Database
 from app.main import create_app
@@ -22,6 +23,10 @@ from app.worker import SolveWorker
 FONTS_DIR = REPO_ROOT / "fonts"
 NOVA_FIXTURES = Path(__file__).parent / "fixtures" / "nova"  # 3.9° Orion field, no hd
 NOVA_NARROW_FIXTURES = Path(__file__).parent / "fixtures" / "nova-narrow"  # 1° Pelican, hd
+
+TEST_PASSWORD = "correct horse battery"
+TEST_PASSWORD_HASH = hash_password(TEST_PASSWORD)  # once per session; scrypt is deliberately slow
+TEST_SESSION_SECRET = "test-session-secret"
 
 
 def load_fixture(name: str, fixtures_dir: Path = NOVA_FIXTURES) -> Any:
@@ -48,6 +53,8 @@ def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
         "site_title": "Test Site",
         "nova_base_url": "https://nova.example.test",
         "default_style": {},
+        "password_hash": TEST_PASSWORD_HASH,
+        "session_secret": TEST_SESSION_SECRET,
     }
     values.update(overrides)
     return Settings(**values)
@@ -130,8 +137,22 @@ def make_client(settings: Settings, solver_factory: Callable[[], Solver | None])
     return TestClient(app)
 
 
+def login(client: TestClient, password: str = TEST_PASSWORD) -> None:
+    resp = client.post("/api/login", json={"password": password})
+    assert resp.status_code == 204, resp.text
+
+
 @pytest.fixture
 def client(settings: Settings, fake_solver: FakeSolver) -> Iterator[TestClient]:
+    """Logged-in owner."""
+    with make_client(settings, lambda: fake_solver) as c:
+        login(c)
+        yield c
+
+
+@pytest.fixture
+def anon_client(settings: Settings, fake_solver: FakeSolver) -> Iterator[TestClient]:
+    """Same app, no session cookie."""
     with make_client(settings, lambda: fake_solver) as c:
         yield c
 
@@ -194,16 +215,33 @@ def make_worker(
     return SolveWorker(db, settings, lambda: solver, **kwargs)
 
 
+ENV_ISOLATED = ("NOVA_API_KEY", "ASTROMETRY_API_KEY", "ASTROCAPTION_SITE_TITLE", "TRUST_PROXY")
+
+
+def env_app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **env: str) -> TestClient:
+    """An app configured from the environment, so config.json in ``tmp_path/data`` is live.
+
+    Starts with no config.json (setup required). The developer's own shell variables are
+    cleared so every test sees the same environment; ``env`` sets the ones a test needs.
+    """
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(exist_ok=True)
+    monkeypatch.setenv("ASTROCAPTION_DATA_DIR", str(data_dir))
+    for name in ENV_ISOLATED:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    app = create_app(
+        solver_factory=lambda: None,
+        poll_interval=0.01,
+        setup_password=env.get("ASTROCAPTION_PASSWORD"),
+    )
+    return TestClient(app)
+
+
 @pytest.fixture
 def env_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[tuple[TestClient, Path]]:
-    """An app configured from the environment, so config.json in ``data_dir`` is live."""
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
-    monkeypatch.setenv("ASTROCAPTION_DATA_DIR", str(data_dir))
-    monkeypatch.delenv("NOVA_API_KEY", raising=False)
-    monkeypatch.delenv("ASTROMETRY_API_KEY", raising=False)
-    app = create_app(solver_factory=lambda: None, poll_interval=0.01)
-    with TestClient(app) as client:
-        yield client, data_dir
+    with env_app_client(tmp_path, monkeypatch) as client:
+        yield client, tmp_path / "data"
