@@ -1,7 +1,7 @@
 # Installing AstroCaption
 
-> Status: milestone 2. Upload, solve, export and the owner login work; the config page and the
-> lockout CLI follow in this milestone.
+> Status: milestone 2. Upload, solve, export, the owner login and the config page work; the
+> lockout CLI follows in this milestone.
 
 ## Requirements
 
@@ -49,15 +49,15 @@ milestone.
 
 | Setting | Where | Default |
 |---|---|---|
-| nova API key | `NOVA_API_KEY` env (alias: `ASTROMETRY_API_KEY`), or `"nova_api_key"` in `data/config.json` | unset (solves fail with a hint) |
-| Upload limit | `ASTROCAPTION_MAX_UPLOAD_MB` env, or `"max_upload_mb"` | 60 (and 300 megapixels) |
-| Site title | `ASTROCAPTION_SITE_TITLE` env, or `"site_title"` | AstroCaption |
+| nova API key | `NOVA_API_KEY` env (alias: `ASTROMETRY_API_KEY`), or `"nova_api_key"` in `data/config.json`, or the config page | unset (solves fail with a hint) |
+| Upload limit | `ASTROCAPTION_MAX_UPLOAD_MB` env, or `"max_upload_mb"`, or the config page | 60 (and 300 megapixels) |
+| Site title | `ASTROCAPTION_SITE_TITLE` env, or `"site_title"`, or the config page | AstroCaption |
 | Data directory | `ASTROCAPTION_DATA_DIR` env | `/data` in the container |
-| Default label style | `"default_style"` object in `data/config.json` | size-relative defaults |
+| Default label style | `"default_style"` object in `data/config.json`, or the config page | size-relative defaults |
 | Owner password | setup page, or `ASTROCAPTION_PASSWORD` env at first start | required |
 | Secure cookies | `TRUST_PROXY=1` env when the app is served over HTTPS by a proxy | off |
 
-Values set by environment variables win over `data/config.json`; the config page (PR 2) shows
+Values set by environment variables win over `data/config.json`; the config page shows
 them read-only.
 
 `data/config.json` is created by the app (uid 1000 inside the container) with owner-only
@@ -80,6 +80,7 @@ applies to newly solved images. `name_preference` picks the label's primary line
 (Messier, Caldwell, Sharpless and Barnard first, then NGC, then IC, then other catalogues,
 then common names) or `ngc_ic` (NGC and IC designations first). Stars show their proper name
 first, then the Bayer letter, then the Flamsteed number. Other names appear on the alias line.
+The config page edits the same object; blank fields keep the size-relative defaults.
 
 The file is re-read whenever it changes, so every setting in it is live without a restart, and
 `/api/health` reports any parse error in the file. The key itself is never logged and never

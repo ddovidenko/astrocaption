@@ -230,10 +230,13 @@ Owner (cookie session):
 - `POST /setup` {password, nova_api_key?, site_title?} → 404 once set up; `POST /login` {password} → sets the
   cookie, 401 on a wrong password, 429 with `Retry-After` during the cooldown; `POST /logout` clears it.
   Logged-out calls to any owner route get 401 with a plain message.
-- `GET/PUT /config` → {site_title, max_upload_mb, nova_api_key_set, default_style, locked}. The key is
-  write-only (`nova_api_key: null` in a PUT clears it, absent keeps it). `default_style` is validated against
-  the style model and the bundled fonts. `locked` lists the fields set by environment variables; a PUT that
-  changes one is rejected with a plain message.
+- `GET/PUT /config` → {site_title, max_upload_mb, nova_api_key_set, default_style, style_defaults, locked}. `PUT`
+  is partial: absent fields are kept, `nova_api_key: null` clears the key, `default_style` replaces the owner's
+  override set (only the fields they chose; blank ones keep the size-relative defaults) and is validated against
+  the style model and the bundled fonts. `locked` lists the fields pinned by environment variables; a `PUT` that
+  touches one is rejected with a plain message naming the variable. `style_defaults` carries the built-in
+  font, colours, booleans and name preference for fields without an override. Writes go through the atomic
+  config.json writer and the running app re-reads the file immediately.
 - `POST /images` (multipart) → id, starts solve
 - `GET /images`, `GET /images/{id}`, `DELETE /images/{id}`
 - `POST /images/{id}/solve` (re-solve, optional scale hints)
