@@ -152,6 +152,32 @@ def test_headless_setup_ignores_a_short_password(
     assert "ASTROCAPTION_PASSWORD" in caplog.text and "abc" not in caplog.text
 
 
+def test_validation_errors_are_plain_language_without_input_echo(anon_client: TestClient) -> None:
+    long_password = "x" * 2000
+    resp = anon_client.post("/api/login", json={"password": long_password})
+    assert resp.status_code == 422
+    assert long_password not in resp.text
+    body = resp.json()
+    assert isinstance(body["detail"], str)
+    assert "password" in body["detail"]
+
+    resp2 = anon_client.post("/api/setup", json={})
+    assert resp2.status_code == 422
+    body2 = resp2.json()
+    assert isinstance(body2["detail"], str)
+    assert "password" in body2["detail"]
+
+
+def test_headless_setup_ignores_an_empty_password(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unset ``ASTROCAPTION_PASSWORD`` in compose.yml expands to "", not the variable's
+    absence; that must behave exactly like the variable being unset, with no log line."""
+    with fresh_app_client(tmp_path, monkeypatch, ASTROCAPTION_PASSWORD="") as client:
+        assert client.get("/api/health").json()["setup_required"] is True
+    assert "ASTROCAPTION_PASSWORD" not in caplog.text
+
+
 def test_login_cooldown_after_five_failures(anon_client: TestClient) -> None:
     for _ in range(5):
         assert anon_client.post("/api/login", json={"password": "nope"}).status_code == 401

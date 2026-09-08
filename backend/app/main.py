@@ -10,8 +10,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
@@ -93,6 +94,14 @@ def create_app(
     app.state.login_limiter = LoginLimiter()
     app.add_middleware(images.UploadSizeGuard, settings_source=source)
 
+    @app.exception_handler(RequestValidationError)
+    async def _plain_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+        """Plain-language 422s: the default FastAPI body echoes the submitted value (a
+        password, here) in ``input`` and returns a list. Neither belongs in a response."""
+        messages = [f"{error['loc'][-1]}: {error['msg']}" for error in exc.errors()]
+        detail = "; ".join(messages) or "Invalid request."
+        return JSONResponse({"detail": detail}, status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
+
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(config.router)
@@ -108,7 +117,17 @@ def create_app(
 
 def _headless_setup(source: SettingsSource, password: str) -> None:
     """``ASTROCAPTION_PASSWORD``: complete first-run setup without the browser (SPEC § 11)."""
+    if not password:  # belt and braces: the module-level app already normalises "" to None
+        return
     current = source.current()
+    if current.config_error is not None:
+        log.error(
+            "ASTROCAPTION_PASSWORD ignored: %s cannot be read (%s); fix or remove it and "
+            "restart to run setup",
+            current.config_path.name,
+            current.config_error,
+        )
+        return
     if not current.setup_required:
         return
     if len(password) < MIN_PASSWORD_LENGTH:
@@ -138,4 +157,4 @@ def _mount_spa(app: FastAPI, static_dir: Path) -> None:
         return FileResponse(index)
 
 
-app = create_app(setup_password=os.environ.get("ASTROCAPTION_PASSWORD"))
+app = create_app(setup_password=os.environ.get("ASTROCAPTION_PASSWORD") or None)

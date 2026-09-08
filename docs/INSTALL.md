@@ -28,12 +28,19 @@ The first visit to <http://localhost:8080> shows the setup page: choose the owne
 `data/config.json` (password hash, a random session secret, the key, the title) with owner-only
 permissions and sends you to the sign-in page. Setup is closed from then on.
 
+Until setup is completed, anyone who can reach the port can claim the site. Finish setup right
+after the first start, or set `ASTROCAPTION_PASSWORD` when the port is reachable from anywhere
+you don't trust.
+
 Headless installs set `ASTROCAPTION_PASSWORD` instead: on start, if no password has been set
 yet, the app performs setup with it. The variable is read once, so you can remove it afterwards.
 Passwords shorter than 8 characters are ignored with a log line.
 
-Sign-ins are rate-limited (five wrong passwords → 60 seconds). Forgot the password: see
-`docs/LOCKOUT.md` (arrives with the reset CLI in this milestone).
+Sign-ins are rate-limited (five wrong passwords → 60 seconds). Forgot the password: stop the
+container, delete the `password_hash` line from `data/config.json` (or the whole file, which
+also drops the key and title), start it again and the setup page returns; images and the
+database are untouched. A `reset-password` command and `docs/LOCKOUT.md` arrive later in this
+milestone.
 
 ## Configuration
 
@@ -49,6 +56,9 @@ Sign-ins are rate-limited (five wrong passwords → 60 seconds). Forgot the pass
 
 Values set by environment variables win over `data/config.json`; the config page (PR 2) shows
 them read-only.
+
+`data/config.json` is created by the app (uid 1000 inside the container) with owner-only
+permissions (0600); editing it directly on the host may need `sudo`.
 
 Setup adds `password_hash` and `session_secret` to this file; leave those two alone. A minimal
 `data/config.json`:

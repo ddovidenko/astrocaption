@@ -139,13 +139,18 @@ def perform_setup(
     nova_api_key: str | None = None,
     site_title: str | None = None,
 ) -> None:
-    """Write the owner password hash and a fresh session secret (SPEC § 5.1 step 4)."""
+    """Write the owner password hash and a fresh session secret (SPEC § 5.1 step 4).
+
+    ``nova_api_key``/``site_title`` are skipped when ``settings.env_locked`` already pins
+    them: the environment variable wins regardless, so writing the form value would only
+    park a stale one in config.json that never takes effect.
+    """
     updates: dict[str, object | None] = {
         "password_hash": hash_password(password),
         "session_secret": secrets.token_urlsafe(32),
     }
-    if nova_api_key and nova_api_key.strip():
+    if nova_api_key and nova_api_key.strip() and "nova_api_key" not in settings.env_locked:
         updates["nova_api_key"] = nova_api_key.strip()
-    if site_title and site_title.strip():
+    if site_title and site_title.strip() and "site_title" not in settings.env_locked:
         updates["site_title"] = site_title.strip()
     update_config(settings.config_path, updates)

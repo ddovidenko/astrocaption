@@ -75,3 +75,12 @@ def test_perform_setup_writes_hash_secret_and_optional_fields(tmp_path: Path) ->
     assert after.nova_api_key == "key" and after.site_title == "AstroCaption"
     written = json.loads((tmp_path / "config.json").read_text())
     assert "site_title" not in written and "password" not in written
+
+
+def test_perform_setup_skips_env_locked_fields(tmp_path: Path) -> None:
+    before = load_settings(env_for(tmp_path, NOVA_API_KEY="from-env"))
+    assert before.env_locked == {"nova_api_key"}
+    perform_setup(before, "hunter2hunter2", nova_api_key="typed-key", site_title="My Sky")
+    written = json.loads((tmp_path / "config.json").read_text())
+    assert "nova_api_key" not in written
+    assert written["site_title"] == "My Sky"

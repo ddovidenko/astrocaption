@@ -13,4 +13,6 @@ services:
     environment:
       - TRUST_PROXY=0
       - NOVA_API_KEY=${NOVA_API_KEY:-${ASTROMETRY_API_KEY:-}}
+      # headless first run (optional); read once, see docs/INSTALL.md
+      - ASTROCAPTION_PASSWORD=${ASTROCAPTION_PASSWORD:-}
     restart: unless-stopped

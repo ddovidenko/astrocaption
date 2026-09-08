@@ -10,9 +10,14 @@ export default function SetupPage({ health, onDone }: { health: HealthOut; onDon
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+  // Set the instant api.setup() resolves, before health is refreshed. Without it, the
+  // "already set up" branch below renders for one frame between the health refresh landing
+  // (setup_required flips to false) and setDone(true) (done flips to true).
+  const [submitted, setSubmitted] = useState(false)
 
   if (done) return <Navigate to="/login" replace />
   if (!health.setup_required) {
+    if (submitted) return null
     return (
       <section className="panel">
         <h2>Setup</h2>
@@ -36,6 +41,7 @@ export default function SetupPage({ health, onDone }: { health: HealthOut; onDon
     setError(null)
     try {
       await api.setup({ password, nova_api_key: novaKey.trim() || undefined, site_title: siteTitle.trim() || undefined })
+      setSubmitted(true)
       // Refresh health before navigating: if we sent the user to /login while health.setup_required
       // was still stale (true), LoginPage's own guard would bounce them straight back to /setup.
       await onDone()

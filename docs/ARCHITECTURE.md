@@ -41,11 +41,12 @@ frontend/src/App.tsx ──fetch──▶ /api/images ...           (backend/app
 | `app/api/deps.py` | Request-scoped dependencies; `require_owner` gates every owner router on the session cookie. |
 | `app/api/auth.py` | `/api/setup`, `/api/login`, `/api/logout`. |
 | `app/api/config.py` | Owner settings (`GET`; `PUT` with the config page). |
+| `app/api/docs.py` | Owner-only Swagger UI and OpenAPI document (`/api/docs`, `/api/openapi.json`). |
 
-Every router except health carries the require_owner dependency; the cookie is validated per
-request against the secret and password hash in config.json, so a password reset logs everyone
-out. `/api/docs` and `/api/openapi.json` are mounted on their own gated router, so the API schema
-and Swagger UI are owner-only too.
+Every router except health and the setup/login/logout router carries the require_owner
+dependency; the cookie is validated per request against the secret and password hash in
+config.json, so a password reset logs everyone out. `/api/docs` and `/api/openapi.json` are
+mounted on their own gated router, so the API schema and Swagger UI are owner-only too.
 
 ## Coordinate contract
 
