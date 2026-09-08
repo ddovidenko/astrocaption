@@ -38,7 +38,11 @@ export function styleFormFromOverrides(o: StyleOverrides): StyleForm {
   }
 }
 
-const num = (v: string): number | undefined => (v.trim() === '' ? undefined : Number(v))
+/** Blank, or anything that is not a finite number, means "unset": the server keeps its default. */
+const num = (v: string): number | undefined => {
+  const n = Number(v)
+  return v.trim() === '' || !Number.isFinite(n) ? undefined : n
+}
 const bool = (v: Tri): boolean | undefined => (v === '' ? undefined : v === 'on')
 const text = (v: string): string | undefined => (v.trim() === '' ? undefined : v.trim())
 
@@ -59,4 +63,13 @@ export function overridesFromStyleForm(f: StyleForm): StyleOverrides {
     name_preference: f.name_preference === '' ? undefined : f.name_preference,
   }
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as StyleOverrides
+}
+
+/** True when two override sets carry the same fields and values, whatever their key order.
+ *  Values are primitives (string, number, boolean), so one level of comparison is enough. */
+export function sameOverrides(a: StyleOverrides, b: StyleOverrides): boolean {
+  const set = (o: StyleOverrides) => Object.entries(o).filter(([, v]) => v !== undefined)
+  const ea = set(a)
+  const eb = new Map(set(b))
+  return ea.length === eb.size && ea.every(([k, v]) => eb.has(k) && eb.get(k) === v)
 }

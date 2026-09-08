@@ -85,6 +85,8 @@ export interface ConfigOut {
   default_style: StyleOverrides
   style_defaults: StyleDefaults
   locked: string[]
+  /** Locked field -> the environment variable that pins it (never its value). */
+  locked_by: Record<string, string>
 }
 
 /** Partial: absent keeps, `nova_api_key: null` clears; `default_style` replaces the override set. */
