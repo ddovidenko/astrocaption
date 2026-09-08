@@ -10,6 +10,12 @@ login message and the nova user id are scrubbed. Two responses cannot be recorde
 successful solve and are written by hand to the documented shape: `job_failure.json` and
 `upload_bad_session.json`.
 
+The recorder does not implement the nova protocol: it runs the app's own `NovaSolver`
+through a `RecordingTransport` that writes each recognised response as it passes back to
+the client. `tests/test_record_nova_fixtures.py` replays this directory through the
+recorder and checks it writes the same files back, so a fresh recording cannot drift from
+what the client sends.
+
 | file | endpoint |
 |---|---|
 | `login.json` | `POST /api/login` |
