@@ -4,10 +4,10 @@ import { api, describeError, type HealthOut } from '../api'
 
 export default function SetupPage({
   health,
-  onDone,
+  refreshHealth,
 }: {
   health: HealthOut
-  onDone: () => Promise<HealthOut | null>
+  refreshHealth: () => Promise<HealthOut | null>
 }) {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -16,10 +16,6 @@ export default function SetupPage({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
-  // Set the instant api.setup() resolves, before health is refreshed. Without it, the
-  // "already set up" branch below renders for one frame between the health refresh landing
-  // (setup_required flips to false) and setDone(true) (done flips to true).
-  const [submitted, setSubmitted] = useState(false)
 
   // An environment variable wins over anything typed here, so offer it read-only and do
   // not send it: a value parked in config.json would never take effect.
@@ -28,7 +24,9 @@ export default function SetupPage({
 
   if (done) return <Navigate to="/login" replace />
   if (!health.setup_required) {
-    if (submitted) return null
+    // While a submit is in flight the refreshed health lands before setDone(true); rendering
+    // the "already set up" branch for that one frame would be a lie.
+    if (busy) return null
     return (
       <section className="panel">
         <h2>Setup</h2>
@@ -56,10 +54,9 @@ export default function SetupPage({
         nova_api_key: novaLocked ? undefined : novaKey.trim() || undefined,
         site_title: titleLocked ? undefined : siteTitle.trim() || undefined,
       })
-      setSubmitted(true)
       // Navigate on what health now says, not on the 204 alone: if we sent the user to
       // /login while setup_required was still true, LoginPage would bounce them back here.
-      const fresh = await onDone()
+      const fresh = await refreshHealth()
       if (fresh && !fresh.setup_required) setDone(true)
       else setError('Setup was saved, but the page could not confirm it. Reload and sign in.')
     } catch (err) {

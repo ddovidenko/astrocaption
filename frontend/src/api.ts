@@ -118,13 +118,9 @@ export function parseBody(status: number, ok: boolean, text: string, sessionLost
 
 let onUnauthorized: (() => void) | null = null
 
-/** Called once per 401 outside the login call, so the shell can send the user to /login. */
+/** Called once per session-losing 401, so the shell can send the user to /login. */
 export function setUnauthorizedHandler(fn: (() => void) | null): void {
   onUnauthorized = fn
-}
-
-export function isSessionLoss(url: string, status: number): boolean {
-  return status === 401 && url !== '/api/login'
 }
 
 /** True when `err` is the ApiError the shell's 401 handler is about to act on; callers that
@@ -140,9 +136,20 @@ export function describeError(err: unknown): string {
   return 'Something went wrong.'
 }
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
+/** The message a page should show for `err`, or null when the shell is already redirecting
+ *  because the session was lost. */
+export function pageError(err: unknown): string | null {
+  return isSessionLossError(err) ? null : describeError(err)
+}
+
+interface RequestOptions {
+  /** A 401 means the session is gone. The login call opts out: its 401 is a wrong password. */
+  sessionAware?: boolean
+}
+
+async function request<T>(url: string, init?: RequestInit, { sessionAware = true }: RequestOptions = {}): Promise<T> {
   const res = await fetch(url, init)
-  const lost = isSessionLoss(url, res.status)
+  const lost = sessionAware && res.status === 401
   if (lost) onUnauthorized?.()
   if (res.status === 204) return undefined as T
   return parseBody(res.status, res.ok, await res.text(), lost) as T
@@ -157,7 +164,8 @@ const json = (method: string, body?: unknown): RequestInit => ({
 export const api = {
   health: () => request<HealthOut>('/api/health'),
   setup: (body: SetupRequest) => request<void>('/api/setup', json('POST', body)),
-  login: (password: string) => request<void>('/api/login', json('POST', { password })),
+  login: (password: string) =>
+    request<void>('/api/login', json('POST', { password }), { sessionAware: false }),
   logout: () => request<void>('/api/logout', json('POST')),
   config: () => request<ConfigOut>('/api/config'),
   listImages: () => request<ImageOut[]>('/api/images'),

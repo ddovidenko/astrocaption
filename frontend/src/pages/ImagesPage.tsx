@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   api,
-  describeError,
   formatBytes,
   isBusy,
-  isSessionLossError,
+  pageError,
   statusLabel,
   type ConfigOut,
   type ExportOut,
@@ -16,10 +15,10 @@ const POLL_MS = 3000
 
 export default function ImagesPage({
   health,
-  onHealthChange,
+  refreshHealth,
 }: {
   health: HealthOut
-  onHealthChange: () => Promise<HealthOut | null>
+  refreshHealth: () => Promise<HealthOut | null>
 }) {
   const [images, setImages] = useState<ImageOut[]>([])
   const [config, setConfig] = useState<ConfigOut | null>(null)
@@ -29,14 +28,14 @@ export default function ImagesPage({
   // just broke, must reach the banners as promptly as the image rows do.
   const refresh = useCallback(async () => {
     try {
-      const [list, cfg] = await Promise.all([api.listImages(), api.config(), onHealthChange()])
+      const [list, cfg] = await Promise.all([api.listImages(), api.config(), refreshHealth()])
       setImages(list)
       setConfig(cfg)
       setError(null)
     } catch (err) {
-      if (!isSessionLossError(err)) setError(describeError(err))
+      setError(pageError(err))
     }
-  }, [onHealthChange])
+  }, [refreshHealth])
 
   useEffect(() => {
     let cancelled = false
@@ -46,7 +45,7 @@ export default function ImagesPage({
         if (!cancelled) setImages(list)
       })
       .catch((err: unknown) => {
-        if (!cancelled && !isSessionLossError(err)) setError(describeError(err))
+        if (!cancelled) setError(pageError(err))
       })
     api
       .config()
@@ -54,7 +53,7 @@ export default function ImagesPage({
         if (!cancelled) setConfig(c)
       })
       .catch((err: unknown) => {
-        if (!cancelled && !isSessionLossError(err)) setError(describeError(err))
+        if (!cancelled) setError(pageError(err))
       })
     return () => {
       cancelled = true
@@ -112,7 +111,7 @@ function UploadPanel({ onUploaded }: { onUploaded: () => Promise<void> }) {
       if (fileRef.current) fileRef.current.value = ''
       await onUploaded()
     } catch (err) {
-      if (!isSessionLossError(err)) setError(describeError(err))
+      setError(pageError(err))
     } finally {
       setUploading(false)
     }
@@ -154,7 +153,7 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
       await action()
       await onChange()
     } catch (err) {
-      if (!isSessionLossError(err)) setError(describeError(err))
+      setError(pageError(err))
     } finally {
       setWorking(false)
     }

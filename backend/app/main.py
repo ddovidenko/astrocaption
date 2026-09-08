@@ -64,8 +64,7 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         nonlocal http_client
         cfg.ensure_dirs()
-        if setup_password is not None:
-            _headless_setup(source, setup_password)
+        _headless_setup(source, setup_password)
         db.init()
         http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(30.0, read=300.0, write=300.0), follow_redirects=True
@@ -96,31 +95,7 @@ def create_app(
     app.state.setup_lock = asyncio.Lock()  # one first-run setup at a time (SPEC § 5.1)
     app.add_middleware(images.UploadGuard, settings_source=source)
 
-    @app.exception_handler(RequestValidationError)
-    async def _plain_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
-        """Plain-language 422s: the default FastAPI body echoes the submitted value (a
-        password, here) in ``input`` and returns a list. Neither belongs in a response."""
-        labels: list[str] = []
-        messages: list[str] = []
-        for error in exc.errors():
-            # loc holds ints too (a byte offset for a bad body, an index in a list), and
-            # its first element is the source; neither names anything a user would type.
-            named = [
-                part
-                for part in error.get("loc", ())
-                if isinstance(part, str) and part not in {"body", "query", "path"}
-            ]
-            label = ".".join(named) or "request"
-            labels.append(label)
-            msg = (
-                "the body is not valid JSON"
-                if error.get("type") == "json_invalid"
-                else str(error.get("msg", "is not valid"))
-            )
-            messages.append(f"{label}: {msg}")
-        log.info("request validation failed: %s", ", ".join(labels) or "request")
-        detail = "; ".join(messages) or "Invalid request."
-        return JSONResponse({"detail": detail}, status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
+    app.add_exception_handler(RequestValidationError, plain_validation_error)  # type: ignore[arg-type]
 
     app.include_router(health.router)
     app.include_router(auth.router)
@@ -135,9 +110,38 @@ def create_app(
     return app
 
 
-def _headless_setup(source: SettingsSource, password: str) -> None:
-    """``ASTROCAPTION_PASSWORD``: complete first-run setup without the browser (SPEC § 11)."""
-    if not password:  # belt and braces: the module-level app already normalises "" to None
+async def plain_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+    """Plain-language 422s: the default FastAPI body echoes the submitted value (a
+    password, here) in ``input`` and returns a list. Neither belongs in a response."""
+    labels: list[str] = []
+    messages: list[str] = []
+    for error in exc.errors():
+        # loc holds ints too (a byte offset for a bad body, an index in a list), and
+        # its first element is the source; neither names anything a user would type.
+        named = [
+            part
+            for part in error.get("loc", ())
+            if isinstance(part, str) and part not in {"body", "query", "path"}
+        ]
+        label = ".".join(named) or "request"
+        labels.append(label)
+        msg = (
+            "the body is not valid JSON"
+            if error.get("type") == "json_invalid"
+            else str(error.get("msg", "is not valid"))
+        )
+        messages.append(f"{label}: {msg}")
+    log.info("request validation failed: %s", ", ".join(labels) or "request")
+    detail = "; ".join(messages) or "Invalid request."
+    return JSONResponse({"detail": detail}, status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
+
+
+def _headless_setup(source: SettingsSource, password: str | None) -> None:
+    """``ASTROCAPTION_PASSWORD``: complete first-run setup without the browser (SPEC § 11).
+
+    Unset and empty mean the same thing: nothing to do.
+    """
+    if not password:
         return
     current = source.current()
     if current.config_error is not None:
@@ -181,4 +185,4 @@ def _mount_spa(app: FastAPI, static_dir: Path) -> None:
         return FileResponse(index)
 
 
-app = create_app(setup_password=os.environ.get("ASTROCAPTION_PASSWORD") or None)
+app = create_app(setup_password=os.environ.get("ASTROCAPTION_PASSWORD"))

@@ -41,7 +41,14 @@ from ..storage import (
     probe_image,
     render_dir,
 )
-from .deps import DbDep, SettingsDep, WorkerDep, is_authenticated, require_owner
+from .deps import (
+    DbDep,
+    SettingsDep,
+    WorkerDep,
+    is_authenticated,
+    require_owner,
+    unauthorized_response,
+)
 
 router = APIRouter(prefix="/api/images", tags=["images"], dependencies=[Depends(require_owner)])
 
@@ -66,7 +73,7 @@ class UploadGuard:
     multi-gigabyte POST would otherwise fill temp space before ``upload_image`` could say
     no -- and an anonymous caller would have their body spooled, then learn the site's
     upload limit from a 413, before ``require_owner`` ever ran. The sign-in check therefore
-    comes first, and answers exactly like ``require_owner`` does. Requests without a usable
+    comes first. Requests without a usable
     Content-Length (chunked) fall through to the streaming cap in ``_copy_limited``, which
     stays the backstop for everything.
     """
@@ -79,11 +86,7 @@ class UploadGuard:
         if scope["type"] == "http" and scope["method"] == "POST" and scope["path"] == router.prefix:
             settings = self._source.current()
             if not is_authenticated(Request(scope), settings):
-                response: JSONResponse = JSONResponse(
-                    {"detail": "Sign in to continue."},
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                )
-                await response(scope, receive, send)
+                await unauthorized_response()(scope, receive, send)
                 return
             declared = _declared_length(scope)
             if declared is not None and declared > (

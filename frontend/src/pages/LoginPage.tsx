@@ -1,18 +1,17 @@
 import { useState } from 'react'
-import { Navigate } from 'react-router'
+import { Navigate, useLocation } from 'react-router'
 import { api, describeError, type HealthOut } from '../api'
 
 export default function LoginPage({
   health,
-  onDone,
-  sessionEnded,
-  onSignedIn,
+  refreshHealth,
 }: {
   health: HealthOut
-  onDone: () => Promise<HealthOut | null>
-  sessionEnded: boolean
-  onSignedIn: () => void
+  refreshHealth: () => Promise<HealthOut | null>
 }) {
+  // The shell navigates here with { state: { sessionEnded: true } } when a request 401s;
+  // the flag lives on that navigation and dies with it, so nothing has to reset it.
+  const sessionEnded = (useLocation().state as { sessionEnded?: boolean } | null)?.sessionEnded === true
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -29,9 +28,8 @@ export default function LoginPage({
       // A 204 only means the server sent the cookie. If the browser dropped it (Secure
       // cookie over plain http, third-party cookie blocking) health still says logged out,
       // and silently staying here with no message is the worst outcome.
-      const fresh = await onDone()
-      if (fresh?.authenticated) onSignedIn()
-      else if (fresh)
+      const fresh = await refreshHealth()
+      if (fresh && !fresh.authenticated)
         setError(
           'Signed in, but the browser did not keep the session cookie. If TRUST_PROXY is set, open the site over HTTPS.',
         )

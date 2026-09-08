@@ -215,16 +215,33 @@ def make_worker(
     return SolveWorker(db, settings, lambda: solver, **kwargs)
 
 
+ENV_ISOLATED = ("NOVA_API_KEY", "ASTROMETRY_API_KEY", "ASTROCAPTION_SITE_TITLE", "TRUST_PROXY")
+
+
+def env_app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **env: str) -> TestClient:
+    """An app configured from the environment, so config.json in ``tmp_path/data`` is live.
+
+    Starts with no config.json (setup required). The developer's own shell variables are
+    cleared so every test sees the same environment; ``env`` sets the ones a test needs.
+    """
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(exist_ok=True)
+    monkeypatch.setenv("ASTROCAPTION_DATA_DIR", str(data_dir))
+    for name in ENV_ISOLATED:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    app = create_app(
+        solver_factory=lambda: None,
+        poll_interval=0.01,
+        setup_password=env.get("ASTROCAPTION_PASSWORD"),
+    )
+    return TestClient(app)
+
+
 @pytest.fixture
 def env_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[tuple[TestClient, Path]]:
-    """An app configured from the environment, so config.json in ``data_dir`` is live."""
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
-    monkeypatch.setenv("ASTROCAPTION_DATA_DIR", str(data_dir))
-    monkeypatch.delenv("NOVA_API_KEY", raising=False)
-    monkeypatch.delenv("ASTROMETRY_API_KEY", raising=False)
-    app = create_app(solver_factory=lambda: None, poll_interval=0.01)
-    with TestClient(app) as client:
-        yield client, data_dir
+    with env_app_client(tmp_path, monkeypatch) as client:
+        yield client, tmp_path / "data"

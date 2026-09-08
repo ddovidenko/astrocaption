@@ -15,8 +15,7 @@ from starlette.routing import BaseRoute
 
 from app.auth import LoginLimiter, hash_password
 from app.config import update_config
-from app.main import create_app
-from tests.conftest import TEST_PASSWORD, login
+from tests.conftest import TEST_PASSWORD, env_app_client, login
 
 # Routes that must stay reachable while logged out: health for the Docker healthcheck,
 # setup/login/logout because a session cookie is exactly what they exist to obtain.
@@ -102,22 +101,8 @@ def test_failed_sign_ins_are_logged_without_the_password(
     assert "not-the-password" not in caplog.text
 
 
-def fresh_app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **env: str) -> TestClient:
-    """An app reading a data dir with no config.json (setup required), config live."""
-    data_dir = tmp_path / "data"
-    data_dir.mkdir(exist_ok=True)
-    monkeypatch.setenv("ASTROCAPTION_DATA_DIR", str(data_dir))
-    for name in ("NOVA_API_KEY", "ASTROMETRY_API_KEY", "ASTROCAPTION_SITE_TITLE", "TRUST_PROXY"):
-        monkeypatch.delenv(name, raising=False)
-    for name, value in env.items():
-        monkeypatch.setenv(name, value)
-    setup_password = env.get("ASTROCAPTION_PASSWORD")
-    app = create_app(solver_factory=lambda: None, poll_interval=0.01, setup_password=setup_password)
-    return TestClient(app)
-
-
 def test_setup_then_login_then_logout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    with fresh_app_client(tmp_path, monkeypatch) as client:
+    with env_app_client(tmp_path, monkeypatch) as client:
         assert client.get("/api/health").json()["setup_required"] is True
         assert client.post("/api/login", json={"password": "anything"}).status_code == 401
         assert client.post("/api/setup", json={"password": "short"}).status_code == 422
@@ -154,7 +139,7 @@ def test_setup_then_login_then_logout(tmp_path: Path, monkeypatch: pytest.Monkey
 
 
 def test_secure_cookie_behind_a_proxy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    with fresh_app_client(tmp_path, monkeypatch, TRUST_PROXY="1") as client:
+    with env_app_client(tmp_path, monkeypatch, TRUST_PROXY="1") as client:
         assert client.post("/api/setup", json={"password": "hunter2hunter2"}).status_code == 204
         ok = client.post("/api/login", json={"password": "hunter2hunter2"})
         assert "Secure" in ok.headers["set-cookie"]
@@ -163,14 +148,14 @@ def test_secure_cookie_behind_a_proxy(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_headless_setup_from_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    with fresh_app_client(tmp_path, monkeypatch, ASTROCAPTION_PASSWORD="from-the-env") as client:
+    with env_app_client(tmp_path, monkeypatch, ASTROCAPTION_PASSWORD="from-the-env") as client:
         assert client.get("/api/health").json()["setup_required"] is False
         assert client.post("/api/setup", json={"password": "hunter2hunter2"}).status_code == 404
         assert client.post("/api/login", json={"password": "from-the-env"}).status_code == 204
     # A second start with the variable still set changes nothing, and says so.
     with (
         caplog.at_level(logging.INFO, logger="app.main"),
-        fresh_app_client(tmp_path, monkeypatch, ASTROCAPTION_PASSWORD="from-the-env") as client,
+        env_app_client(tmp_path, monkeypatch, ASTROCAPTION_PASSWORD="from-the-env") as client,
     ):
         assert client.post("/api/login", json={"password": "from-the-env"}).status_code == 204
     assert "an owner password is already set" in caplog.text
@@ -182,7 +167,7 @@ def test_concurrent_setup_requests_leave_exactly_one_owner(
 ) -> None:
     """Two browsers submitting the form at once: one wins, the other is told setup is done."""
     passwords = ["first-password-1", "second-password-2"]
-    with fresh_app_client(tmp_path, monkeypatch) as client:
+    with env_app_client(tmp_path, monkeypatch) as client:
 
         def attempt(password: str) -> int:
             code: int = client.post("/api/setup", json={"password": password}).status_code
@@ -201,7 +186,7 @@ def test_setup_reports_a_data_directory_it_cannot_write(
 ) -> None:
     if os.geteuid() == 0:
         pytest.skip("root writes into a read-only directory anyway")
-    with fresh_app_client(tmp_path, monkeypatch) as client:
+    with env_app_client(tmp_path, monkeypatch) as client:
         data_dir = tmp_path / "data"
         data_dir.chmod(0o500)
         try:
@@ -219,7 +204,7 @@ def test_setup_reports_a_data_directory_it_cannot_write(
 def test_headless_setup_ignores_a_short_password(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    with fresh_app_client(tmp_path, monkeypatch, ASTROCAPTION_PASSWORD="abc") as client:
+    with env_app_client(tmp_path, monkeypatch, ASTROCAPTION_PASSWORD="abc") as client:
         assert client.get("/api/health").json()["setup_required"] is True
     assert "ASTROCAPTION_PASSWORD" in caplog.text and "abc" not in caplog.text
 
@@ -243,7 +228,7 @@ def test_validation_errors_are_plain_language_without_input_echo(anon_client: Te
 def test_health_lists_the_fields_pinned_by_the_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with fresh_app_client(
+    with env_app_client(
         tmp_path, monkeypatch, NOVA_API_KEY="secret-nova-key", ASTROCAPTION_SITE_TITLE="Env"
     ) as client:
         body = client.get("/api/health").json()
@@ -276,7 +261,7 @@ def test_headless_setup_ignores_an_empty_password(
 ) -> None:
     """An unset ``ASTROCAPTION_PASSWORD`` in compose.yml expands to "", not the variable's
     absence; that must behave exactly like the variable being unset, with no log line."""
-    with fresh_app_client(tmp_path, monkeypatch, ASTROCAPTION_PASSWORD="") as client:
+    with env_app_client(tmp_path, monkeypatch, ASTROCAPTION_PASSWORD="") as client:
         assert client.get("/api/health").json()["setup_required"] is True
     assert "ASTROCAPTION_PASSWORD" not in caplog.text
 
@@ -299,7 +284,7 @@ def test_login_cooldown_after_five_failures(anon_client: TestClient) -> None:
 def test_password_reset_invalidates_sessions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with fresh_app_client(tmp_path, monkeypatch) as client:
+    with env_app_client(tmp_path, monkeypatch) as client:
         client.post("/api/setup", json={"password": "hunter2hunter2"})
         login(client, "hunter2hunter2")
         assert client.get("/api/images").status_code == 200

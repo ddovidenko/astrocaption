@@ -38,9 +38,10 @@ class ConfigError(ValueError):
     """
 
     def __init__(self, public: str, detail: str | None = None) -> None:
-        super().__init__(detail or public)
+        detail = detail or public
+        super().__init__(detail)
         self.public = public
-        self.detail = detail or public
+        self.detail = detail
 
 
 @dataclass(frozen=True)

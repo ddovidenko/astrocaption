@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 
 from ..auth import COOKIE_NAME, session_is_valid
 from ..config import Settings, SettingsSource
@@ -40,7 +41,15 @@ def is_authenticated(request: Request, settings: Settings) -> bool:
     )
 
 
+UNAUTHORIZED_DETAIL = "Sign in to continue."  # SPEC § 8: plain 401, no hints
+
+
+def unauthorized_response() -> JSONResponse:
+    """The 401 body as a response, for middleware that answers before routing."""
+    return JSONResponse({"detail": UNAUTHORIZED_DETAIL}, status_code=status.HTTP_401_UNAUTHORIZED)
+
+
 def require_owner(request: Request, settings: SettingsDep) -> None:
-    """Router-level gate for every owner route (SPEC § 8). Plain 401, no hints."""
+    """Router-level gate for every owner route (SPEC § 8)."""
     if not is_authenticated(request, settings):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sign in to continue.")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, UNAUTHORIZED_DETAIL)

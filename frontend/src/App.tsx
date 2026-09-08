@@ -8,7 +8,6 @@ import SetupPage from './pages/SetupPage'
 export default function App() {
   const [health, setHealth] = useState<HealthOut | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [sessionEnded, setSessionEnded] = useState(false)
   const navigate = useNavigate()
 
   /** Re-read health and hand it back, so a caller can act on what the server actually says
@@ -49,9 +48,8 @@ export default function App() {
     setUnauthorizedHandler(() => {
       // Ask the server what is true now rather than patching `authenticated: false` onto a
       // stale copy: config_error and setup_required may have moved on too.
-      setSessionEnded(true)
       void refreshHealth()
-      navigate('/login', { replace: true })
+      navigate('/login', { replace: true, state: { sessionEnded: true } })
     })
     return () => setUnauthorizedHandler(null)
   }, [navigate, refreshHealth])
@@ -69,7 +67,6 @@ export default function App() {
     }
     const fresh = await refreshHealth()
     if (fresh && !fresh.authenticated) {
-      setSessionEnded(false)
       navigate('/login', { replace: true })
     } else if (fresh) {
       setError('Could not sign out: the browser kept the session cookie. You are still signed in.')
@@ -102,23 +99,13 @@ export default function App() {
         )}
         {health && (
           <Routes>
-            <Route path="/setup" element={<SetupPage health={health} onDone={refreshHealth} />} />
-            <Route
-              path="/login"
-              element={
-                <LoginPage
-                  health={health}
-                  onDone={refreshHealth}
-                  sessionEnded={sessionEnded}
-                  onSignedIn={() => setSessionEnded(false)}
-                />
-              }
-            />
+            <Route path="/setup" element={<SetupPage health={health} refreshHealth={refreshHealth} />} />
+            <Route path="/login" element={<LoginPage health={health} refreshHealth={refreshHealth} />} />
             <Route
               path="/"
               element={
                 <Guard health={health}>
-                  <ImagesPage health={health} onHealthChange={refreshHealth} />
+                  <ImagesPage health={health} refreshHealth={refreshHealth} />
                 </Guard>
               }
             />

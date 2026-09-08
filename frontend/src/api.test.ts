@@ -5,8 +5,9 @@ import {
   errorMessage,
   formatBytes,
   isBusy,
-  isSessionLoss,
+  
   isSessionLossError,
+  pageError,
   parseBody,
   statusLabel,
 } from './api'
@@ -53,17 +54,16 @@ describe('api helpers', () => {
     expect(() => parseBody(502, false, '<html>bad gateway</html>')).toThrow('HTTP 502')
   })
 
-  it('treats a 401 as session loss everywhere except the login call', () => {
-    expect(isSessionLoss('/api/images', 401)).toBe(true)
-    expect(isSessionLoss('/api/config', 401)).toBe(true)
-    expect(isSessionLoss('/api/login', 401)).toBe(false)
-    expect(isSessionLoss('/api/images', 403)).toBe(false)
-    expect(isSessionLoss('/api/images', 200)).toBe(false)
+  it('hides the page-level message only for a lost session', () => {
+    expect(pageError(new ApiError(401, 'Sign in to continue.', true))).toBeNull()
+    expect(pageError(new ApiError(401, 'Wrong password.'))).toBe('Wrong password.')
+    expect(pageError(new Error('network down'))).toBe('network down')
+    expect(pageError('?')).toBe('Something went wrong.')
   })
 
   it('identifies the ApiError a page should not show because the shell is redirecting', () => {
-    // The flag is set once, by request(), from isSessionLoss(url, status); the status alone
-    // cannot tell a lost session from the 401 that a wrong password on /api/login earns.
+    // The flag is set once, by request(); the status alone cannot tell a lost session from
+    // the 401 that a wrong password on /api/login earns (that call opts out).
     expect(isSessionLossError(new ApiError(401, 'Sign in to continue.', true))).toBe(true)
     expect(isSessionLossError(new ApiError(401, 'Wrong password.'))).toBe(false)
     expect(isSessionLossError(new ApiError(403, 'Forbidden.'))).toBe(false)
