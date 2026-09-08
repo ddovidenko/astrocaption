@@ -116,15 +116,10 @@ class RecordingTransport(httpx.AsyncBaseTransport):
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         response = await self._inner.handle_async_request(request)
-        content = await response.aread()
+        content = await response.aread()  # decoded (nova gzips); the client reuses the buffer
         if response.is_success:
             self._record(request, content)
-        return httpx.Response(
-            response.status_code,
-            headers=response.headers,
-            content=content,
-            request=request,
-        )
+        return response
 
     async def aclose(self) -> None:
         await self._inner.aclose()

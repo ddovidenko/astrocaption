@@ -309,7 +309,7 @@ Later (not v1): local ASTAP solver option, custom object entries (user-added lab
 ## 14. Open questions
 
 - Nova rate limits: undocumented; we serialise solves (one at a time) and cache job results forever. Confirm behaviour under a burst of 5 uploads.
-- Object list size: wide fields can return 500+ HD stars. Default-hide `hd` type entirely? Current plan: hide by default, available in the list with a type filter. (The recorded 2.4° field had no `hd` entries at all; nova seems to add them only for small fields.)
+- Object list size: wide fields can return 500+ HD stars. Default-hide `hd` type entirely? Current plan: hide by default, available in the list with a type filter. (nova adds `hd` entries only to fields of about 1° radius or less: the 2.4° Orion recording has none, the 1° Pelican recording in `tests/fixtures/nova-narrow/` has five, and a bright star can appear twice, as `bright` and as `hd` at the same pixel.)
 - Non-stellar objects nova returns with radius 0 (NGC 206, the star cloud in M 31) are hidden by the size rule. Enable NGC/IC objects regardless of size? Decide with the editor (milestone 3), where a click toggles them anyway.
 - Should exports be stored or generated on demand? Plan: stored (cheap) so the gallery can show them without re-rendering.
 - Touch support in the editor: out of scope for v1, but Konva makes pinch-zoom cheap. Revisit after milestone 5.

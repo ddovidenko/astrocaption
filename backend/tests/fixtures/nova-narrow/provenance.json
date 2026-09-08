@@ -1,0 +1,19 @@
+{
+ "recorded_at": "2026-09-08T10:20:46+00:00",
+ "nova_base_url": "https://nova.astrometry.net",
+ "solve_copy_scale": 1.0,
+ "solve_status": "success",
+ "recorded_files": [
+  "annotations.json",
+  "job_info.json",
+  "job_solving.json",
+  "job_success.json",
+  "login.json",
+  "login_bad_key.json",
+  "submission_pending.json",
+  "submission_queued.json",
+  "submission_ready.json",
+  "upload.json",
+  "wcs.fits"
+ ]
+}
