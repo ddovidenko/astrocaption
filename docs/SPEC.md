@@ -67,8 +67,12 @@ No multi-user, no roles, no invites in v1.
 3. Backend submits to nova (async job). Status page polls. Typical 30–120 s.
    *M1 note:* what is uploaded is `solve.jpg`, a ≤ 3000 px JPEG copy; nova's pixel coordinates and radii
    are multiplied by `solve_scale = original_width / copy_width` at ingest so everything stored is in
-   original pixels. Solves run one at a time through an in-process queue; the nova submission/job ids
-   are persisted so an unfinished solve resumes after a container restart instead of re-uploading.
+   original pixels. Solves run one at a time through an in-process queue. A row stays `pending` (previous
+   nova ids and links intact) until nova accepts the upload, then becomes `solving` with the new ids, so a
+   restart resumes exactly the in-flight submission and never re-uploads it; transient nova errors while
+   polling are retried until the 15-minute deadline; scale hints are stored on the row; deleting an image
+   mid-solve drops the job. Uploads are capped at 300 megapixels regardless of file size, 16-bit greyscale
+   PNG/TIFF is rescaled rather than clipped, and JPEGs with a multi-picture (MPO) segment are accepted.
 4. On success: store WCS header (`wcs.fits` text), the nova job ID, and nova's annotation
    list (`/api/jobs/<id>/annotations/`) as `nova_annotations.json`. Every object gets a stable local ID
    (assigned by descending radius, then name). *M1 note:* nova returns one designation per deep-sky

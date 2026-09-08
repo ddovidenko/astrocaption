@@ -37,7 +37,7 @@ def close(a: tuple[int, ...], b: tuple[int, ...], tol: int = 60) -> bool:
 
 
 def test_measurement_uses_line_heights_and_alias_scale() -> None:
-    style = default_style(3000, 2000)
+    style = default_style(3000, 2000, FONTS_DIR)
     box = measure_label(FONTS_DIR, style, Label(object_id=1), OBJECTS[0])
     assert box.height == line_height(style.font_size) + line_height(
         round(style.font_size * ALIAS_SCALE)
@@ -52,7 +52,7 @@ def test_measurement_uses_line_heights_and_alias_scale() -> None:
 
 
 def test_label_text_override_and_alias_toggle() -> None:
-    style = default_style(3000, 2000)
+    style = default_style(3000, 2000, FONTS_DIR)
     t = label_text(OBJECTS[0], Label(object_id=1), style)
     assert (t.primary, t.alias) == ("M 42", "NGC 1976 · Orion Nebula")
     t = label_text(
@@ -107,7 +107,10 @@ def test_default_export_matches_source_jpeg_tables(tmp_path: Path) -> None:
         assert JpegImagePlugin.get_sampling(src) == 2
     ann = build_default_annotations("x", 1200, 800, OBJECTS[:1], FONTS_DIR)
     out = tmp_path / "match.jpg"
-    result = render_annotated(original, OBJECTS[:1], ann, FONTS_DIR, out)
+    preview = tmp_path / "sub" / "preview.jpg"
+    result = render_annotated(original, OBJECTS[:1], ann, FONTS_DIR, out, preview_path=preview)
+    with Image.open(preview) as p:
+        assert p.size == (1200, 800)  # already within the preview bound
     assert result.encoding == "matched original JPEG tables, 4:2:0, progressive"
     with Image.open(out) as back:
         assert isinstance(back, JpegImagePlugin.JpegImageFile)
@@ -133,7 +136,7 @@ def test_png_source_falls_back_to_quality_95(tmp_path: Path) -> None:
 
 def test_leader_is_drawn_when_forced_on(tmp_path: Path) -> None:
     original = write_test_image(tmp_path / "orig.jpg", 3000, 2000)
-    style = default_style(3000, 2000)
+    style = default_style(3000, 2000, FONTS_DIR)
     label = Label(object_id=2, x=2200.0, y=520.0, leader="on")
     ann = Annotations(image_id="x", style=style, labels=[label])
     out = tmp_path / "leader.jpg"

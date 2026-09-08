@@ -62,5 +62,5 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
 - Ask before adding a dependency. Prefer the standard library and what's already installed.
 - After finishing a feature: run `make lint test`, update SPEC.md if behaviour diverged from it,
   and note anything a self-hoster needs to know in `docs/INSTALL.md`.
-- Don't scaffold ahead of the current milestone. Milestone order is in SPEC.md § 12.
+- Don't scaffold ahead of the current milestone. Milestone order is in SPEC.md § 13.
 - When unsure about UX intent, check SPEC.md § 6 (editor interactions) before guessing.

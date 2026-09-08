@@ -13,6 +13,10 @@ class SolverError(Exception):
     """A solve failed in a way the owner should read about in plain language."""
 
 
+class TransientSolverError(SolverError):
+    """The solver service could not be reached or answered 5xx; worth retrying for a while."""
+
+
 class JobState(StrEnum):
     SOLVING = "solving"
     SUCCESS = "success"
@@ -51,7 +55,3 @@ class Solver(Protocol):
     async def poll_job(self, job_id: int) -> JobState: ...
 
     async def fetch_result(self, submission_id: int, job_id: int) -> SolveResult: ...
-
-    def status_url(self, submission_id: int) -> str | None: ...
-
-    def job_log_url(self, job_id: int) -> str | None: ...

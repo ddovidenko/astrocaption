@@ -9,9 +9,11 @@ from typing import Any
 import httpx
 import pytest
 
-from app.solver import JobState, SolveRequest, SolverError
+from app.solver import JobState, SolveRequest, SolverError, TransientSolverError
 from app.solver.nova import BAD_KEY, NovaSolver, job_log_url, status_url
 from tests.conftest import NOVA_FIXTURES
+
+Route = str | list[str] | dict[str, Any]  # fixture file, sequence of files, or inline JSON
 
 BASE = "https://nova.example.test"
 KEY = "super-secret-api-key"
@@ -22,7 +24,7 @@ JOBID = 16837720
 class Replay:
     """Serve fixture files per (method, path); lists are consumed in order."""
 
-    def __init__(self, routes: dict[str, str | list[str]]) -> None:
+    def __init__(self, routes: dict[str, Route]) -> None:
         self.routes = {k: (list(v) if isinstance(v, list) else v) for k, v in routes.items()}
         self.requests: list[tuple[httpx.Request, bytes]] = []
 
@@ -33,10 +35,13 @@ class Replay:
         entry = self.routes.get(key)
         if entry is None:
             return httpx.Response(404, text="not found")
+        name: str | dict[str, Any]
         if isinstance(entry, list):
             name = entry.pop(0) if len(entry) > 1 else entry[0]
         else:
             name = entry
+        if isinstance(name, dict):
+            return httpx.Response(200, json=name)
         if name.startswith("status:"):
             return httpx.Response(int(name.split(":")[1]), text="<html>error</html>")
         if name == "raise":
@@ -56,7 +61,7 @@ def run(coro: Any) -> Any:
     return asyncio.run(coro)
 
 
-def happy_routes() -> dict[str, str | list[str]]:
+def happy_routes() -> dict[str, Route]:
     return {
         "POST /api/login": "login.json",
         "POST /api/upload": "upload.json",
@@ -148,21 +153,42 @@ def test_expired_session_triggers_one_relogin(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("route_value", "fragment"),
-    [("status:500", "HTTP 500"), ("raise", "Could not reach"), ("wcs.fits", "unexpected response")],
+    ("route_value", "fragment", "transient"),
+    [
+        ("status:500", "HTTP 500", True),
+        ("raise", "Could not reach", True),
+        ("wcs.fits", "unexpected response", False),
+    ],
 )
-def test_transport_failures_become_solver_errors(route_value: str, fragment: str) -> None:
+def test_transport_failures_become_solver_errors(
+    route_value: str, fragment: str, transient: bool
+) -> None:
     replay = Replay({f"GET /api/jobs/{JOBID}": route_value})
-    with pytest.raises(SolverError, match=fragment):
+    with pytest.raises(SolverError, match=fragment) as excinfo:
         run(make_solver(replay).poll_job(JOBID))
+    assert isinstance(excinfo.value, TransientSolverError) is transient
+
+
+def test_submission_finished_without_a_job_is_permanent() -> None:
+    dead = {
+        "processing_started": "2026-09-08 00:37:58.522033+00:00",
+        "processing_finished": "2026-09-08 00:37:59.946128+00:00",
+        "user_images": [],
+        "images": [],
+        "jobs": [],
+        "job_calibrations": [],
+        "user": 0,
+    }
+    replay = Replay({f"GET /api/submissions/{SUBID}": dead})
+    with pytest.raises(SolverError, match="could not read the uploaded image") as excinfo:
+        run(make_solver(replay).poll_submission(SUBID))
+    assert not isinstance(excinfo.value, TransientSolverError)
+    assert f"/status/{SUBID}" in str(excinfo.value)
 
 
 def test_urls() -> None:
     assert status_url(BASE + "/", 5) == f"{BASE}/status/5"
     assert job_log_url(BASE, 6) == f"{BASE}/joblog/6"
-    solver = make_solver(Replay({}))
-    assert solver.status_url(5) == f"{BASE}/status/5"
-    assert solver.job_log_url(6) == f"{BASE}/joblog/6"
 
 
 def test_replay_never_hits_the_network() -> None:

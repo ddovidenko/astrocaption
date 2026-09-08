@@ -7,4 +7,4 @@ if ! mkdir -p "$DATA_DIR/uploads" "$DATA_DIR/renders" 2>/dev/null; then
   echo "  chown -R 1000:1000 ./data   (or mount a directory that uid 1000 can write)" >&2
   exit 1
 fi
-exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" --no-server-header
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-server-header

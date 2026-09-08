@@ -15,4 +15,5 @@ async def health(settings: SettingsDep) -> HealthOut:
         version=__version__,
         site_title=settings.site_title,
         nova_api_key_set=settings.nova_api_key_set,
+        config_error=settings.config_error,
     )

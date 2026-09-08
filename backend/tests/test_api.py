@@ -4,10 +4,13 @@ import hashlib
 import os
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
 from app.config import Settings
+from app.db import Database
+from app.main import create_app
 from tests.conftest import (
     FakeSolver,
     load_fixture,
@@ -30,6 +33,7 @@ def test_health_and_fonts(client: TestClient) -> None:
         "version": health["version"],
         "site_title": "Test Site",
         "nova_api_key_set": False,
+        "config_error": None,
     }
     fonts = client.get("/api/fonts").json()
     assert len(fonts) == 24
@@ -227,3 +231,77 @@ def test_png_upload_is_accepted(client: TestClient, tmp_path: Path) -> None:
     assert body["original_name"] == "field.png"
     assert body["original_format"] == "PNG"
     assert client.get(body["original_url"]).headers["content-type"] == "image/png"
+
+
+def test_png_named_jpg_is_stored_by_content(
+    client: TestClient, settings: Settings, tmp_path: Path
+) -> None:
+    disguised = write_test_image(tmp_path / "disguised.jpg", 100, 80, fmt="PNG")
+    body = upload(client, disguised)
+    assert body["original_format"] == "PNG"
+    assert (settings.uploads_dir / body["id"] / "original.png").is_file()
+    assert not (settings.uploads_dir / body["id"] / "original.upload").exists()
+    assert client.get(body["original_url"]).headers["content-type"] == "image/png"
+
+
+def test_resolve_persists_hints_on_the_row(
+    client: TestClient, settings: Settings, sample_jpeg: Path
+) -> None:
+    body = upload(client, sample_jpeg)
+    wait_for_status(client, body["id"], {"solved", "failed"})
+    resp = client.post(
+        f"/api/images/{body['id']}/solve", json={"focal_length_mm": 400, "pixel_size_um": 3.76}
+    )
+    assert resp.status_code == 200
+    row = Database(settings.db_path).get_image(body["id"])
+    assert row is not None and row.solve_hints is not None
+    assert row.solve_hints.focal_length_mm == 400
+    assert wait_for_status(client, body["id"], {"solved", "failed"})["solve_status"] == "solved"
+
+
+def test_health_reflects_a_key_added_after_start(env_client: tuple[TestClient, Path]) -> None:
+    client, data_dir = env_client
+    assert client.get("/api/health").json()["nova_api_key_set"] is False
+    (data_dir / "config.json").write_text('{"nova_api_key": "k"}')
+    assert client.get("/api/health").json()["nova_api_key_set"] is True
+    assert client.get("/api/health").json()["nova_api_key_set"] is True
+
+
+def test_truncated_jpeg_is_rejected_cleanly(
+    client: TestClient, settings: Settings, tmp_path: Path
+) -> None:
+    whole = write_test_image(tmp_path / "whole.jpg", 1200, 800)
+    truncated = tmp_path / "cut.jpg"
+    truncated.write_bytes(whole.read_bytes()[: whole.stat().st_size * 6 // 10])
+    with truncated.open("rb") as fh:
+        resp = client.post("/api/images", files={"file": ("cut.jpg", fh, "image/jpeg")})
+    assert resp.status_code == 415
+    assert "truncated or corrupt" in resp.json()["detail"]
+    assert list(settings.uploads_dir.iterdir()) == []
+
+
+def test_upload_files_are_removed_when_the_row_cannot_be_written(
+    tmp_path: Path, sample_jpeg: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = make_settings(tmp_path)
+
+    def boom(self: Database, rec: object) -> None:
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(Database, "insert_image", boom)
+    app = create_app(settings, solver_factory=lambda: None, poll_interval=0.01)
+    with TestClient(app, raise_server_exceptions=False) as client, sample_jpeg.open("rb") as fh:
+        resp = client.post("/api/images", files={"file": ("orion.jpg", fh, "image/jpeg")})
+        assert resp.status_code == 500
+        assert list(settings.uploads_dir.iterdir()) == []
+
+
+def test_health_reports_a_broken_config_file(env_client: tuple[TestClient, Path]) -> None:
+    client, data_dir = env_client
+    (data_dir / "config.json").write_text('{"nova_api_key": "k",')
+    body = client.get("/api/health").json()
+    assert body["nova_api_key_set"] is False
+    assert body["config_error"] and "not valid JSON" in body["config_error"]
+    (data_dir / "config.json").write_text('{"nova_api_key": "k"}')
+    body = client.get("/api/health").json()
+    assert body["nova_api_key_set"] is True and body["config_error"] is None

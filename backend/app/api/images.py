@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import os
 import re
 import uuid
@@ -31,8 +32,8 @@ from ..solver.nova import job_log_url, status_url
 from ..storage import (
     UnsupportedImageError,
     delete_image_files,
+    format_of,
     image_dir,
-    make_annotated_preview,
     make_derivatives,
     normalised_extension,
     probe_image,
@@ -43,8 +44,6 @@ from .deps import DbDep, SettingsDep, WorkerDep
 router = APIRouter(prefix="/api/images", tags=["images"])
 
 COPY_CHUNK = 1024 * 1024
-MEDIA_TYPES = {"jpg": "image/jpeg", "png": "image/png", "tif": "image/tiff"}
-FORMAT_NAMES = {"jpg": "JPEG", "png": "PNG", "tif": "TIFF"}
 FileKind = Literal["original", "preview", "thumb", "annotated-preview"]
 
 
@@ -96,9 +95,7 @@ def image_out(rec: ImageRecord, settings: Settings, object_count: int) -> ImageO
         published=rec.published,
         object_count=object_count,
         exported_at=rec.exported_at,
-        original_format=FORMAT_NAMES.get(
-            Path(rec.original_path).suffix.lstrip(".").lower(), "image"
-        ),
+        original_format=(fmt.name if (fmt := format_of(Path(rec.original_path))) else "image"),
         preview_url=f"{base}/files/preview",
         thumb_url=f"{base}/files/thumb",
         original_url=f"{base}/files/original",
@@ -123,8 +120,7 @@ async def upload_image(
     title: Annotated[str | None, Form()] = None,
 ) -> ImageOut:
     filename = file.filename or ""
-    ext = normalised_extension(filename)
-    if ext is None:
+    if normalised_extension(filename) is None:
         raise HTTPException(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             "Unsupported file type. Upload a JPG, PNG or TIFF.",
@@ -133,11 +129,29 @@ async def upload_image(
     image_id = str(uuid.uuid4())
     directory = image_dir(settings, image_id)
     directory.mkdir(parents=True, exist_ok=False)
-    original = directory / f"original.{ext}"
+    upload_path = directory / "original.upload"
     try:
-        await asyncio.to_thread(_copy_limited, file.file, original, limit)
-        width, height = await asyncio.to_thread(probe_image, original)
+        await asyncio.to_thread(_copy_limited, file.file, upload_path, limit)
+        # The stored extension follows the detected format, not the upload's file name.
+        width, height, ext = await asyncio.to_thread(probe_image, upload_path)
+        original = upload_path.with_name(f"original.{ext}")
+        upload_path.rename(original)
         preview, thumb = await asyncio.to_thread(make_derivatives, original, directory)
+        now = utcnow_iso()
+        rec = ImageRecord(
+            id=image_id,
+            created_at=now,
+            updated_at=now,
+            title=(title or "").strip() or Path(filename).stem or "Untitled",
+            original_name=Path(filename).name,
+            original_path=original.relative_to(settings.data_dir).as_posix(),
+            preview_path=preview.relative_to(settings.data_dir).as_posix(),
+            thumb_path=thumb.relative_to(settings.data_dir).as_posix(),
+            width=width,
+            height=height,
+        )
+        db.insert_image(rec)
+        worker.enqueue(image_id)
     except UploadTooLargeError:
         delete_image_files(settings, image_id)
         raise HTTPException(
@@ -149,25 +163,16 @@ async def upload_image(
         raise HTTPException(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, f"Not a usable image: {exc}"
         ) from None
-    except Exception:
+    except OSError as exc:
+        delete_image_files(settings, image_id)
+        if exc.errno == errno.ENOSPC:
+            raise HTTPException(
+                status.HTTP_507_INSUFFICIENT_STORAGE, "The server is out of disk space."
+            ) from None
+        raise
+    except Exception:  # any failure before the row exists leaves nothing behind on disk
         delete_image_files(settings, image_id)
         raise
-
-    now = utcnow_iso()
-    rec = ImageRecord(
-        id=image_id,
-        created_at=now,
-        updated_at=now,
-        title=(title or "").strip() or Path(filename).stem or "Untitled",
-        original_name=Path(filename).name,
-        original_path=original.relative_to(settings.data_dir).as_posix(),
-        preview_path=preview.relative_to(settings.data_dir).as_posix(),
-        thumb_path=thumb.relative_to(settings.data_dir).as_posix(),
-        width=width,
-        height=height,
-    )
-    db.insert_image(rec)
-    worker.enqueue(image_id)
     return image_out(rec, settings, 0)
 
 
@@ -201,8 +206,11 @@ async def solve_image(
     rec = _get_or_404(db, image_id)
     if rec.solve_status in (SolveStatus.PENDING, SolveStatus.SOLVING):
         raise HTTPException(status.HTTP_409_CONFLICT, "A solve is already in progress.")
-    db.update_image(image_id, {"solve_status": SolveStatus.PENDING, "solve_error": None})
-    worker.enqueue(image_id, hints)
+    db.update_image(
+        image_id,
+        {"solve_status": SolveStatus.PENDING, "solve_error": None, "solve_hints": hints},
+    )
+    worker.enqueue(image_id)
     return image_out(_get_or_404(db, image_id), settings, db.count_objects(image_id))
 
 
@@ -246,7 +254,10 @@ def _render_export(
     out_dir = render_dir(settings, rec.id)
     out_dir.mkdir(parents=True, exist_ok=True)
     final = out_dir / "annotated.jpg"
-    tmp = out_dir / f".annotated-{uuid.uuid4().hex}.jpg"
+    preview = out_dir / "annotated_preview.jpg"
+    token = uuid.uuid4().hex
+    tmp = out_dir / f".annotated-{token}.jpg"
+    tmp_preview = out_dir / f".preview-{token}.jpg"
     try:
         result = render_annotated(
             settings.data_dir / rec.original_path,
@@ -256,11 +267,14 @@ def _render_export(
             tmp,
             quality=quality,
             scale=scale,
+            preview_path=tmp_preview,
         )
+        # Both files swap in only after the full render succeeded, so they always match.
         os.replace(tmp, final)
+        os.replace(tmp_preview, preview)
     finally:
         tmp.unlink(missing_ok=True)
-    make_annotated_preview(final, out_dir / "annotated_preview.jpg")
+        tmp_preview.unlink(missing_ok=True)
     return result.width, result.height, final.stat().st_size, result.encoding
 
 
@@ -316,7 +330,8 @@ async def image_file(
     rec = _get_or_404(db, image_id)
     if kind == "original":
         path = settings.data_dir / rec.original_path
-        media = MEDIA_TYPES.get(path.suffix.lstrip(".").lower(), "application/octet-stream")
+        fmt = format_of(path)
+        media = fmt.media_type if fmt else "application/octet-stream"
     elif kind == "preview":
         path, media = settings.data_dir / rec.preview_path, "image/jpeg"
     elif kind == "thumb":

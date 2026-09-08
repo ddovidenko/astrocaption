@@ -26,7 +26,7 @@ live in `./data` on the host; back that directory up and nothing else.
 | Setting | Where | Default |
 |---|---|---|
 | nova API key | `NOVA_API_KEY` env (alias: `ASTROMETRY_API_KEY`), or `"nova_api_key"` in `data/config.json` | unset (solves fail with a hint) |
-| Upload limit | `ASTROCAPTION_MAX_UPLOAD_MB` env, or `"max_upload_mb"` | 60 |
+| Upload limit | `ASTROCAPTION_MAX_UPLOAD_MB` env, or `"max_upload_mb"` | 60 (and 300 megapixels) |
 | Site title | `ASTROCAPTION_SITE_TITLE` env, or `"site_title"` | AstroCaption |
 | Data directory | `ASTROCAPTION_DATA_DIR` env | `/data` in the container |
 | Default label style | `"default_style"` object in `data/config.json` | size-relative defaults |
@@ -48,7 +48,8 @@ applies to newly solved images. `name_preference` picks the label's primary line
 then common names) or `ngc_ic` (NGC and IC designations first). Stars show their proper name
 first, then the Bayer letter, then the Flamsteed number. Other names appear on the alias line.
 
-The key is read on every solve, so editing the file does not require a restart. It is never
+The file is re-read whenever it changes, so every setting in it is live without a restart, and
+`/api/health` reports the key state and any parse error in the file. It is never
 logged and never returned by the API (`/api/health` only reports whether one is set).
 
 ## Data directory layout

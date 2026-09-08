@@ -4,14 +4,15 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from ..config import Settings
+from ..config import Settings, SettingsSource
 from ..db import Database
 from ..worker import SolveWorker
 
 
 def get_settings(request: Request) -> Settings:
-    settings: Settings = request.app.state.settings
-    return settings
+    """Current settings: config.json values are re-read when the file changes."""
+    source: SettingsSource = request.app.state.settings_source
+    return source.current()
 
 
 def get_db(request: Request) -> Database:

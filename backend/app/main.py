@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .api import fonts, health, images
-from .config import Settings, load_settings
+from .config import Settings, SettingsSource
 from .db import Database
 from .solver import Solver
 from .solver.nova import NovaSolver
@@ -34,21 +34,22 @@ def create_app(
     poll_interval: float = 5.0,
     solve_timeout: float = 15 * 60,
 ) -> FastAPI:
-    explicit_settings = settings is not None
-    cfg = settings if settings is not None else load_settings()
+    source = SettingsSource(settings)  # config.json values stay live; paths are fixed
+    cfg = source.current()
     db = Database(cfg.db_path)
     http_client: httpx.AsyncClient | None = None
 
     def default_solver_factory() -> Solver | None:
-        # Re-read the key on every solve so a key added to config.json/env after start works.
-        current = cfg if explicit_settings else load_settings()
-        if not current.nova_api_key or http_client is None:
+        if http_client is None:  # only possible outside the lifespan
+            raise RuntimeError("HTTP client is not started")
+        current = source.current()
+        if not current.nova_api_key:
             return None
         return NovaSolver(current.nova_api_key, http_client, current.nova_base_url)
 
     worker = SolveWorker(
         db,
-        cfg,
+        source,
         solver_factory or default_solver_factory,
         poll_interval=poll_interval,
         timeout=solve_timeout,
@@ -81,7 +82,7 @@ def create_app(
         openapi_url="/api/openapi.json",
         redoc_url=None,
     )
-    app.state.settings = cfg
+    app.state.settings_source = source
     app.state.db = db
     app.state.worker = worker
 

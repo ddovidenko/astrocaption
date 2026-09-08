@@ -12,9 +12,12 @@ from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
 from app.config import REPO_ROOT, Settings
+from app.db import Database
 from app.main import create_app
-from app.models import Calibration
+from app.models import Calibration, ImageRecord, utcnow_iso
 from app.solver import JobState, Solver, SolveRequest, SolverError, SolveResult
+from app.storage import image_dir, make_derivatives
+from app.worker import SolveWorker
 
 FONTS_DIR = REPO_ROOT / "fonts"
 NOVA_FIXTURES = Path(__file__).parent / "fixtures" / "nova"
@@ -113,12 +116,6 @@ class FakeSolver:
     async def fetch_result(self, submission_id: int, job_id: int) -> SolveResult:
         return self.result
 
-    def status_url(self, submission_id: int) -> str | None:
-        return f"https://nova.example.test/status/{submission_id}"
-
-    def job_log_url(self, job_id: int) -> str | None:
-        return f"https://nova.example.test/joblog/{job_id}"
-
 
 @pytest.fixture
 def fake_solver() -> FakeSolver:
@@ -158,3 +155,52 @@ def wait_for_status(
         if time.monotonic() > deadline:
             raise AssertionError(f"timed out waiting for {statuses}; last {body}")
         time.sleep(0.02)
+
+
+def seed_image(
+    settings: Settings, db: Database, image_id: str = "img-1", width: int = 3000
+) -> ImageRecord:
+    """An uploaded-but-unsolved image on disk and in the database."""
+    settings.ensure_dirs()
+    db.init()
+    directory = image_dir(settings, image_id)
+    original = write_test_image(directory / "original.jpg", width, width * 2 // 3)
+    preview, thumb = make_derivatives(original, directory)
+    now = utcnow_iso()
+    rec = ImageRecord(
+        id=image_id,
+        created_at=now,
+        updated_at=now,
+        title="Orion",
+        original_name="orion.jpg",
+        original_path=original.relative_to(settings.data_dir).as_posix(),
+        preview_path=preview.relative_to(settings.data_dir).as_posix(),
+        thumb_path=thumb.relative_to(settings.data_dir).as_posix(),
+        width=width,
+        height=width * 2 // 3,
+    )
+    db.insert_image(rec)
+    return rec
+
+
+def make_worker(
+    settings: Settings, db: Database, solver: Solver | None, **kwargs: Any
+) -> SolveWorker:
+    kwargs.setdefault("poll_interval", 0.001)
+    kwargs.setdefault("timeout", 5)
+    return SolveWorker(db, settings, lambda: solver, **kwargs)
+
+
+@pytest.fixture
+def env_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[tuple[TestClient, Path]]:
+    """An app configured from the environment, so config.json in ``data_dir`` is live."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    monkeypatch.setenv("ASTROCAPTION_DATA_DIR", str(data_dir))
+    monkeypatch.delenv("NOVA_API_KEY", raising=False)
+    monkeypatch.delenv("ASTROMETRY_API_KEY", raising=False)
+    app = create_app(solver_factory=lambda: None, poll_interval=0.01)
+    with TestClient(app) as client:
+        yield client, data_dir

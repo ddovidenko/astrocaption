@@ -226,19 +226,25 @@ def primary_name(names: list[str], preference: NamePreference = "popular") -> st
 LeaderMode = Literal["auto", "on", "off"]
 
 
+MIN_FONT_SIZE = 6
+MAX_FONT_SIZE = 200
+MAX_STROKE_WIDTH = 40
+MAX_MARKER_MIN_RADIUS = 400
+
+
 class StyleConfig(BaseModel):
     """Global style for one image. All lengths are original-image pixels."""
 
     font_file: str = "Inter-Regular.ttf"
-    font_size: int = Field(default=24, ge=6, le=200)
+    font_size: int = Field(default=24, ge=MIN_FONT_SIZE, le=MAX_FONT_SIZE)
     text_color: str = "#FFFFFF"
     marker_color: str = "#FFD54A"
     leader_color: str = "#FFD54A"
     halo: bool = True
     halo_color: str = "#000000"
-    halo_width: int = Field(default=2, ge=0, le=40)
-    marker_width: int = Field(default=2, ge=1, le=40)
-    marker_min_radius: int = Field(default=6, ge=1, le=400)
+    halo_width: int = Field(default=2, ge=0, le=MAX_STROKE_WIDTH)
+    marker_width: int = Field(default=2, ge=1, le=MAX_STROKE_WIDTH)
+    marker_min_radius: int = Field(default=6, ge=1, le=MAX_MARKER_MIN_RADIUS)
     show_aliases: bool = True
     name_preference: NamePreference = "popular"
 
@@ -250,7 +256,7 @@ class Label(BaseModel):
     enabled: bool = True
     x: float = 0.0
     y: float = 0.0
-    font_size: int | None = Field(default=None, ge=6, le=200)
+    font_size: int | None = Field(default=None, ge=MIN_FONT_SIZE, le=MAX_FONT_SIZE)
     text_override: str | None = None
     color: str | None = None
     show_aliases: bool | None = None
@@ -282,6 +288,20 @@ class Calibration(BaseModel):
     parity: float
 
 
+class SolveHints(BaseModel):
+    """Optional hints passed to the solver when re-solving after a failure."""
+
+    focal_length_mm: float | None = Field(default=None, gt=0)
+    pixel_size_um: float | None = Field(default=None, gt=0)
+    scale_tolerance_pct: float = Field(default=20.0, gt=0, le=100)
+
+    @property
+    def arcsec_per_pixel(self) -> float | None:
+        if self.focal_length_mm is None or self.pixel_size_um is None:
+            return None
+        return 206.265 * self.pixel_size_um / self.focal_length_mm
+
+
 class ImageRecord(BaseModel):
     """Row of the ``images`` table."""
 
@@ -302,6 +322,7 @@ class ImageRecord(BaseModel):
     nova_job_id: int | None = None
     wcs_text: str | None = None
     calibration: Calibration | None = None
+    solve_hints: SolveHints | None = None  # persisted so a restart keeps the owner's hints
     published: bool = False
     exported_at: str | None = None
 
@@ -309,20 +330,6 @@ class ImageRecord(BaseModel):
 # ---------------------------------------------------------------------------
 # API payloads
 # ---------------------------------------------------------------------------
-
-
-class SolveHints(BaseModel):
-    """Optional hints passed to the solver when re-solving after a failure."""
-
-    focal_length_mm: float | None = Field(default=None, gt=0)
-    pixel_size_um: float | None = Field(default=None, gt=0)
-    scale_tolerance_pct: float = Field(default=20.0, gt=0, le=100)
-
-    @property
-    def arcsec_per_pixel(self) -> float | None:
-        if self.focal_length_mm is None or self.pixel_size_um is None:
-            return None
-        return 206.265 * self.pixel_size_um / self.focal_length_mm
 
 
 class ImageOut(BaseModel):
@@ -392,3 +399,4 @@ class HealthOut(BaseModel):
     version: str
     site_title: str
     nova_api_key_set: bool
+    config_error: str | None = None

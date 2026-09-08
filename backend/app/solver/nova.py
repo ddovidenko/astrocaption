@@ -6,6 +6,7 @@ Never called from tests; the recorded responses live in ``tests/fixtures/nova/``
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -13,7 +14,7 @@ from typing import Any
 import httpx
 
 from ..models import Calibration
-from .base import JobState, SolveRequest, SolverError, SolveResult
+from .base import JobState, SolveRequest, SolverError, SolveResult, TransientSolverError
 
 log = logging.getLogger(__name__)
 
@@ -42,23 +43,15 @@ class NovaSolver:
         self._base = base_url.rstrip("/")
         self._session: str | None = None
 
-    # -- urls -----------------------------------------------------------------------
-
-    def status_url(self, submission_id: int) -> str | None:
-        return status_url(self._base, submission_id)
-
-    def job_log_url(self, job_id: int) -> str | None:
-        return job_log_url(self._base, job_id)
-
     # -- transport helpers ------------------------------------------------------------
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         try:
             resp = await self._client.request(method, f"{self._base}{path}", **kwargs)
         except httpx.HTTPError as exc:
-            raise SolverError(f"{UNREACHABLE} ({exc.__class__.__name__}).") from exc
+            raise TransientSolverError(f"{UNREACHABLE} ({exc.__class__.__name__}).") from exc
         if resp.status_code >= 500:
-            raise SolverError(
+            raise TransientSolverError(
                 f"nova.astrometry.net returned HTTP {resp.status_code}; it may be down."
                 " Try again later."
             )
@@ -128,6 +121,14 @@ class NovaSolver:
         for job in jobs:
             if job is not None:
                 return int(job)
+        finished = payload.get("processing_finished")
+        if finished and finished != "None" and not jobs and not payload.get("user_images"):
+            # nova processed the upload but could not make an image (unreadable file):
+            # nothing will ever appear here, so do not wait for the deadline.
+            raise SolverError(
+                "nova.astrometry.net could not read the uploaded image and created no job."
+                f" See {status_url(self._base, submission_id)}."
+            )
         return None
 
     async def poll_job(self, job_id: int) -> JobState:
@@ -140,13 +141,23 @@ class NovaSolver:
         return JobState.SOLVING
 
     async def fetch_result(self, submission_id: int, job_id: int) -> SolveResult:
-        ann = await self._json("GET", f"/api/jobs/{job_id}/annotations/")
+        results = await asyncio.gather(
+            self._json("GET", f"/api/jobs/{job_id}/annotations/"),
+            self._json("GET", f"/api/jobs/{job_id}/info/"),
+            self._request("GET", f"/wcs_file/{job_id}"),
+            return_exceptions=True,  # let all three settle; no orphaned tasks on failure
+        )
+        for item in results:
+            if isinstance(item, BaseException):
+                raise item
+        ann, info, wcs_resp = results
+        assert isinstance(ann, dict) and isinstance(info, dict)
+        assert isinstance(wcs_resp, httpx.Response)
         entries = ann.get("annotations")
         if not isinstance(entries, list):
             raise SolverError("nova.astrometry.net returned no annotation list for this job.")
 
         calibration: Calibration | None = None
-        info = await self._json("GET", f"/api/jobs/{job_id}/info/")
         raw_cal = info.get("calibration")
         if isinstance(raw_cal, dict):
             try:
@@ -154,6 +165,9 @@ class NovaSolver:
             except ValueError:
                 log.warning("nova job %s: unparseable calibration %r", job_id, raw_cal)
 
-        wcs_resp = await self._request("GET", f"/wcs_file/{job_id}")
-        wcs_text = wcs_resp.content.decode("ascii", errors="replace") if wcs_resp.is_success else ""
+        if wcs_resp.is_success:
+            wcs_text = wcs_resp.content.decode("ascii", errors="replace")
+        else:
+            wcs_text = ""
+            log.warning("nova job %s: wcs_file returned HTTP %s", job_id, wcs_resp.status_code)
         return SolveResult(annotations=entries, wcs_text=wcs_text, calibration=calibration)

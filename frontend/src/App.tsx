@@ -16,7 +16,9 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     try {
-      setImages(await api.listImages())
+      const [list, current] = await Promise.all([api.listImages(), api.health()])
+      setImages(list)
+      setHealth(current)
       setError(null)
     } catch (err) {
       setError(describeError(err))
@@ -62,11 +64,16 @@ export default function App() {
         {health && <span className="version">v{health.version}</span>}
       </header>
       <main>
+        {health?.config_error && (
+          <div className="notice error">
+            <code>data/config.json</code> was ignored: {health.config_error}
+          </div>
+        )}
         {health && !health.nova_api_key_set && (
           <div className="notice">
             No nova.astrometry.net API key is configured. Set <code>NOVA_API_KEY</code> (or{' '}
-            <code>nova_api_key</code> in <code>data/config.json</code>) and restart; uploads will
-            fail to solve until then.
+            <code>nova_api_key</code> in <code>data/config.json</code>); no restart is needed, and
+            solves fail until a key is present.
           </div>
         )}
         <UploadPanel onUploaded={refresh} />

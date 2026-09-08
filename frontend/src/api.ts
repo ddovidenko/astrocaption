@@ -42,6 +42,7 @@ export interface HealthOut {
   version: string
   site_title: string
   nova_api_key_set: boolean
+  config_error: string | null
 }
 
 export interface ExportOut {

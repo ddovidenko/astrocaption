@@ -8,7 +8,16 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from .models import Annotations, Label, SolveObject, StyleConfig
+from .fonts import font_path
+from .models import (
+    MAX_FONT_SIZE,
+    MAX_MARKER_MIN_RADIUS,
+    MAX_STROKE_WIDTH,
+    Annotations,
+    Label,
+    SolveObject,
+    StyleConfig,
+)
 from .placement import Box, Circle, PlacementItem, place_labels, scale_unit
 from .render import marker_radius, measure_label
 
@@ -23,20 +32,36 @@ def _clamp(v: int, lo: int, hi: int) -> int:
 
 
 def default_style(
-    width: int, height: int, overrides: Mapping[str, object] | None = None
+    width: int,
+    height: int,
+    fonts_dir: Path,
+    overrides: Mapping[str, object] | None = None,
 ) -> StyleConfig:
-    """Size-relative defaults, then the owner's ``default_style`` from config.json on top."""
+    """Size-relative defaults, then the owner's ``default_style`` from config.json on top.
+
+    Derived values are clamped to the model bounds so a giant mosaic still validates, and a
+    ``font_file`` override that is not a bundled font is dropped with a warning rather than
+    failing every solve after nova has already succeeded.
+    """
     s = scale_unit(width, height)
     base = StyleConfig(
-        font_size=_clamp(round(12 * s), 8, 200),
-        halo_width=max(1, round(2 * s)),
-        marker_width=max(1, round(1.5 * s)),
-        marker_min_radius=max(4, round(6 * s)),
+        font_size=_clamp(round(12 * s), 8, MAX_FONT_SIZE),
+        halo_width=_clamp(round(2 * s), 1, MAX_STROKE_WIDTH),
+        marker_width=_clamp(round(1.5 * s), 1, MAX_STROKE_WIDTH),
+        marker_min_radius=_clamp(round(6 * s), 4, MAX_MARKER_MIN_RADIUS),
     )
     if not overrides:
         return base
+    merged: dict[str, object] = {**base.model_dump(), **overrides}
+    font = merged.get("font_file")
+    if isinstance(font, str):
+        try:
+            font_path(fonts_dir, font)
+        except LookupError:
+            log.warning("ignoring default_style.font_file %r: not a bundled font", font)
+            merged["font_file"] = base.font_file
     try:
-        return StyleConfig.model_validate({**base.model_dump(), **overrides})
+        return StyleConfig.model_validate(merged)
     except ValidationError as exc:
         log.warning("ignoring invalid default_style in config.json: %s", exc)
         return base
@@ -98,7 +123,7 @@ def build_default_annotations(
     fonts_dir: Path,
     style_overrides: Mapping[str, object] | None = None,
 ) -> Annotations:
-    style = default_style(width, height, style_overrides)
+    style = default_style(width, height, fonts_dir, style_overrides)
     labels = [
         Label(object_id=o.id, enabled=default_enabled(o, width), x=o.x, y=o.y) for o in objects
     ]

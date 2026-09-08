@@ -19,10 +19,7 @@ from PIL import Image, ImageDraw, JpegImagePlugin
 from .fonts import load_font
 from .models import Annotations, Label, SolveObject, StyleConfig
 from .placement import Box, scale_unit
-
-# Uploads are owner-only and capped by max_upload_mb; large astrophotos exceed Pillow's
-# default decompression-bomb threshold (~89 MP).
-Image.MAX_IMAGE_PIXELS = None
+from .storage import is_jpeg, to_rgb, write_preview
 
 ALIAS_SCALE = 0.7
 LINE_HEIGHT = 1.2
@@ -48,7 +45,7 @@ def jpeg_save_options(src: Image.Image, quality: int | None) -> tuple[dict[str, 
     about the same size as the upload with the smallest possible generational loss.
     """
     tables = getattr(src, "quantization", None)
-    if quality is None and src.format == "JPEG" and isinstance(tables, dict) and tables:
+    if quality is None and is_jpeg(src) and isinstance(tables, dict) and tables:
         sampling = JpegImagePlugin.get_sampling(src)
         if sampling not in SUBSAMPLING_NAMES:
             sampling = 0
@@ -196,14 +193,22 @@ def render_annotated(
     *,
     quality: int | None = None,
     scale: float = 1.0,
+    preview_path: Path | None = None,
 ) -> RenderResult:
-    """Render ``original`` + annotations to ``out_path`` (JPEG). The original is never modified."""
+    """Render ``original`` + annotations to ``out_path`` (JPEG). The original is never modified.
+
+    ``preview_path`` additionally receives a preview made from the in-memory render (no
+    second decode of the full-size export). Callers that need the pair to be atomic write
+    both to temporary names and swap them in afterwards.
+    """
     with Image.open(original_path) as src:
         icc = src.info.get("icc_profile")
         options, encoding = jpeg_save_options(src, quality)
-        img = src.convert("RGB")
+        img = to_rgb(src)
     draw_annotations(img, objects, ann, fonts_dir)
-    if scale != 1.0:
+    if preview_path is not None:
+        write_preview(img, preview_path, icc)
+    if scale != 1.0:  # rebinding drops the full-resolution copy before the encode
         size = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
         img = img.resize(size, Image.Resampling.LANCZOS)
     out_path.parent.mkdir(parents=True, exist_ok=True)

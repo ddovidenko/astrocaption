@@ -7,23 +7,34 @@ request handlers independent without a shared-connection lock.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
+
+from pydantic import BaseModel
 
 from .models import (
     Annotations,
     Calibration,
     ImageRecord,
     Label,
+    SolveHints,
     SolveObject,
     SolveStatus,
     StyleConfig,
     utcnow_iso,
 )
 
-SCHEMA_VERSION = 1
+log = logging.getLogger(__name__)
+
+SCHEMA_VERSION = 2
+
+# Statements that bring an existing database from version N-1 to N.
+MIGRATIONS: dict[int, tuple[str, ...]] = {
+    2: ("ALTER TABLE images ADD COLUMN solve_hints_json TEXT",),
+}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS images (
@@ -44,6 +55,7 @@ CREATE TABLE IF NOT EXISTS images (
     nova_job_id        INTEGER,
     wcs_text           TEXT,
     calibration_json   TEXT,
+    solve_hints_json   TEXT,
     published          INTEGER NOT NULL DEFAULT 0,
     exported_at        TEXT
 );
@@ -69,54 +81,47 @@ CREATE TABLE IF NOT EXISTS annotations (
 );
 """
 
-IMAGE_COLUMNS = (
-    "id",
-    "created_at",
-    "updated_at",
-    "title",
-    "original_name",
-    "original_path",
-    "preview_path",
-    "thumb_path",
-    "width",
-    "height",
-    "solve_status",
-    "solve_error",
-    "solve_scale",
-    "nova_submission_id",
-    "nova_job_id",
-    "wcs_text",
-    "calibration_json",
-    "published",
-    "exported_at",
+# ImageRecord fields stored as JSON text under a different column name. Every other field
+# maps to a column of the same name; enums bind as their string and bools as 0/1.
+JSON_COLUMNS: dict[str, tuple[str, type[BaseModel]]] = {
+    "calibration": ("calibration_json", Calibration),
+    "solve_hints": ("solve_hints_json", SolveHints),
+}
+IMAGE_COLUMNS: tuple[str, ...] = tuple(
+    JSON_COLUMNS[name][0] if name in JSON_COLUMNS else name for name in ImageRecord.model_fields
 )
 
 
+def _parse_json_column[T: BaseModel](row: sqlite3.Row, column: str, model: type[T]) -> T | None:
+    """One corrupt JSON cell must not take the whole image list down."""
+    raw = row[column]
+    if not raw:
+        return None
+    try:
+        return model.model_validate_json(raw)
+    except ValueError as exc:
+        log.warning("image %s: ignoring unreadable %s: %s", row["id"], column, exc)
+        return None
+
+
 def _row_to_image(row: sqlite3.Row) -> ImageRecord:
-    calibration = None
-    if row["calibration_json"]:
-        calibration = Calibration.model_validate_json(row["calibration_json"])
-    return ImageRecord(
-        id=row["id"],
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-        title=row["title"],
-        original_name=row["original_name"],
-        original_path=row["original_path"],
-        preview_path=row["preview_path"],
-        thumb_path=row["thumb_path"],
-        width=row["width"],
-        height=row["height"],
-        solve_status=SolveStatus(row["solve_status"]),
-        solve_error=row["solve_error"],
-        solve_scale=row["solve_scale"],
-        nova_submission_id=row["nova_submission_id"],
-        nova_job_id=row["nova_job_id"],
-        wcs_text=row["wcs_text"],
-        calibration=calibration,
-        published=bool(row["published"]),
-        exported_at=row["exported_at"],
-    )
+    data: dict[str, object] = dict(row)
+    for name, (column, model) in JSON_COLUMNS.items():
+        data[name] = _parse_json_column(row, column, model)
+    return ImageRecord.model_validate(data)
+
+
+def _encode(fields: Mapping[str, object]) -> dict[str, object]:
+    """Record fields → column values."""
+    values: dict[str, object] = {}
+    for key, value in fields.items():
+        if key in JSON_COLUMNS:
+            values[JSON_COLUMNS[key][0]] = (
+                value.model_dump_json() if isinstance(value, BaseModel) else None
+            )
+        else:
+            values[key] = value
+    return values
 
 
 def _row_to_object(row: sqlite3.Row) -> SolveObject:
@@ -151,19 +156,35 @@ class Database:
         with self.connect() as conn:
             conn.execute("PRAGMA journal_mode = WAL")
             version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            if version > SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"database schema {version} is newer than this build ({SCHEMA_VERSION});"
+                    " upgrade AstroCaption or restore a matching data directory"
+                )
             if version < 1:
                 conn.executescript(SCHEMA)
                 conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                return
+            for target in range(version + 1, SCHEMA_VERSION + 1):
+                # SQLite DDL is transactional: a failed step leaves the old version stamped.
+                conn.execute("BEGIN")
+                try:
+                    for statement in MIGRATIONS[target]:
+                        conn.execute(statement)
+                    conn.execute(f"PRAGMA user_version = {target}")
+                    conn.execute("COMMIT")
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
 
     # -- images -----------------------------------------------------------------
 
     def insert_image(self, rec: ImageRecord) -> None:
-        values = {
-            **rec.model_dump(exclude={"calibration"}),
-            "solve_status": rec.solve_status.value,
-            "published": int(rec.published),
-            "calibration_json": rec.calibration.model_dump_json() if rec.calibration else None,
+        fields = {
+            **rec.model_dump(exclude=set(JSON_COLUMNS)),
+            **{name: getattr(rec, name) for name in JSON_COLUMNS},
         }
+        values = _encode(fields)
         cols = ", ".join(IMAGE_COLUMNS)
         params = ", ".join(f":{c}" for c in IMAGE_COLUMNS)
         with self.connect() as conn:
@@ -187,20 +208,9 @@ class Database:
             ).fetchall()
         return [_row_to_image(r) for r in rows]
 
-    def update_image(self, image_id: str, fields: dict[str, object]) -> None:
-        """Update the given columns; ``updated_at`` is always refreshed."""
-        values: dict[str, object] = {}
-        for key, value in fields.items():
-            if key == "calibration":
-                values["calibration_json"] = (
-                    value.model_dump_json() if isinstance(value, Calibration) else None
-                )
-            elif key == "solve_status" and isinstance(value, SolveStatus):
-                values[key] = value.value
-            elif key == "published":
-                values[key] = int(bool(value))
-            else:
-                values[key] = value
+    def update_image(self, image_id: str, fields: Mapping[str, object]) -> None:
+        """Update the given record fields; ``updated_at`` is always refreshed."""
+        values = _encode(fields)
         unknown = set(values) - set(IMAGE_COLUMNS)
         if unknown:
             raise ValueError(f"unknown image columns: {sorted(unknown)}")
