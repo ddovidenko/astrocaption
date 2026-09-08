@@ -11,21 +11,24 @@ import pytest
 
 from app.solver import JobState, SolveRequest, SolverError, TransientSolverError
 from app.solver.nova import BAD_KEY, NovaSolver, job_log_url, status_url
-from tests.conftest import NOVA_FIXTURES
+from tests.conftest import NOVA_FIXTURES, NOVA_NARROW_FIXTURES
 
 Route = str | list[str] | dict[str, Any]  # fixture file, sequence of files, or inline JSON
 
 BASE = "https://nova.example.test"
 KEY = "super-secret-api-key"
-SUBID = 16030035  # ids inside the recorded fixtures
+SUBID = 16030035  # ids inside the recorded Orion fixtures
 JOBID = 16837720
+NARROW_SUBID = 16031943  # and the Pelican ones
+NARROW_JOBID = 16840120
 
 
 class Replay:
     """Serve fixture files per (method, path); lists are consumed in order."""
 
-    def __init__(self, routes: dict[str, Route]) -> None:
+    def __init__(self, routes: dict[str, Route], fixtures_dir: Path = NOVA_FIXTURES) -> None:
         self.routes = {k: (list(v) if isinstance(v, list) else v) for k, v in routes.items()}
+        self.fixtures_dir = fixtures_dir
         self.requests: list[tuple[httpx.Request, bytes]] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
@@ -46,7 +49,7 @@ class Replay:
             return httpx.Response(int(name.split(":")[1]), text="<html>error</html>")
         if name == "raise":
             raise httpx.ConnectError("connection refused")
-        path = NOVA_FIXTURES / name
+        path = self.fixtures_dir / name
         if name.endswith(".json"):
             return httpx.Response(200, json=json.loads(path.read_text()))
         return httpx.Response(200, content=path.read_bytes())
@@ -61,45 +64,54 @@ def run(coro: Any) -> Any:
     return asyncio.run(coro)
 
 
-def happy_routes() -> dict[str, Route]:
+def happy_routes(subid: int = SUBID, jobid: int = JOBID) -> dict[str, Route]:
     return {
         "POST /api/login": "login.json",
         "POST /api/upload": "upload.json",
-        f"GET /api/submissions/{SUBID}": [
+        f"GET /api/submissions/{subid}": [
             "submission_queued.json",
             "submission_pending.json",
             "submission_ready.json",
         ],
-        f"GET /api/jobs/{JOBID}": ["job_solving.json", "job_success.json"],
-        f"GET /api/jobs/{JOBID}/annotations/": "annotations.json",
-        f"GET /api/jobs/{JOBID}/info/": "job_info.json",
-        f"GET /wcs_file/{JOBID}": "wcs.fits",
+        f"GET /api/jobs/{jobid}": ["job_solving.json", "job_success.json"],
+        f"GET /api/jobs/{jobid}/annotations/": "annotations.json",
+        f"GET /api/jobs/{jobid}/info/": "job_info.json",
+        f"GET /wcs_file/{jobid}": "wcs.fits",
     }
 
 
-def test_full_flow_replays_fixtures(tmp_path: Path) -> None:
-    replay = Replay(happy_routes())
+@pytest.mark.parametrize(
+    ("fixtures_dir", "subid", "jobid", "n_annotations"),
+    [
+        pytest.param(NOVA_FIXTURES, SUBID, JOBID, 20, id="orion"),
+        pytest.param(NOVA_NARROW_FIXTURES, NARROW_SUBID, NARROW_JOBID, 8, id="pelican"),
+    ],
+)
+def test_full_flow_replays_fixtures(
+    tmp_path: Path, fixtures_dir: Path, subid: int, jobid: int, n_annotations: int
+) -> None:
+    replay = Replay(happy_routes(subid, jobid), fixtures_dir)
     solver = make_solver(replay)
     image = tmp_path / "solve.jpg"
     image.write_bytes(b"\xff\xd8fakejpeg\xff\xd9")
 
     async def flow() -> Any:
-        subid = await solver.submit(
+        got_subid = await solver.submit(
             SolveRequest(image, scale_arcsec_per_px=1.94, scale_tolerance_pct=15)
         )
-        assert subid == SUBID
+        assert got_subid == subid
         assert await solver.poll_submission(subid) is None  # queued
         assert await solver.poll_submission(subid) is None  # pending
         job = await solver.poll_submission(subid)
-        assert job == JOBID
+        assert job == jobid
         assert await solver.poll_job(job) == JobState.SOLVING
         assert await solver.poll_job(job) == JobState.SUCCESS
         return await solver.fetch_result(subid, job)
 
     result = run(flow())
-    assert len(result.annotations) == 20
+    assert len(result.annotations) == n_annotations
     assert result.wcs_text.startswith("SIMPLE  =")
-    expected_ra = json.loads((NOVA_FIXTURES / "job_info.json").read_text())["calibration"]["ra"]
+    expected_ra = json.loads((fixtures_dir / "job_info.json").read_text())["calibration"]["ra"]
     assert result.calibration is not None and result.calibration.ra == pytest.approx(expected_ra)
 
     login_req, login_body = replay.requests[0]

@@ -1,0 +1,30 @@
+{
+ "objects_in_field": [
+  "IC 5070",
+  "Pelican Nebula",
+  "The star 56 Cyg",
+  "The star 57 Cyg"
+ ],
+ "machine_tags": [
+  "The star 56 Cyg",
+  "The star 57 Cyg",
+  "IC 5070",
+  "Pelican Nebula"
+ ],
+ "tags": [
+  "The star 56 Cyg",
+  "The star 57 Cyg",
+  "IC 5070",
+  "Pelican Nebula"
+ ],
+ "status": "success",
+ "original_filename": "solve.jpg",
+ "calibration": {
+  "ra": 312.8924796655735,
+  "dec": 44.028221983874076,
+  "radius": 0.9964682058369624,
+  "pixscale": 1.9929364116739248,
+  "orientation": 2.4918639788148766,
+  "parity": 1.0
+ }
+}

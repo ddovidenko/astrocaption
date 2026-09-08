@@ -5,7 +5,7 @@ import pytest
 from app.catalog import enrich_names, normalise
 from app.models import name_category, primary_name
 from app.objects import objects_from_nova, split_names
-from tests.conftest import load_fixture
+from tests.conftest import NOVA_NARROW_FIXTURES, load_fixture
 
 
 def test_primary_name_prefers_messier() -> None:
@@ -139,3 +139,23 @@ def test_invalid_entries_are_skipped() -> None:
     assert len(objects) == 1
     assert objects[0].catalog_names == ["OK 1"]
     assert objects[0].radius == 0.0
+
+
+def test_narrow_field_keeps_hd_stars_separate_from_their_bright_twins() -> None:
+    """nova lists 56 Cyg and 57 Cyg twice on the 1° Pelican field: as ``bright`` entries
+    and again as ``hd`` entries at the same pixel. They stay separate objects."""
+    raw = load_fixture("annotations.json", NOVA_NARROW_FIXTURES)["annotations"]
+    objects = objects_from_nova(raw, 1.0)
+    assert [o.type for o in objects].count("hd") == 5
+    assert all(o.radius == 0 for o in objects if o.type == "hd")
+    assert all(primary_name(o.catalog_names).startswith("HD ") for o in objects if o.type == "hd")
+
+    pelican = objects[0]
+    assert pelican.id == 1 and pelican.type == "ic"
+    assert pelican.catalog_names == ["IC 5070", "LBN 350", "Pelican Nebula"]
+
+    by_name = {primary_name(o.catalog_names): o for o in objects}
+    for bright, hd in (("56 Cyg", "HD 198639"), ("57 Cyg", "HD 199081")):
+        assert abs(by_name[bright].x - by_name[hd].x) <= 1
+        assert abs(by_name[bright].y - by_name[hd].y) <= 1
+        assert by_name[bright].type == "bright" and by_name[hd].type == "hd"

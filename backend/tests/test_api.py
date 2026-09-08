@@ -13,10 +13,12 @@ from app.config import Settings
 from app.db import Database
 from app.main import create_app
 from tests.conftest import (
+    NOVA_NARROW_FIXTURES,
     FakeSolver,
     load_fixture,
     make_client,
     make_settings,
+    nova_result,
     upload,
     wait_for_status,
     write_test_image,
@@ -143,6 +145,30 @@ def test_upload_too_large_without_content_length_is_refused_after_the_cap(
 def test_content_length_precheck_only_guards_the_upload_route(client: TestClient) -> None:
     resp = client.get("/api/images", headers={"content-length": str(10**12)})
     assert resp.status_code == 200
+
+
+def test_narrow_field_hides_hd_stars_but_lists_them(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    pelican = write_test_image(tmp_path / "pelican.jpg", 2160, 2880)
+    solver = FakeSolver(nova_result(NOVA_NARROW_FIXTURES))
+    with make_client(settings, lambda: solver) as client:
+        image_id = upload(client, pelican)["id"]
+        solved = wait_for_status(client, image_id, {"solved", "failed"})
+        assert solved["solve_status"] == "solved", solved["solve_error"]
+        assert solved["object_count"] == 8
+        assert solved["calibration"]["radius"] == pytest.approx(0.9965, abs=1e-3)
+
+        objects = client.get(f"/api/images/{image_id}/objects").json()
+        by_type: dict[str, list[str]] = {}
+        for o in objects:
+            by_type.setdefault(o["type"], []).append(o["primary_name"])
+        assert by_type["ic"] == ["IC 5070"]
+        assert sorted(by_type["bright"]) == ["56 Cyg", "57 Cyg"]
+        assert len(by_type["hd"]) == 5 and all(n.startswith("HD ") for n in by_type["hd"])
+
+        labels = client.get(f"/api/images/{image_id}/annotations").json()["labels"]
+        enabled = {lab["object_id"] for lab in labels if lab["enabled"]}
+        assert enabled == {o["id"] for o in objects if o["type"] != "hd"}
 
 
 def test_solve_objects_annotations_and_export(

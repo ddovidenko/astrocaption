@@ -35,3 +35,4 @@ What the recording taught us, and what the code now relies on: NGC/IC entries ca
 designation (aliases such as `M 42` come from `app/catalog/names.json`); bright stars carry
 `"ι Ori / 44 Ori"` plus an optional proper name; entries are never merged because nova puts
 e.g. NGC 1980 and ι Ori at the same pixel; `hd` entries were absent for this 2.4° field.
+The narrow field with `hd` entries is in `../nova-narrow/`.

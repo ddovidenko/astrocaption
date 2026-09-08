@@ -20,18 +20,21 @@ from app.storage import image_dir, make_derivatives
 from app.worker import SolveWorker
 
 FONTS_DIR = REPO_ROOT / "fonts"
-NOVA_FIXTURES = Path(__file__).parent / "fixtures" / "nova"
+NOVA_FIXTURES = Path(__file__).parent / "fixtures" / "nova"  # 3.9° Orion field, no hd
+NOVA_NARROW_FIXTURES = Path(__file__).parent / "fixtures" / "nova-narrow"  # 1° Pelican, hd
 
 
-def load_fixture(name: str) -> Any:
-    return json.loads((NOVA_FIXTURES / name).read_text(encoding="utf-8"))
+def load_fixture(name: str, fixtures_dir: Path = NOVA_FIXTURES) -> Any:
+    return json.loads((fixtures_dir / name).read_text(encoding="utf-8"))
 
 
-def nova_result() -> SolveResult:
+def nova_result(fixtures_dir: Path = NOVA_FIXTURES) -> SolveResult:
     return SolveResult(
-        annotations=load_fixture("annotations.json")["annotations"],
-        wcs_text=(NOVA_FIXTURES / "wcs.fits").read_text(encoding="ascii"),
-        calibration=Calibration.model_validate(load_fixture("job_info.json")["calibration"]),
+        annotations=load_fixture("annotations.json", fixtures_dir)["annotations"],
+        wcs_text=(fixtures_dir / "wcs.fits").read_text(encoding="ascii"),
+        calibration=Calibration.model_validate(
+            load_fixture("job_info.json", fixtures_dir)["calibration"]
+        ),
     )
 
 
