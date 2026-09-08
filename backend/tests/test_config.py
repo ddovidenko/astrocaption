@@ -25,7 +25,7 @@ def test_settings_without_config_file_require_setup(tmp_path: Path) -> None:
     s = load_settings(env_for(tmp_path))
     assert s.password_hash is None and s.session_secret is None
     assert s.setup_required is True and s.auth_ready is False
-    assert s.trust_proxy is False and s.env_locked == frozenset()
+    assert s.trust_proxy is False and s.locked_by == {}
 
 
 def test_settings_read_auth_fields_and_env_locks(tmp_path: Path) -> None:
@@ -38,7 +38,7 @@ def test_settings_read_auth_fields_and_env_locks(tmp_path: Path) -> None:
     assert (s.password_hash, s.session_secret) == ("scrypt$x", "s")
     assert s.setup_required is False and s.auth_ready is True
     assert s.trust_proxy is True
-    assert s.site_title == "Env" and s.env_locked == {"site_title", "nova_api_key"}
+    assert s.site_title == "Env" and set(s.locked_by) == {"site_title", "nova_api_key"}
     assert "scrypt$x" not in repr(s)  # both secrets are repr=False
 
 
@@ -155,7 +155,7 @@ def test_perform_setup_skips_env_locked_fields(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     before = load_settings(env_for(tmp_path, NOVA_API_KEY="from-env"))
-    assert before.env_locked == {"nova_api_key"}
+    assert set(before.locked_by) == {"nova_api_key"}
     with caplog.at_level(logging.INFO, logger="app.auth"):
         perform_setup(before, "hunter2hunter2", nova_api_key="typed-key", site_title="My Sky")
     written = json.loads((tmp_path / "config.json").read_text())
@@ -189,7 +189,7 @@ def test_lockable_covers_every_lockable_field(tmp_path: Path) -> None:
             tmp_path, NOVA_API_KEY="k", ASTROCAPTION_MAX_UPLOAD_MB="7", ASTROCAPTION_SITE_TITLE="T"
         )
     )
-    assert set(LOCKABLE) == s.env_locked == {"nova_api_key", "max_upload_mb", "site_title"}
+    assert set(LOCKABLE) == set(s.locked_by) == {"nova_api_key", "max_upload_mb", "site_title"}
     assert s.locked_by == {
         "nova_api_key": "NOVA_API_KEY",
         "max_upload_mb": "ASTROCAPTION_MAX_UPLOAD_MB",
@@ -200,7 +200,7 @@ def test_lockable_covers_every_lockable_field(tmp_path: Path) -> None:
 def test_locked_by_names_the_variable_that_is_actually_set(tmp_path: Path) -> None:
     """The legacy alias locks the key just as well, and is the name the API reports."""
     s = load_settings(env_for(tmp_path, ASTROMETRY_API_KEY="legacy"))
-    assert s.env_locked == {"nova_api_key"} and s.nova_api_key == "legacy"
+    assert set(s.locked_by) == {"nova_api_key"} and s.nova_api_key == "legacy"
     assert s.locked_by == {"nova_api_key": "ASTROMETRY_API_KEY"}
     both = load_settings(env_for(tmp_path, NOVA_API_KEY="new", ASTROMETRY_API_KEY="legacy"))
     assert both.nova_api_key == "new" and both.locked_by["nova_api_key"] == "NOVA_API_KEY"

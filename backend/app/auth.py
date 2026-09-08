@@ -189,7 +189,7 @@ def perform_setup(
 ) -> None:
     """Write the owner password hash and a fresh session secret (SPEC § 5.1 step 4).
 
-    ``nova_api_key``/``site_title`` are skipped when ``settings.env_locked`` already pins
+    ``nova_api_key``/``site_title`` are skipped when ``settings.locked_by`` already pins
     them: the environment variable wins regardless, so writing the form value would only
     park a stale one in config.json that never takes effect.
     """
@@ -201,7 +201,7 @@ def perform_setup(
         value = raw.strip() if raw else ""
         if not value:
             continue
-        if name in settings.env_locked:
+        if name in settings.locked_by:
             log.info("setup: %s ignored, pinned by the environment", name)
             continue
         updates[name] = value

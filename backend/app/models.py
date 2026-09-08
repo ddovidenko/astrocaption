@@ -6,9 +6,10 @@ Geometry is always in original-image pixels (see CLAUDE.md).
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -484,6 +485,13 @@ class ConfigUpdate(BaseModel):
     max_upload_mb: int | None = Field(default=None, ge=MIN_UPLOAD_MB, le=MAX_UPLOAD_MB)
     nova_api_key: str | None = Field(default=None, max_length=200)
     default_style: StyleOverrides | None = None
+
+
+def validation_message(error: Mapping[str, Any]) -> str:
+    """Pydantic's reason for one rejected value, never the value itself (CLAUDE.md)."""
+    if error.get("type") == "json_invalid":
+        return "the body is not valid JSON"
+    return str(error.get("msg", "is not valid"))
 
 
 # A custom ``@field_validator`` message is echoed verbatim by the 422 handler in main.py,

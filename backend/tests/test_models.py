@@ -63,6 +63,11 @@ def test_style_defaults_model_matches_the_style_model() -> None:
     assert set(StyleDefaults.model_fields) == set(StyleConfig.model_fields) - SIZE_RELATIVE
 
 
+def test_style_overrides_covers_every_style_field() -> None:
+    """A new StyleConfig field must be settable from config.json and the page, not silently not."""
+    assert set(StyleOverrides.model_fields) == set(StyleConfig.model_fields)
+
+
 def test_config_update_strips_and_bounds_the_title() -> None:
     assert ConfigUpdate.model_validate({"site_title": "  Sky  "}).site_title == "Sky"
     with pytest.raises(ValidationError) as caught:

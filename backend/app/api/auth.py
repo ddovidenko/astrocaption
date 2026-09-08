@@ -20,6 +20,7 @@ from ..auth import (
 from ..config import ConfigError, Settings
 from ..models import LoginRequest, SetupRequest
 from .deps import SettingsDep
+from .errors import config_write_error
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ def session_cookie_params(settings: Settings, *, with_max_age: bool = False) -> 
 
 @router.post("/setup", status_code=status.HTTP_204_NO_CONTENT)
 async def setup(body: SetupRequest, request: Request) -> None:
-    lock: asyncio.Lock = request.app.state.setup_lock
+    lock: asyncio.Lock = request.app.state.config_write_lock
     async with lock:
         # Re-read inside the lock: two browsers submitting the form at the same moment must
         # not both write a password hash, each believing it owns the site.
@@ -70,15 +71,10 @@ async def setup(body: SetupRequest, request: Request) -> None:
                 nova_api_key=body.nova_api_key,
                 site_title=body.site_title,
             )
-        except ConfigError as exc:  # the file grew unreadable between the check and the write
-            raise HTTPException(status.HTTP_409_CONFLICT, exc.public) from exc
-        except OSError as exc:
-            log.exception("setup could not write config.json")
-            raise HTTPException(
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-                "The password could not be saved: the data directory is not writable. "
-                "Check the permissions on ./data and try again.",
-            ) from exc
+        except (ConfigError, OSError) as exc:  # unreadable since the check, or unwritable
+            if isinstance(exc, OSError):
+                log.exception("setup could not write config.json")
+            raise config_write_error(exc, "The password") from exc
 
 
 @router.post("/login", status_code=status.HTTP_204_NO_CONTENT)

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api, pageError, type ConfigOut, type ConfigUpdate, type FontOut, type HealthOut } from '../api'
-import { overridesFromStyleForm, sameOverrides, styleFormFromOverrides, type StyleForm, type Tri } from './configForm'
+import { api, pageError, type ConfigOut, type FontOut, type HealthOut } from '../api'
+import { buildUpdate, styleFormFromOverrides, type StyleForm, type Tri } from './configForm'
 
 type ColorField = 'text_color' | 'marker_color' | 'leader_color' | 'halo_color'
 type SizeField = 'font_size' | 'halo_width' | 'marker_width' | 'marker_min_radius'
@@ -50,10 +50,8 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
     setSaved(null) // any edit makes "Saved." stale
     set(value)
   }
-  const setField = <K extends keyof StyleForm>(key: K, value: StyleForm[K]) => {
-    setSaved(null)
-    setStyle((s) => ({ ...s, [key]: value }))
-  }
+  const setField = <K extends keyof StyleForm>(key: K, value: StyleForm[K]) =>
+    edit((v: StyleForm[K]) => setStyle((s) => ({ ...s, [key]: v })), value)
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
@@ -61,20 +59,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
     setBusy(true)
     setError(null)
     setSaved(null)
-    const body: ConfigUpdate = {}
-    // default_style replaces the whole override set, so the saved font travels with it even
-    // when the font list did not load: dropping it here would silently unset the owner's font.
-    // If it is no longer a bundled file the server answers 422 naming default_style.font_file.
-    const next = overridesFromStyleForm(style)
-    if (!sameOverrides(next, config.default_style)) body.default_style = next
-    if (!locked('site_title') && siteTitle.trim() !== config.site_title) body.site_title = siteTitle.trim()
-    if (!locked('max_upload_mb') && uploadMb.trim() !== '' && uploadMb !== String(config.max_upload_mb)) {
-      body.max_upload_mb = Number(uploadMb)
-    }
-    if (!locked('nova_api_key')) {
-      if (clearKey) body.nova_api_key = null
-      else if (novaKey.trim()) body.nova_api_key = novaKey.trim()
-    }
+    const body = buildUpdate({ siteTitle, uploadMb, novaKey, clearKey, style }, config)
     try {
       const fresh = await api.updateConfig(body)
       setConfig(fresh)
@@ -185,11 +170,12 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
                 <input
                   type="checkbox"
                   checked={clearKey}
-                  onChange={(e) => {
-                    setSaved(null)
-                    setClearKey(e.target.checked)
-                    if (e.target.checked) setNovaKey('') // never silently discard a typed key
-                  }}
+                  onChange={(e) =>
+                    edit((checked: boolean) => {
+                      setClearKey(checked)
+                      if (checked) setNovaKey('') // never silently discard a typed key
+                    }, e.target.checked)
+                  }
                 />{' '}
                 Remove the stored key
               </label>

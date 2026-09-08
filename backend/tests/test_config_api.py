@@ -195,34 +195,29 @@ def test_put_rejects_blank_title_with_the_model_rule(
         assert read_config(tmp_path)["site_title"] == "Padded"  # stripped by the model
 
 
-def test_put_500_on_unwritable_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("exc", "detail"),
+    [
+        (PermissionError("Read-only file system"), DATA_DIR_NOT_WRITABLE),
+        (OSError(errno.ENOSPC, "no space left on device"), DATA_DIR_FULL),
+    ],
+    ids=["not-writable", "disk-full"],
+)
+def test_put_500_names_the_write_failure_without_the_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exc: OSError, detail: str
+) -> None:
+    """A full disk is the one write failure the owner can act on, so it gets its own words;
+    everything else is neutral, and the reason stays in the server log either way."""
     with owner_client(tmp_path, monkeypatch) as client:
 
         def _boom(*args: object, **kwargs: object) -> None:
-            raise PermissionError("Read-only file system")
+            raise exc
 
         monkeypatch.setattr("app.api.config.update_config", _boom)
         resp = client.put("/api/config", json={"site_title": "X"})
         assert resp.status_code == 500
-        assert resp.json() == {"detail": DATA_DIR_NOT_WRITABLE}
-        assert "log" in DATA_DIR_NOT_WRITABLE  # neutral: the reason is in the server log
+        assert resp.json() == {"detail": detail}
         assert str(tmp_path) not in resp.text and "Read-only" not in resp.text
-
-
-def test_put_500_says_so_when_the_disk_is_full(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A full disk is the one write failure the owner can act on, so it gets its own words."""
-    with owner_client(tmp_path, monkeypatch) as client:
-
-        def _full(*args: object, **kwargs: object) -> None:
-            raise OSError(errno.ENOSPC, "no space left on device")
-
-        monkeypatch.setattr("app.api.config.update_config", _full)
-        resp = client.put("/api/config", json={"site_title": "X"})
-        assert resp.status_code == 500
-        assert resp.json() == {"detail": DATA_DIR_FULL}
-        assert "full" in DATA_DIR_FULL and str(tmp_path) not in resp.text
 
 
 def test_put_500_when_the_file_cannot_be_read_back(

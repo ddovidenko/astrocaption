@@ -19,7 +19,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from .models import MAX_UPLOAD_MB, MIN_UPLOAD_MB, StyleOverrides
+from .models import MAX_UPLOAD_MB, MIN_UPLOAD_MB, StyleOverrides, validation_message
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ LOCKABLE: dict[str, tuple[str, ...]] = {
 }
 """Env vars that pin each lockable config.json field (read-only in the UI when one is set).
 
-The keys are exactly the fields ``load_settings`` may report in ``env_locked``; the values are
+The keys are exactly the fields ``load_settings`` may report in ``locked_by``; the values are
 tried in order, so the first one set wins and is the name reported in ``locked_by``.
 """
 
@@ -76,7 +76,6 @@ class Settings:
     password_hash: str | None = field(default=None, repr=False)
     session_secret: str | None = field(default=None, repr=False)
     trust_proxy: bool = False
-    env_locked: frozenset[str] = frozenset()  # settings an env var overrides (read-only in the UI)
     locked_by: dict[str, str] = field(default_factory=dict)  # locked field -> the variable name
 
     @property
@@ -162,7 +161,7 @@ def _upload_mb(raw: object) -> int:
 
 def _first_message(exc: ValidationError) -> str:
     """Pydantic's reason for a rejected field, without the value it rejected."""
-    return "; ".join(str(e.get("msg", "is not valid")) for e in exc.errors()) or "is not valid"
+    return "; ".join(validation_message(e) for e in exc.errors()) or "is not valid"
 
 
 def _normalise_style(raw: object) -> dict[str, object]:
@@ -184,12 +183,10 @@ def _normalise_style(raw: object) -> dict[str, object]:
     kept: dict[str, object] = {}
     for name, value in fields.items():
         try:
-            StyleOverrides.model_validate({name: value})
+            kept.update(StyleOverrides.model_validate({name: value}).overrides())
         except ValidationError as exc:  # the reason only, never the value (CLAUDE.md)
             log.warning("ignoring default_style.%s in config.json: %s", name, _first_message(exc))
-        else:
-            kept[name] = value
-    return StyleOverrides.model_validate(kept).overrides()
+    return kept  # every value here already passed the model; there are no cross-field rules
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -239,7 +236,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         password_hash=password_hash,
         session_secret=session_secret,
         trust_proxy=e.get("TRUST_PROXY", "").strip().lower() in {"1", "true", "yes"},
-        env_locked=frozenset(locked_by),
         locked_by=locked_by,
     )
 

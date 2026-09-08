@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import errno
 import os
 import re
 import uuid
@@ -49,6 +48,7 @@ from .deps import (
     require_owner,
     unauthorized_response,
 )
+from .errors import DISK_FULL_ERRNOS
 
 router = APIRouter(prefix="/api/images", tags=["images"], dependencies=[Depends(require_owner)])
 
@@ -221,7 +221,7 @@ async def upload_image(
         ) from None
     except OSError as exc:
         delete_image_files(settings, image_id)
-        if exc.errno == errno.ENOSPC:
+        if exc.errno in DISK_FULL_ERRNOS:
             raise HTTPException(
                 status.HTTP_507_INSUFFICIENT_STORAGE, "The server is out of disk space."
             ) from None
