@@ -53,12 +53,13 @@ milestone.
 | Upload limit | `ASTROCAPTION_MAX_UPLOAD_MB` env, or `"max_upload_mb"`, or the config page | 60 (and 300 megapixels) |
 | Site title | `ASTROCAPTION_SITE_TITLE` env, or `"site_title"`, or the config page | AstroCaption |
 | Data directory | `ASTROCAPTION_DATA_DIR` env | `/data` in the container |
-| Default label style | `"default_style"` object in `data/config.json`, or the config page | size-relative defaults |
+| Default label style | `"default_style"` object in `data/config.json`, or the config page | built-in defaults (size-relative for the four size fields) |
 | Owner password | setup page, or `ASTROCAPTION_PASSWORD` env at first start | required |
 | Secure cookies | `TRUST_PROXY=1` env when the app is served over HTTPS by a proxy | off |
 
 Values set by environment variables win over `data/config.json`; the config page shows
-them read-only.
+them read-only and names the variable that pinned each one. `max_upload_mb` outside 1-1024 is
+clamped when the file is read, with a line in the server log.
 
 `data/config.json` is created by the app (uid 1000 inside the container) with owner-only
 permissions (0600); editing it directly on the host may need `sudo`.
@@ -76,11 +77,22 @@ Setup adds `password_hash` and `session_secret` to this file; leave those two al
 ```
 
 `default_style` accepts any field of the style object (font file, colours, halo, sizes) and
-applies to newly solved images. `name_preference` picks the label's primary line: `popular`
+applies to newly solved images. Only the fields you list are overridden; anything you leave
+out keeps its built-in default, and for `font_size`, `halo_width`, `marker_width` and
+`marker_min_radius` that default is derived from each image's size. Colours are `#RRGGBB`
+(`"#ffd54a"`, not `"yellow"`), sizes are whole numbers within the bounds the API accepts
+(font size 6-200, halo and marker width 0-40 and 1-40, marker minimum radius 1-400) and the
+font is a bundled file name. A value the page cannot represent — a colour by name, a size out
+of range, a field that is not part of the style — is dropped when the file is read, with a
+warning in the server log naming the field; the rest of your `default_style` still applies.
+
+`name_preference` picks the label's primary line: `popular`
 (Messier, Caldwell, Sharpless and Barnard first, then NGC, then IC, then other catalogues,
 then common names) or `ngc_ic` (NGC and IC designations first). Stars show their proper name
 first, then the Bayer letter, then the Flamsteed number. Other names appear on the alias line.
-The config page edits the same object; blank fields keep the size-relative defaults.
+
+The config page edits the same object: blank fields keep the built-in defaults, and saving
+stores exactly the fields shown filled in, so clearing one there removes it from the file.
 
 The file is re-read whenever it changes, so every setting in it is live without a restart, and
 `/api/health` reports any parse error in the file. The key itself is never logged and never

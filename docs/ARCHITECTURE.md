@@ -40,7 +40,7 @@ frontend/src/App.tsx ──fetch──▶ /api/images ...           (backend/app
 | `app/auth.py` | scrypt password hashes, stateless HMAC session tokens, login cooldown, first-run setup writer. Standard library only. |
 | `app/api/deps.py` | Request-scoped dependencies; `require_owner` gates every owner router on the session cookie. |
 | `app/api/auth.py` | `/api/setup`, `/api/login`, `/api/logout`. |
-| `app/api/config.py` | Owner settings: `GET`, and `PUT` with locked-field and style validation through the atomic writer. |
+| `app/api/config.py` | Owner settings: `GET`, and `PUT` with locked-field and style validation, serialised through the atomic writer. |
 | `app/api/docs.py` | Owner-only Swagger UI and OpenAPI document (`/api/docs`, `/api/openapi.json`). |
 
 Every router except health and the setup/login/logout router carries the require_owner
