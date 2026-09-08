@@ -100,7 +100,7 @@ function UploadPanel({ onUploaded }: { onUploaded: () => Promise<void> }) {
       if (fileRef.current) fileRef.current.value = ''
       await onUploaded()
     } catch (err) {
-      setError(describeError(err))
+      if (!isSessionLossError(err)) setError(describeError(err))
     } finally {
       setUploading(false)
     }

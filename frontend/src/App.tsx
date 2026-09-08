@@ -20,6 +20,8 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    // Inlined rather than `void refreshHealth()`: react-hooks/set-state-in-effect forbids
+    // calling a setState-wrapping function directly in an effect body.
     let cancelled = false
     api
       .health()
