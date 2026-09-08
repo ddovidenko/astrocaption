@@ -25,9 +25,22 @@ DEFAULT_MAX_UPLOAD_MB = 60
 DEFAULT_SITE_TITLE = "AstroCaption"
 DEFAULT_NOVA_BASE_URL = "https://nova.astrometry.net"
 
+CONFIG_UNREADABLE = "config.json could not be read; fix or remove it and restart"
+CONFIG_NOT_JSON = "config.json is not valid JSON; fix or remove it and restart"
+CONFIG_NOT_OBJECT = "config.json must contain a JSON object"
+
 
 class ConfigError(ValueError):
-    """config.json exists but cannot be used."""
+    """config.json exists but cannot be used.
+
+    ``public`` is the fixed sentence users are shown (SPEC § 5.1 step 7: no server paths,
+    no exception text); ``detail`` carries the reason, for the server log only.
+    """
+
+    def __init__(self, public: str, detail: str | None = None) -> None:
+        super().__init__(detail or public)
+        self.public = public
+        self.detail = detail or public
 
 
 @dataclass(frozen=True)
@@ -68,8 +81,15 @@ class Settings:
 
     @property
     def setup_required(self) -> bool:
-        """No owner password yet. A corrupt config.json is *not* setup-required (SPEC § 5.1)."""
-        return self.password_hash is None and self.config_error is None
+        """No usable owner credentials yet (SPEC § 5.1).
+
+        A corrupt config.json is *not* setup-required: setup stays closed until the owner
+        fixes the file. A half-written one (a hash without a secret, or the reverse) is:
+        it cannot authenticate anybody, and setup writes both halves fresh.
+        """
+        return self.config_error is None and (
+            self.password_hash is None or self.session_secret is None
+        )
 
     @property
     def auth_ready(self) -> bool:
@@ -84,11 +104,11 @@ def _parse_config(path: Path) -> dict[str, object]:
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
     except OSError as exc:
-        raise ConfigError(f"{path.name} could not be read: {exc.strerror or exc}") from exc
+        raise ConfigError(CONFIG_UNREADABLE, f"{path}: {exc.strerror or exc}") from exc
     except ValueError as exc:
-        raise ConfigError(f"{path.name} is not valid JSON: {exc}") from exc
+        raise ConfigError(CONFIG_NOT_JSON, f"{path}: {exc}") from exc
     if not isinstance(loaded, dict):
-        raise ConfigError(f"{path.name} must contain a JSON object")
+        raise ConfigError(CONFIG_NOT_OBJECT, f"{path}: top level is {type(loaded).__name__}")
     return loaded
 
 
@@ -106,8 +126,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         try:
             cfg = _parse_config(config_path)
         except ConfigError as exc:
-            config_error = str(exc)
-            log.warning("ignoring %s: %s", config_path, exc)
+            config_error = exc.public  # what the API may show; the reason stays in the log
+            log.warning("ignoring config.json: %s", exc.detail)
 
     key = e.get("NOVA_API_KEY") or e.get("ASTROMETRY_API_KEY") or cfg.get("nova_api_key")
     max_mb_raw = e.get("ASTROCAPTION_MAX_UPLOAD_MB") or cfg.get("max_upload_mb")
@@ -128,8 +148,15 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         )
         if present
     )
-    password_hash = cfg.get("password_hash")
-    session_secret = cfg.get("session_secret")
+    raw_hash = cfg.get("password_hash")
+    raw_secret = cfg.get("session_secret")
+    password_hash = raw_hash if isinstance(raw_hash, str) and raw_hash else None
+    session_secret = raw_secret if isinstance(raw_secret, str) and raw_secret else None
+    if config_error is None and (password_hash is None) != (session_secret is None):
+        log.warning(
+            "config.json has a password_hash but no session_secret (or vice versa); "
+            "setup will run again"
+        )
 
     return Settings(
         data_dir=data_dir,
@@ -141,10 +168,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         nova_base_url=e.get("NOVA_BASE_URL", DEFAULT_NOVA_BASE_URL).rstrip("/"),
         default_style=default_style,
         config_error=config_error,
-        password_hash=password_hash if isinstance(password_hash, str) and password_hash else None,
-        session_secret=session_secret
-        if isinstance(session_secret, str) and session_secret
-        else None,
+        password_hash=password_hash,
+        session_secret=session_secret,
         trust_proxy=e.get("TRUST_PROXY", "").strip().lower() in {"1", "true", "yes"},
         env_locked=env_locked,
     )
@@ -199,8 +224,28 @@ def update_config(path: Path, updates: Mapping[str, object | None]) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(current, fh, indent=2)
             fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())  # the bytes, before the rename that publishes them
         os.replace(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
-    os.chmod(path, 0o600)
+    _fsync_dir(path.parent)  # and the rename itself, or a crash can lose the whole file
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        log.warning("could not restrict permissions on %s", path.name)
+
+
+def _fsync_dir(directory: Path) -> None:
+    """Best effort: some filesystems (and Windows) refuse to fsync a directory."""
+    try:
+        fd = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
