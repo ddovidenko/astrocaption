@@ -84,17 +84,27 @@ export function errorMessage(status: number, body: unknown): string {
   return `Request failed (HTTP ${status})`
 }
 
+/** Parse a response body; a 2xx that is not JSON (e.g. the dev server answering with
+ *  index.html when the API is unreachable) is an error, not a silent null. */
+export function parseBody(status: number, ok: boolean, text: string): unknown {
+  let body: unknown = null
+  if (text) {
+    try {
+      body = JSON.parse(text)
+    } catch {
+      if (ok) {
+        throw new ApiError(status, 'The server returned something that is not JSON. Is the API running?')
+      }
+    }
+  }
+  if (!ok) throw new ApiError(status, errorMessage(status, body))
+  return body
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init)
   if (res.status === 204) return undefined as T
-  let body: unknown
-  try {
-    body = await res.json()
-  } catch {
-    body = null
-  }
-  if (!res.ok) throw new ApiError(res.status, errorMessage(res.status, body))
-  return body as T
+  return parseBody(res.status, res.ok, await res.text()) as T
 }
 
 const json = (method: string, body?: unknown): RequestInit => ({
