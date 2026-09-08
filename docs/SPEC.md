@@ -168,6 +168,7 @@ Details fixed by the M1 implementation (`backend/app/placement.py`):
 - Diagonal anchors put the box corner at `offset / √2` on both axes; "inside the image" is inclusive of the edges.
 - Boxes overlap when their gap is smaller than the padding on any side; a box "crosses a ring" when its nearest point is closer than `r + pad` and its farthest corner farther than `r − pad` from the centre.
 - The placer accepts *fixed* boxes and circles as obstacles it must avoid but never moves; re-solve uses this to keep the owner's layout and place only new objects.
+- An object whose own circle spills past the frame (M 31 filling the field: radius larger than the distance to every edge) gets no slot outside its ring, so after the normal search fails it is labelled as a point at its centre using the same anchors and rings. Only objects whose ring is fully inside the frame fall through to the `collided` fallback.
 - Text boxes are measured by the caller (Pillow on the server, canvas metrics in the browser); the placer itself has no font dependency. Vectors in `tests/fixtures/placement/` pin the Python output and are regenerated with `make placement-vectors`.
 
 ## 7. Data model

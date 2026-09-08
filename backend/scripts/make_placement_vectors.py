@@ -76,6 +76,17 @@ def main() -> None:
         fixed_boxes=[Box(1560, 970, 1900, 1030)],
         fixed_circles=[Circle(1700, 1100, 90)],
     )
+    _case(
+        "huge_marker_centre_label",  # M 31 filling a 6248 × 4176 frame; ring spills past every edge
+        6248,
+        4176,
+        [
+            PlacementItem(1, 3185, 2119, 3817, 900, 180),
+            PlacementItem(2, 2674, 3614, 348, 600, 180),
+            PlacementItem(3, 2685, 1207, 166, 500, 180),
+            PlacementItem(4, 6025, 96, 37, 400, 180),
+        ],
+    )
     rng = random.Random(20260907)
     for k in range(3):
         w, h = rng.choice([(6000, 4000), (4128, 2752), (1920, 1080)])

@@ -6,7 +6,8 @@ shared vectors in ``tests/fixtures/placement/``.
 
 All coordinates are original-image pixels. ``s = max(W, H) / 1000`` is the scale unit.
 A larger object's marker only blocks its ring line: labels may sit inside a big nebula's
-circle, they just must not cross the drawn outline.
+circle, they just must not cross the drawn outline. An object whose own circle spills past
+the frame (M 31 filling the field) is labelled at its centre, as if it were a point.
 """
 
 from __future__ import annotations
@@ -124,6 +125,36 @@ def box_inside(box: Box, width: float, height: float) -> bool:
     return box.left >= 0 and box.top >= 0 and box.right <= width and box.bottom <= height
 
 
+def ring_inside_frame(it: PlacementItem, width: float, height: float) -> bool:
+    return it.radius <= min(it.x, it.y, width - it.x, height - it.y)
+
+
+def _search(
+    it: PlacementItem,
+    radius: float,
+    width: float,
+    height: float,
+    gap: float,
+    pad: float,
+    step: float,
+    accepted: Sequence[Box],
+    markers: Sequence[Circle],
+) -> Box | None:
+    """First anchor (ring by ring) whose box fits the frame and clears every obstacle."""
+    for ring in range(MAX_RINGS + 1):
+        offset = radius + gap + ring * step
+        for anchor in ANCHORS:
+            box = anchor_box(anchor, it.x, it.y, offset, it.w, it.h)
+            if not box_inside(box, width, height):
+                continue
+            if any(boxes_overlap(box, other, pad) for other in accepted):
+                continue
+            if any(box_crosses_ring(box, c, pad) for c in markers):
+                continue
+            return box
+    return None
+
+
 def place_labels(
     width: float,
     height: float,
@@ -148,21 +179,12 @@ def place_labels(
     result: dict[int, Placement] = {}
 
     for it in order:
-        chosen: Box | None = None
-        for ring in range(MAX_RINGS + 1):
-            offset = it.radius + gap + ring * step
-            for anchor in ANCHORS:
-                box = anchor_box(anchor, it.x, it.y, offset, it.w, it.h)
-                if not box_inside(box, width, height):
-                    continue
-                if any(boxes_overlap(box, other, pad) for other in accepted):
-                    continue
-                if any(box_crosses_ring(box, c, pad) for c in markers):
-                    continue
-                chosen = box
-                break
-            if chosen is not None:
-                break
+        chosen = _search(it, it.radius, width, height, gap, pad, step, accepted, markers)
+        if chosen is None and not ring_inside_frame(it, width, height):
+            # The catalogue circle spills past the frame, so no slot exists outside it.
+            # Label the centre instead: a box inside a big marker is fine, only the ring
+            # line is protected, and the renderer draws no leader for it.
+            chosen = _search(it, 0.0, width, height, gap, pad, step, accepted, markers)
         collided = chosen is None
         if chosen is None:
             chosen = anchor_box("right", it.x, it.y, it.radius + gap, it.w, it.h)
