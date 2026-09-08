@@ -11,6 +11,8 @@ import binascii
 import hashlib
 import hmac
 import secrets
+import time
+from collections.abc import Callable
 
 SCRYPT_N = 2**15
 SCRYPT_R = 8
@@ -60,3 +62,66 @@ def verify_password(password: str, stored: str) -> bool:
     except (ValueError, TypeError, binascii.Error, UnicodeEncodeError, OverflowError):
         return False
     return hmac.compare_digest(actual, expected)
+
+
+def _fingerprint(password_hash: str) -> str:
+    return hashlib.sha256(password_hash.encode("utf-8")).hexdigest()[:32]
+
+
+def _signature(secret: str, issued: int, password_hash: str) -> str:
+    message = f"{issued}:{_fingerprint(password_hash)}".encode()
+    return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def issue_session(secret: str, password_hash: str, now: float | None = None) -> str:
+    """``<issued>.<hmac>``: stateless, bound to the current password hash (SPEC § 10)."""
+    issued = int(time.time() if now is None else now)
+    return f"{issued}.{_signature(secret, issued, password_hash)}"
+
+
+def session_is_valid(
+    token: str | None, secret: str, password_hash: str, now: float | None = None
+) -> bool:
+    if not token or "." not in token:
+        return False
+    issued_text, signature = token.split(".", 1)
+    if not issued_text.isdigit():
+        return False
+    issued = int(issued_text)
+    current = time.time() if now is None else now
+    if issued > current + CLOCK_SKEW_SECONDS or current - issued > SESSION_TTL_SECONDS:
+        return False
+    return hmac.compare_digest(signature, _signature(secret, issued, password_hash))
+
+
+class LoginLimiter:
+    """Global cooldown: ``max_failures`` wrong passwords start ``cooldown`` seconds of 429s."""
+
+    def __init__(
+        self,
+        max_failures: int = 5,
+        cooldown: float = 60.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._max_failures = max_failures
+        self._cooldown = cooldown
+        self._clock = clock
+        self._failures = 0
+        self._locked_until = 0.0
+
+    def retry_after(self) -> int:
+        """Whole seconds until the next attempt is allowed; 0 when it is allowed now."""
+        remaining = self._locked_until - self._clock()
+        if remaining <= 0:
+            return 0
+        return max(1, int(remaining + 0.999))
+
+    def record_failure(self) -> None:
+        self._failures += 1
+        if self._failures >= self._max_failures:
+            self._failures = 0
+            self._locked_until = self._clock() + self._cooldown
+
+    def reset(self) -> None:
+        self._failures = 0
+        self._locked_until = 0.0
