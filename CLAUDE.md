@@ -58,6 +58,8 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
 - Fonts referenced by file name (e.g. `Inter-Regular.ttf`), never by family name, so browser and Pillow agree.
 - Errors from the solver are surfaced to the user in plain language with the nova job URL when one exists.
 - Small PRs. One feature or fix per branch. Conventional commit messages (`feat:`, `fix:`, `docs:`, `chore:`).
+- Backlog lives in GitHub Issues, grouped by milestone (`gh issue list --milestone "Milestone 3: Editor v1"`).
+  Reference issues from PRs (`Closes #12`); add new follow-ups as issues, not TODO comments.
 
 ## Working with Claude Code
 
