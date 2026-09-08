@@ -17,6 +17,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from pydantic import ValidationError
+
+from .models import MAX_UPLOAD_MB, MIN_UPLOAD_MB, StyleOverrides
+
 log = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -25,21 +29,23 @@ DEFAULT_MAX_UPLOAD_MB = 60
 DEFAULT_SITE_TITLE = "AstroCaption"
 DEFAULT_NOVA_BASE_URL = "https://nova.astrometry.net"
 
-ENV_VAR_FOR = {
-    "nova_api_key": "NOVA_API_KEY",
-    "max_upload_mb": "ASTROCAPTION_MAX_UPLOAD_MB",
-    "site_title": "ASTROCAPTION_SITE_TITLE",
+LOCKABLE: dict[str, tuple[str, ...]] = {
+    "nova_api_key": ("NOVA_API_KEY", "ASTROMETRY_API_KEY"),
+    "max_upload_mb": ("ASTROCAPTION_MAX_UPLOAD_MB",),
+    "site_title": ("ASTROCAPTION_SITE_TITLE",),
 }
-"""Env var that pins each lockable config.json field (read-only in the UI when set).
+"""Env vars that pin each lockable config.json field (read-only in the UI when one is set).
 
-The keys of ``ENV_VAR_FOR`` are exactly the fields ``load_settings`` may report in
-``env_locked``; the nova key also accepts the legacy ``ASTROMETRY_API_KEY``, so its presence
-check stays explicit below rather than a lookup through this map.
+The keys are exactly the fields ``load_settings`` may report in ``env_locked``; the values are
+tried in order, so the first one set wins and is the name reported in ``locked_by``.
 """
 
-CONFIG_UNREADABLE = "config.json could not be read; fix or remove it and restart"
-CONFIG_NOT_JSON = "config.json is not valid JSON; fix or remove it and restart"
-CONFIG_NOT_OBJECT = "config.json must contain a JSON object"
+CONFIG_FIX_HINT = "fix it, or remove it and run setup again (removing it resets the owner password)"
+"""How every ``config_error`` sentence ends: what the owner can actually do about it."""
+
+CONFIG_UNREADABLE = f"config.json could not be read; {CONFIG_FIX_HINT}"
+CONFIG_NOT_JSON = f"config.json is not valid JSON; {CONFIG_FIX_HINT}"
+CONFIG_NOT_OBJECT = f"config.json must contain a JSON object; {CONFIG_FIX_HINT}"
 
 
 class ConfigError(ValueError):
@@ -71,6 +77,7 @@ class Settings:
     session_secret: str | None = field(default=None, repr=False)
     trust_proxy: bool = False
     env_locked: frozenset[str] = frozenset()  # settings an env var overrides (read-only in the UI)
+    locked_by: dict[str, str] = field(default_factory=dict)  # locked field -> the variable name
 
     @property
     def uploads_dir(self) -> Path:
@@ -125,6 +132,66 @@ def _parse_config(path: Path) -> dict[str, object]:
     return loaded
 
 
+def _from_env(e: Mapping[str, str], name: str) -> tuple[str | None, str | None]:
+    """The value pinning ``name``, and the variable it came from; ``(None, None)`` when free."""
+    for var in LOCKABLE[name]:
+        value = e.get(var)
+        if value:
+            return value, var
+    return None, None
+
+
+def _upload_mb(raw: object) -> int:
+    """config.json's (or the env's) upload limit, clamped to what the API would accept."""
+    try:
+        value = int(str(raw)) if raw else DEFAULT_MAX_UPLOAD_MB
+    except (TypeError, ValueError):
+        log.warning("ignoring max_upload_mb: not a whole number; using %d", DEFAULT_MAX_UPLOAD_MB)
+        return DEFAULT_MAX_UPLOAD_MB
+    clamped = max(MIN_UPLOAD_MB, min(MAX_UPLOAD_MB, value))
+    if clamped != value:
+        log.warning(
+            "max_upload_mb %d is outside %d-%d; using %d",
+            value,
+            MIN_UPLOAD_MB,
+            MAX_UPLOAD_MB,
+            clamped,
+        )
+    return clamped
+
+
+def _first_message(exc: ValidationError) -> str:
+    """Pydantic's reason for a rejected field, without the value it rejected."""
+    return "; ".join(str(e.get("msg", "is not valid")) for e in exc.errors()) or "is not valid"
+
+
+def _normalise_style(raw: object) -> dict[str, object]:
+    """config.json's ``default_style``, as the same overrides ``PUT /api/config`` would store.
+
+    Best effort: a file the page cannot represent should not cost the owner the fields that
+    are fine, so a whole-object failure is retried field by field and only the bad ones (and
+    fields the model does not know) are dropped, each with a log line naming the field.
+    """
+    if not isinstance(raw, Mapping):
+        if raw is not None:
+            log.warning("ignoring default_style in config.json: not a JSON object")
+        return {}
+    fields = {str(k): v for k, v in raw.items()}
+    try:
+        return StyleOverrides.model_validate(fields).overrides()
+    except ValidationError:
+        pass  # one bad field must not drop the good ones; find out which below
+    kept: dict[str, object] = {}
+    for name, value in fields.items():
+        try:
+            StyleOverrides.model_validate({name: value})
+        except ValidationError as exc:  # the reason only, never the value (CLAUDE.md)
+            log.warning("ignoring default_style.%s in config.json: %s", name, _first_message(exc))
+        else:
+            kept[name] = value
+    return StyleOverrides.model_validate(kept).overrides()
+
+
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     """Build settings from the environment (default ``os.environ``) and ``config.json``."""
     e = os.environ if env is None else env
@@ -142,28 +209,13 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             config_error = exc.public  # what the API may show; the reason stays in the log
             log.warning("ignoring config.json: %s", exc.detail)
 
-    key = e.get("NOVA_API_KEY") or e.get("ASTROMETRY_API_KEY") or cfg.get("nova_api_key")
-    max_mb_raw = e.get("ASTROCAPTION_MAX_UPLOAD_MB") or cfg.get("max_upload_mb")
-    try:
-        max_mb = int(str(max_mb_raw)) if max_mb_raw else DEFAULT_MAX_UPLOAD_MB
-    except (TypeError, ValueError):
-        max_mb = DEFAULT_MAX_UPLOAD_MB
-    title = e.get("ASTROCAPTION_SITE_TITLE") or cfg.get("site_title") or DEFAULT_SITE_TITLE
-    raw_style = cfg.get("default_style")
-    default_style = dict(raw_style) if isinstance(raw_style, dict) else {}
+    from_env = {name: _from_env(e, name) for name in LOCKABLE}
+    locked_by = {name: var for name, (_, var) in from_env.items() if var is not None}
 
-    env_locked = frozenset(
-        name
-        for name, present in (
-            # nova_api_key also accepts the legacy ASTROMETRY_API_KEY, so it stays explicit
-            # rather than a plain ENV_VAR_FOR[name] lookup; ENV_VAR_FOR's keys are exactly
-            # the fields tested here.
-            ("nova_api_key", bool(e.get("NOVA_API_KEY") or e.get("ASTROMETRY_API_KEY"))),
-            ("max_upload_mb", bool(e.get(ENV_VAR_FOR["max_upload_mb"]))),
-            ("site_title", bool(e.get(ENV_VAR_FOR["site_title"]))),
-        )
-        if present
-    )
+    key = from_env["nova_api_key"][0] or cfg.get("nova_api_key")
+    max_mb = _upload_mb(from_env["max_upload_mb"][0] or cfg.get("max_upload_mb"))
+    title = from_env["site_title"][0] or cfg.get("site_title") or DEFAULT_SITE_TITLE
+    default_style = _normalise_style(cfg.get("default_style"))
     raw_hash = cfg.get("password_hash")
     raw_secret = cfg.get("session_secret")
     password_hash = raw_hash if isinstance(raw_hash, str) and raw_hash else None
@@ -179,7 +231,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         fonts_dir=fonts_dir,
         static_dir=static_dir.resolve(),
         nova_api_key=str(key).strip() if key else None,
-        max_upload_mb=max(1, max_mb),
+        max_upload_mb=max_mb,
         site_title=str(title),
         nova_base_url=e.get("NOVA_BASE_URL", DEFAULT_NOVA_BASE_URL).rstrip("/"),
         default_style=default_style,
@@ -187,7 +239,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         password_hash=password_hash,
         session_secret=session_secret,
         trust_proxy=e.get("TRUST_PROXY", "").strip().lower() in {"1", "true", "yes"},
-        env_locked=env_locked,
+        env_locked=frozenset(locked_by),
+        locked_by=locked_by,
     )
 
 
@@ -224,8 +277,11 @@ class SettingsSource:
         """Re-read config.json now, whatever the stamp says (after the app itself wrote it)."""
         if self._fixed is not None:
             return self._fixed
+        # Stamp first, like current(): a write that lands mid-load is then picked up by the
+        # next current() instead of being hidden behind a stamp taken after it.
+        stamp = _file_stamp(self._current.config_path)
         self._current = load_settings(self._env)
-        self._stamp = _file_stamp(self._current.config_path)
+        self._stamp = stamp
         return self._current
 
 

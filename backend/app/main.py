@@ -93,6 +93,7 @@ def create_app(
     app.state.worker = worker
     app.state.login_limiter = LoginLimiter()
     app.state.setup_lock = asyncio.Lock()  # one first-run setup at a time (SPEC § 5.1)
+    app.state.config_lock = asyncio.Lock()  # one config.json read-modify-write at a time
     app.add_middleware(images.UploadGuard, settings_source=source)
 
     app.add_exception_handler(RequestValidationError, plain_validation_error)  # type: ignore[arg-type]
@@ -110,6 +111,18 @@ def create_app(
     return app
 
 
+MAX_LABEL_CHARS = 60
+
+
+def _safe_label(parts: list[str]) -> str:
+    """A field path fit to echo: the client chooses these names, so it could send a control
+    character to forge a log line, or a very long one to bury the message."""
+    cleaned = (
+        "".join(c if c.isascii() and c.isprintable() else "?" for c in part) for part in parts
+    )
+    return ".".join(cleaned)[:MAX_LABEL_CHARS] or "request"
+
+
 async def plain_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
     """Plain-language 422s: the default FastAPI body echoes the submitted value (a
     password, here) in ``input`` and returns a list. Neither belongs in a response."""
@@ -123,7 +136,7 @@ async def plain_validation_error(_: Request, exc: RequestValidationError) -> JSO
             for part in error.get("loc", ())
             if isinstance(part, str) and part not in {"body", "query", "path"}
         ]
-        label = ".".join(named) or "request"
+        label = _safe_label(named)
         labels.append(label)
         msg = (
             "the body is not valid JSON"

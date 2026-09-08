@@ -3,7 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.models import ConfigUpdate, StyleConfig, StyleOverrides
+from app.layout import SIZE_RELATIVE
+from app.models import ConfigUpdate, StyleConfig, StyleDefaults, StyleOverrides
 
 
 def test_style_overrides_keeps_only_set_fields() -> None:
@@ -53,4 +54,17 @@ def test_style_defaults_exclude_size_relative_fields() -> None:
 
     d = style_defaults()
     assert d["text_color"] == StyleConfig().text_color and d["font_file"] == "Inter-Regular.ttf"
-    assert not {"font_size", "halo_width", "marker_width", "marker_min_radius"} & set(d)
+    assert not SIZE_RELATIVE & set(d)
+    assert StyleDefaults.model_validate(d).font_file == "Inter-Regular.ttf"
+
+
+def test_style_defaults_model_matches_the_style_model() -> None:
+    """The page reads every non-size field off style_defaults; none may go missing."""
+    assert set(StyleDefaults.model_fields) == set(StyleConfig.model_fields) - SIZE_RELATIVE
+
+
+def test_config_update_strips_and_bounds_the_title() -> None:
+    assert ConfigUpdate.model_validate({"site_title": "  Sky  "}).site_title == "Sky"
+    with pytest.raises(ValidationError) as caught:
+        ConfigUpdate.model_validate({"site_title": "   "})
+    assert "at least 1 character" in "; ".join(str(e["msg"]) for e in caught.value.errors())

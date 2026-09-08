@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+import errno
 import json
+import logging
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.config import (
+    CONFIG_SAVED_BUT_UNREADABLE,
+    DATA_DIR_FULL,
+    DATA_DIR_NOT_WRITABLE,
+)
 from app.config import CONFIG_NOT_JSON, ConfigError
 from tests.conftest import env_app_client, login
 
@@ -73,13 +81,47 @@ def test_locked_fields_are_rejected_with_the_variable_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with owner_client(tmp_path, monkeypatch, ASTROCAPTION_SITE_TITLE="Env title") as client:
-        assert client.get("/api/config").json()["locked"] == ["site_title"]
+        body = client.get("/api/config").json()
+        assert body["locked"] == ["site_title"]
+        assert body["locked_by"] == {"site_title": "ASTROCAPTION_SITE_TITLE"}
         resp = client.put("/api/config", json={"site_title": "Mine", "max_upload_mb": 9})
         assert resp.status_code == 422
         assert resp.json() == {
             "detail": "site_title is set by ASTROCAPTION_SITE_TITLE; unset it to change it here."
         }
         assert "max_upload_mb" not in read_config(tmp_path)  # nothing was written
+
+
+def test_locked_message_names_the_legacy_key_variable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The message must name the variable that is actually set, not the preferred spelling."""
+    with owner_client(tmp_path, monkeypatch, ASTROMETRY_API_KEY="legacy") as client:
+        assert client.get("/api/config").json()["locked_by"] == {
+            "nova_api_key": "ASTROMETRY_API_KEY"
+        }
+        resp = client.put("/api/config", json={"nova_api_key": "mine"})
+        assert resp.status_code == 422
+        assert resp.json() == {
+            "detail": "nova_api_key is set by ASTROMETRY_API_KEY; unset it to change it here."
+        }
+        assert "mine" not in resp.text and "legacy" not in resp.text
+
+
+def test_locked_message_names_every_locked_field_that_was_touched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with owner_client(
+        tmp_path, monkeypatch, ASTROCAPTION_SITE_TITLE="Env title", ASTROMETRY_API_KEY="legacy"
+    ) as client:
+        resp = client.put("/api/config", json={"site_title": "Mine", "nova_api_key": "k"})
+        assert resp.status_code == 422
+        assert resp.json() == {
+            "detail": (
+                "nova_api_key (ASTROMETRY_API_KEY), site_title (ASTROCAPTION_SITE_TITLE) "
+                "are set by the environment; unset them to change them here."
+            )
+        }
 
 
 def test_default_style_is_validated_and_stored_as_overrides(
@@ -139,29 +181,147 @@ def test_put_refuses_to_touch_a_corrupt_config(
         assert client.put("/api/config", json={"site_title": "Back"}).status_code == 200
 
 
-def test_put_rejects_blank_title(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_put_rejects_blank_title_with_the_model_rule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One rule, in the model: a blank title is a pydantic 422, and the value is not echoed."""
     with owner_client(tmp_path, monkeypatch) as client:
         resp = client.put("/api/config", json={"site_title": "   "})
         assert resp.status_code == 422
-        assert resp.json() == {"detail": "site_title must not be blank."}
+        detail = resp.json()["detail"]
+        assert isinstance(detail, str)
+        assert detail == "site_title: String should have at least 1 character"
+        assert client.put("/api/config", json={"site_title": "  Padded  "}).status_code == 200
+        assert read_config(tmp_path)["site_title"] == "Padded"  # stripped by the model
 
 
 def test_put_500_on_unwritable_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     with owner_client(tmp_path, monkeypatch) as client:
 
         def _boom(*args: object, **kwargs: object) -> None:
-            raise OSError("Read-only file system")
+            raise PermissionError("Read-only file system")
 
         monkeypatch.setattr("app.api.config.update_config", _boom)
         resp = client.put("/api/config", json={"site_title": "X"})
         assert resp.status_code == 500
-        assert resp.json() == {
-            "detail": (
-                "Settings could not be saved: the data directory is not writable. "
-                "Check the permissions on ./data and try again."
-            )
-        }
-        assert str(tmp_path) not in resp.text
+        assert resp.json() == {"detail": DATA_DIR_NOT_WRITABLE}
+        assert "log" in DATA_DIR_NOT_WRITABLE  # neutral: the reason is in the server log
+        assert str(tmp_path) not in resp.text and "Read-only" not in resp.text
+
+
+def test_put_500_says_so_when_the_disk_is_full(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A full disk is the one write failure the owner can act on, so it gets its own words."""
+    with owner_client(tmp_path, monkeypatch) as client:
+
+        def _full(*args: object, **kwargs: object) -> None:
+            raise OSError(errno.ENOSPC, "no space left on device")
+
+        monkeypatch.setattr("app.api.config.update_config", _full)
+        resp = client.put("/api/config", json={"site_title": "X"})
+        assert resp.status_code == 500
+        assert resp.json() == {"detail": DATA_DIR_FULL}
+        assert "full" in DATA_DIR_FULL and str(tmp_path) not in resp.text
+
+
+def test_put_500_when_the_file_cannot_be_read_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A write that lands but leaves an unusable file is not a success."""
+    with owner_client(tmp_path, monkeypatch) as client:
+        path = tmp_path / "data" / "config.json"
+
+        def _corrupt(*args: object, **kwargs: object) -> None:
+            path.write_text("{oops")
+
+        monkeypatch.setattr("app.api.config.update_config", _corrupt)
+        with caplog.at_level(logging.ERROR, logger="app.api.config"):
+            resp = client.put("/api/config", json={"site_title": "X"})
+        assert resp.status_code == 500
+        assert resp.json() == {"detail": CONFIG_SAVED_BUT_UNREADABLE}
+        assert "unusable immediately after a write" in caplog.text
+        assert str(tmp_path) not in resp.text and "Traceback" not in resp.text
+
+
+def test_put_with_nothing_to_change_never_rewrites_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A no-op save must not touch the file that holds the password hash and the secret."""
+    with owner_client(tmp_path, monkeypatch) as client:
+
+        def _boom(*args: object, **kwargs: object) -> None:
+            raise AssertionError("config.json must not be written for an empty update")
+
+        monkeypatch.setattr("app.api.config.update_config", _boom)
+        resp = client.put("/api/config", json={})
+        assert resp.status_code == 200 and resp.json()["site_title"] == "Sky"
+
+
+def test_concurrent_puts_of_different_fields_both_land(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two saves at once: the lock keeps one read-modify-write from losing the other."""
+    with owner_client(tmp_path, monkeypatch) as client:
+
+        def put(body: dict[str, object]) -> int:
+            code: int = client.put("/api/config", json=body).status_code
+            return code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            codes = list(pool.map(put, [{"site_title": "Left"}, {"max_upload_mb": 42}]))
+        assert codes == [200, 200]
+        after = read_config(tmp_path)
+        assert after["site_title"] == "Left" and after["max_upload_mb"] == 42
+        assert "password_hash" in after and "session_secret" in after
+
+
+def test_default_style_from_the_file_survives_a_round_trip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What GET reports is what a page-shaped PUT may send straight back (fields it cannot
+    represent were dropped at load, with a server-log warning)."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "default_style": {
+                    "text_color": "white",
+                    "font_size": 300,
+                    "halo": "false",
+                    "bogus": 1,
+                    "marker_color": "#ff8800",
+                }
+            }
+        )
+    )
+    with owner_client(tmp_path, monkeypatch) as client:
+        loaded = client.get("/api/config").json()["default_style"]
+        assert loaded == {"halo": False, "marker_color": "#ff8800"}
+        resp = client.put("/api/config", json={"site_title": "Fresh", "default_style": loaded})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["default_style"] == loaded
+        assert read_config(tmp_path)["default_style"] == loaded
+
+
+def test_422_labels_cannot_forge_a_log_line_or_flood_the_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Field names come from the client, so they are sanitised before they are echoed."""
+    with owner_client(tmp_path, monkeypatch) as client:
+        with caplog.at_level(logging.INFO, logger="app.main"):
+            resp = client.put("/api/config", json={"leaked\nWARNING forged": 1})
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert "\n" not in detail and "leaked?WARNING forged" in detail
+        logged = [r for r in caplog.records if "request validation failed" in r.getMessage()]
+        assert len(logged) == 1 and "\n" not in logged[0].getMessage()
+
+        long_resp = client.put("/api/config", json={"x" * 200: 1})
+        assert long_resp.status_code == 422
+        label = long_resp.json()["detail"].split(":")[0]
+        assert label == "x" * 60
 
 
 def test_put_409_on_config_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from app.auth import perform_setup, verify_password
-from app.config import ConfigError, load_settings, update_config
+from app.config import CONFIG_FIX_HINT, ConfigError, load_settings, update_config
 from tests.conftest import FONTS_DIR
 
 
@@ -56,13 +56,17 @@ def test_config_error_is_a_fixed_sentence_and_the_reason_only_reaches_the_log(
     (tmp_path / "config.json").write_text('{"nova_api_key": "k",')
     with caplog.at_level(logging.WARNING, logger="app.config"):
         s = load_settings(env_for(tmp_path))
-    assert s.config_error == "config.json is not valid JSON; fix or remove it and restart"
+    assert s.config_error == f"config.json is not valid JSON; {CONFIG_FIX_HINT}"
+    assert "run setup again" in s.config_error
     assert "line 1" not in s.config_error and "char" not in s.config_error
     assert str(tmp_path) not in s.config_error
     assert "Expecting" in caplog.text and str(tmp_path) in caplog.text  # the detail is logged
 
     (tmp_path / "config.json").write_text("[1, 2]")
-    assert load_settings(env_for(tmp_path)).config_error == "config.json must contain a JSON object"
+    assert (
+        load_settings(env_for(tmp_path)).config_error
+        == f"config.json must contain a JSON object; {CONFIG_FIX_HINT}"
+    )
 
 
 @pytest.mark.parametrize("present", ["password_hash", "session_secret"])
@@ -98,7 +102,7 @@ def test_update_config_refuses_to_overwrite_a_corrupt_file(tmp_path: Path) -> No
     path.write_text("{oops")
     with pytest.raises(ConfigError) as caught:
         update_config(path, {"site_title": "x"})
-    assert caught.value.public == "config.json is not valid JSON; fix or remove it and restart"
+    assert caught.value.public == f"config.json is not valid JSON; {CONFIG_FIX_HINT}"
     assert str(path) in caught.value.detail  # the path is for the log, never for the public
     assert path.read_text() == "{oops"
 
@@ -177,12 +181,103 @@ def test_settings_source_reload_reads_a_same_stamp_write(tmp_path: Path) -> None
     assert source.current().site_title == "BBBB"
 
 
-def test_env_var_for_covers_every_lockable_field(tmp_path: Path) -> None:
-    from app.config import ENV_VAR_FOR
+def test_lockable_covers_every_lockable_field(tmp_path: Path) -> None:
+    from app.config import LOCKABLE
 
     s = load_settings(
         env_for(
             tmp_path, NOVA_API_KEY="k", ASTROCAPTION_MAX_UPLOAD_MB="7", ASTROCAPTION_SITE_TITLE="T"
         )
     )
-    assert set(ENV_VAR_FOR) == s.env_locked == {"nova_api_key", "max_upload_mb", "site_title"}
+    assert set(LOCKABLE) == s.env_locked == {"nova_api_key", "max_upload_mb", "site_title"}
+    assert s.locked_by == {
+        "nova_api_key": "NOVA_API_KEY",
+        "max_upload_mb": "ASTROCAPTION_MAX_UPLOAD_MB",
+        "site_title": "ASTROCAPTION_SITE_TITLE",
+    }
+
+
+def test_locked_by_names_the_variable_that_is_actually_set(tmp_path: Path) -> None:
+    """The legacy alias locks the key just as well, and is the name the API reports."""
+    s = load_settings(env_for(tmp_path, ASTROMETRY_API_KEY="legacy"))
+    assert s.env_locked == {"nova_api_key"} and s.nova_api_key == "legacy"
+    assert s.locked_by == {"nova_api_key": "ASTROMETRY_API_KEY"}
+    both = load_settings(env_for(tmp_path, NOVA_API_KEY="new", ASTROMETRY_API_KEY="legacy"))
+    assert both.nova_api_key == "new" and both.locked_by["nova_api_key"] == "NOVA_API_KEY"
+
+
+def test_default_style_is_normalised_field_by_field(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """GET and PUT must agree: what loads is what the page can send straight back."""
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "default_style": {
+                    "text_color": "white",  # not #RRGGBB
+                    "font_size": 300,  # above the model bound
+                    "halo": "false",  # a JSON string pydantic can read as a bool
+                    "bogus": 1,  # not a style field at all
+                    "marker_color": "#ff8800",
+                }
+            }
+        )
+    )
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        s = load_settings(env_for(tmp_path))
+    assert s.default_style == {"halo": False, "marker_color": "#ff8800"}
+    dropped = [r for r in caplog.records if "ignoring default_style." in r.getMessage()]
+    assert len(dropped) == 3
+    text = caplog.text
+    assert "text_color" in text and "font_size" in text and "bogus" in text
+    assert "white" not in text and "300" not in text  # the reason, never the value
+
+
+def test_default_style_that_is_not_an_object_is_dropped(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "config.json").write_text(json.dumps({"default_style": ["nope"]}))
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        assert load_settings(env_for(tmp_path)).default_style == {}
+    assert "not a JSON object" in caplog.text
+
+
+def test_max_upload_mb_is_clamped_to_the_api_bounds(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "config.json").write_text(json.dumps({"max_upload_mb": 2000}))
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        assert load_settings(env_for(tmp_path)).max_upload_mb == 1024
+    assert "2000" in caplog.text and "1024" in caplog.text
+    (tmp_path / "config.json").write_text(json.dumps({"max_upload_mb": -5}))
+    assert load_settings(env_for(tmp_path)).max_upload_mb == 1
+    (tmp_path / "config.json").write_text(json.dumps({"max_upload_mb": 0}))
+    assert load_settings(env_for(tmp_path)).max_upload_mb == 60  # 0 reads as "not set"
+    (tmp_path / "config.json").write_text(json.dumps({"max_upload_mb": "lots"}))
+    assert load_settings(env_for(tmp_path)).max_upload_mb == 60
+
+
+def test_settings_source_reload_stamps_before_it_loads(tmp_path: Path) -> None:
+    """A write that lands while reload() is reading is picked up by the next current()."""
+    from app import config as config_module
+    from app.config import SettingsSource
+
+    env = env_for(tmp_path)
+    path = tmp_path / "config.json"
+    update_config(path, {"site_title": "AAAA"})
+    source = SettingsSource(env=env)
+    real_load = config_module.load_settings
+    landed = False
+
+    def load_and_race(e: object = None) -> object:
+        nonlocal landed
+        loaded = real_load(env)
+        if not landed:  # a concurrent PUT lands after the stamp was taken, before the read
+            landed = True
+            update_config(path, {"site_title": "BBBB"})
+        return loaded
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(config_module, "load_settings", load_and_race)
+        assert source.reload().site_title == "AAAA"  # the racing write was not in this read
+    assert source.current().site_title == "BBBB"  # ... but the stale stamp finds it next time

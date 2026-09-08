@@ -8,9 +8,9 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 
 def utcnow_iso() -> str:
@@ -331,6 +331,9 @@ class ImageRecord(BaseModel):
 # API payloads
 # ---------------------------------------------------------------------------
 
+MIN_UPLOAD_MB = 1
+MAX_UPLOAD_MB = 1024  # the bounds config.json is clamped to and PUT /api/config validates
+
 
 class ImageOut(BaseModel):
     id: str
@@ -406,6 +409,23 @@ class HealthOut(BaseModel):
     locked: list[str] = []  # field names pinned by environment variables, never their values
 
 
+class StyleDefaults(BaseModel):
+    """The built-in style values the page shows for fields with no override.
+
+    Exactly ``StyleConfig``'s fields minus ``layout.SIZE_RELATIVE`` (the four sizes, which are
+    derived from each image and so have no single default to show).
+    """
+
+    font_file: str
+    text_color: str
+    marker_color: str
+    leader_color: str
+    halo: bool
+    halo_color: str
+    show_aliases: bool
+    name_preference: NamePreference
+
+
 class ConfigOut(BaseModel):
     """Owner-facing settings. The nova key is write-only: only its presence is reported."""
 
@@ -414,7 +434,8 @@ class ConfigOut(BaseModel):
     nova_api_key_set: bool
     default_style: dict[str, object]
     locked: list[str]  # fields pinned by environment variables
-    style_defaults: dict[str, object]  # built-in font/colours/booleans for fields with no override
+    locked_by: dict[str, str]  # locked field -> the variable that pins it, never its value
+    style_defaults: StyleDefaults  # built-ins for fields with no override
 
 
 HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
@@ -443,16 +464,24 @@ class StyleOverrides(BaseModel):
     name_preference: NamePreference | None = None
 
     def overrides(self) -> dict[str, object]:
-        return {k: v for k, v in self.model_dump().items() if v is not None}
+        """The chosen fields only, with validated values (real ints, bools, ``#RRGGBB``)."""
+        return self.model_dump(exclude_none=True)
 
 
 class ConfigUpdate(BaseModel):
-    """Partial update: absent fields are kept; ``nova_api_key: null`` clears the key."""
+    """Partial update: absent fields are kept; ``nova_api_key: null`` clears the key.
+
+    ``default_style`` is not merged: it replaces the whole override set, so a field left out
+    of it goes back to the built-in (size-relative, for the four size fields) default.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    site_title: str | None = Field(default=None, min_length=1, max_length=200)
-    max_upload_mb: int | None = Field(default=None, ge=1, le=1024)
+    site_title: (
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+        | None
+    ) = None
+    max_upload_mb: int | None = Field(default=None, ge=MIN_UPLOAD_MB, le=MAX_UPLOAD_MB)
     nova_api_key: str | None = Field(default=None, max_length=200)
     default_style: StyleOverrides | None = None
 
