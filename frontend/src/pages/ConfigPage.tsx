@@ -62,14 +62,11 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
     setError(null)
     setSaved(null)
     const body: ConfigUpdate = {}
+    // default_style replaces the whole override set, so the saved font travels with it even
+    // when the font list did not load: dropping it here would silently unset the owner's font.
+    // If it is no longer a bundled file the server answers 422 naming default_style.font_file.
     const next = overridesFromStyleForm(style)
-    const stored = { ...config.default_style }
-    if (!fontsLoaded) {
-      // Nothing was offered to pick from, so the font is not ours to send back.
-      delete next.font_file
-      delete stored.font_file
-    }
-    if (!sameOverrides(next, stored)) body.default_style = next
+    if (!sameOverrides(next, config.default_style)) body.default_style = next
     if (!locked('site_title') && siteTitle.trim() !== config.site_title) body.site_title = siteTitle.trim()
     if (!locked('max_upload_mb') && uploadMb.trim() !== '' && uploadMb !== String(config.max_upload_mb)) {
       body.max_upload_mb = Number(uploadMb)
