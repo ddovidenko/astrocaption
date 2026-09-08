@@ -6,7 +6,7 @@ VENV      := backend/.venv
 PY        := $(VENV)/bin/python
 NPM       := npm --prefix frontend
 
-.PHONY: help install dev dev-backend dev-frontend test test-backend test-frontend lint lint-backend lint-frontend format build up placement-vectors clean
+.PHONY: help install dev dev-backend dev-frontend test test-backend test-frontend lint lint-backend lint-frontend format build up placement-vectors names-catalog record-fixtures clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -60,6 +60,13 @@ up: ## docker compose up --build (uses ./data as the volume)
 
 placement-vectors: $(VENV)/.installed ## Regenerate tests/fixtures/placement/*.json from the Python placer
 	cd backend && .venv/bin/python scripts/make_placement_vectors.py
+
+names-catalog: $(VENV)/.installed ## Rebuild backend/app/catalog/names.json from OpenNGC (network)
+	cd backend && .venv/bin/python scripts/build_names_catalog.py
+
+record-fixtures: $(VENV)/.installed ## Re-record backend/tests/fixtures/nova/ from a real solve: make record-fixtures IMAGE=path.jpg
+	@test -n "$(IMAGE)" || { echo "usage: make record-fixtures IMAGE=path/to/image.jpg"; exit 2; }
+	cd backend && .venv/bin/python scripts/record_nova_fixtures.py "$(IMAGE)"
 
 clean: ## Remove build artefacts (keeps data/)
 	rm -rf backend/static frontend/dist backend/.pytest_cache backend/.mypy_cache backend/.ruff_cache

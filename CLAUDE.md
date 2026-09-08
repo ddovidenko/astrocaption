@@ -27,6 +27,8 @@ make build        # docker build -t astrocaption:local .
 make up           # docker compose up (uses ./data as volume)
 make reset-password   # see docs/LOCKOUT.md
 make placement-vectors   # regenerate tests/fixtures/placement/*.json from the Python placer
+make names-catalog       # rebuild backend/app/catalog/names.json from OpenNGC (network)
+make record-fixtures IMAGE=path.jpg   # re-record backend/tests/fixtures/nova/ from a real solve (network, needs the key)
 ```
 
 If a Makefile target doesn't exist yet, create it rather than documenting a raw command.
@@ -42,6 +44,8 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
   and env vars. Never in the repo, never in logs, never returned by any API endpoint.
 - Public (logged-out) routes are read-only and must never expose the editor, the config,
   or unpublished images.
+- API responses and the page never carry server paths or raw exception text. Failures are
+  plain language, with the nova status URL when one exists; tracebacks go to the server log.
 - One container, one process supervisor. No sidecar services. SQLite, not Postgres.
 - Keep the Docker image under 400 MB. Check with `docker image ls` after `make build`.
 
@@ -64,3 +68,14 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
   and note anything a self-hoster needs to know in `docs/INSTALL.md`.
 - Don't scaffold ahead of the current milestone. Milestone order is in SPEC.md § 13.
 - When unsure about UX intent, check SPEC.md § 6 (editor interactions) before guessing.
+- Library docs: the Context7 MCP server covers FastAPI, Starlette, Pydantic, Pillow, httpx, React, Vite,
+  Konva and similar; query it before answering API questions from memory. It has no entry for
+  nova.astrometry.net: use https://astrometry.net/doc/net/api.html and the recorded fixtures instead.
+- Flow: branch → `gh pr create` → `gh pr checks --watch` → `gh pr merge --squash --delete-branch`.
+  `main` allows squash merges only (branch protection arrives with milestone 6). Never push to `main`.
+- Review ritual before a milestone PR: `/code-review high`, then a silent-failure pass
+  (pr-review-toolkit agent) on the diff, then `/simplify`; fix, re-run `make lint test`, and let the
+  owner smoke-test on `make dev` before committing.
+- Don't switch git branches that add or remove `frontend/vite.config.ts` while `make dev` runs: Vite
+  restarts without the `/api` proxy and the page goes blank. Stop the servers first (kill by port, not
+  by process pattern). If `docker` needs `sudo`, the docker group hasn't taken effect in that shell yet.
