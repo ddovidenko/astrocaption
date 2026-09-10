@@ -79,13 +79,12 @@ export interface ConfigForm {
   siteTitle: string
   uploadMb: string
   novaKey: string
-  clearKey: boolean
   style: StyleForm
 }
 
 /** The partial update for a save: only what changed, never a locked field, and
  *  default_style as the whole override set (the server replaces it) only when it differs.
- *  A blank upload limit means "unchanged"; ticking "remove the key" beats a typed key. */
+ *  A blank upload limit means "unchanged"; removing the key is a separate action. */
 export function buildUpdate(form: ConfigForm, config: ConfigOut): ConfigUpdate {
   const locked = (field: string) => config.locked.includes(field)
   const body: ConfigUpdate = {}
@@ -99,9 +98,6 @@ export function buildUpdate(form: ConfigForm, config: ConfigOut): ConfigUpdate {
   if (!locked('max_upload_mb') && mb !== '' && mb !== String(config.max_upload_mb)) {
     body.max_upload_mb = Number(mb)
   }
-  if (!locked('nova_api_key')) {
-    if (form.clearKey) body.nova_api_key = null
-    else if (form.novaKey.trim()) body.nova_api_key = form.novaKey.trim()
-  }
+  if (!locked('nova_api_key') && form.novaKey.trim()) body.nova_api_key = form.novaKey.trim()
   return body
 }

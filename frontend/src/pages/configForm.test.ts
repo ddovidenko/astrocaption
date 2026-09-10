@@ -63,7 +63,7 @@ describe('config form helpers', () => {
       locked: [],
       locked_by: {},
     }
-    const form = { siteTitle: 'Sky', uploadMb: '60', novaKey: '', clearKey: false, style: { ...empty, font_file: 'Roboto-Bold.ttf' } }
+    const form = { siteTitle: 'Sky', uploadMb: '60', novaKey: '', style: { ...empty, font_file: 'Roboto-Bold.ttf' } }
 
     it('sends nothing when nothing changed', () => {
       expect(buildUpdate(form, config)).toEqual({})
@@ -79,9 +79,9 @@ describe('config form helpers', () => {
       expect(buildUpdate({ ...form, siteTitle: 'Other', uploadMb: '9' }, locked)).toEqual({})
     })
 
-    it('lets "remove the key" win over a typed key', () => {
+    it('sends a typed key trimmed and never an empty one', () => {
       expect(buildUpdate({ ...form, novaKey: ' abc ' }, config)).toEqual({ nova_api_key: 'abc' })
-      expect(buildUpdate({ ...form, novaKey: 'abc', clearKey: true }, config)).toEqual({ nova_api_key: null })
+      expect(buildUpdate({ ...form, novaKey: '   ' }, config)).toEqual({})
     })
 
     it('sends default_style as the whole set only when it differs, keeping the stored font', () => {
