@@ -6,7 +6,7 @@ VENV      := backend/.venv
 PY        := $(VENV)/bin/python
 NPM       := npm --prefix frontend
 
-.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors names-catalog record-fixtures favicons e2e-fixture clean
+.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors names-catalog record-fixtures favicons e2e-fixture e2e clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -112,6 +112,10 @@ e2e-fixture: $(VENV)/.installed ## Regenerate frontend/e2e/fixtures/field.jpg (3
 record-fixtures: $(VENV)/.installed ## Record nova fixtures from a real solve: make record-fixtures IMAGE=path.jpg [OUT=backend/tests/fixtures/nova-narrow]
 	@test -n "$(IMAGE)" || { echo "usage: make record-fixtures IMAGE=path/to/image.jpg [OUT=dir]"; exit 2; }
 	cd backend && .venv/bin/python scripts/record_nova_fixtures.py "$(abspath $(IMAGE))" $(if $(OUT),"$(abspath $(OUT))",)
+
+e2e: install ## Browser smoke test: built frontend + uvicorn on a scratch data dir + a fake nova (needs `npx playwright install chromium` once)
+	$(NPM) run build
+	cd frontend && E2E_START_APP=1 npx playwright test
 
 clean: ## Remove build artefacts (keeps data/)
 	rm -rf backend/static frontend/dist backend/.pytest_cache backend/.mypy_cache backend/.ruff_cache
