@@ -132,6 +132,10 @@ def test_setup_then_login_then_logout(tmp_path: Path, monkeypatch: pytest.Monkey
         assert out.status_code == 204 and "Max-Age=0" in out.headers["set-cookie"]
         assert client.get("/api/health").json()["authenticated"] is False
         assert client.get("/api/images").status_code == 401
+        # Without a valid session there is nothing to clear: no Set-Cookie at all, so a
+        # cross-site POST (which SameSite=Lax strips the cookie from) cannot force a logout.
+        anonymous = client.post("/api/logout")
+        assert anonymous.status_code == 204 and "set-cookie" not in anonymous.headers
 
         written = json.loads((tmp_path / "data" / "config.json").read_text())
         assert set(written) == {"password_hash", "session_secret", "nova_api_key", "site_title"}

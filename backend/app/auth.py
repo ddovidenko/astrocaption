@@ -155,7 +155,11 @@ def session_is_valid(
 
 
 class LoginLimiter:
-    """Global cooldown: ``max_failures`` wrong passwords start ``cooldown`` seconds of 429s."""
+    """Global cooldown: ``max_failures`` wrong passwords start ``cooldown`` seconds of 429s.
+
+    In-memory, one instance per process: the app is one uvicorn worker (CLAUDE.md), so a
+    restart forgets the cooldown and a second worker would count separately.
+    """
 
     def __init__(
         self,

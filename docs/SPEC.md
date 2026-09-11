@@ -93,7 +93,9 @@ No multi-user, no roles, no invites in v1.
    NGC 1980 and ι Ori at the same pixel and they are different objects. The label's primary line is
    chosen by the style's *name preference* (§ 6.3).
 5. Owner lands in the editor with all objects present but **only objects above a size
-   threshold enabled** (default: radius ≥ 0.4 % of image width, plus all named bright stars).
+   threshold enabled** (default: radius ≥ 0.4 % of image width, plus all named bright stars, plus
+   non-stellar objects nova returns with radius 0: there the radius means "no size known", not
+   "small", so NGC 206 in M 31 is enabled like any other NGC entry. Decided 2026-09-11, #9).
    `hd`-type stars have radius 0 and are therefore hidden by default (see § 14).
 6. On failure: show nova's job log link and let the owner retry, optionally with scale hints
    (focal length / pixel size passed as nova's `scale_units` etc.).
@@ -352,7 +354,5 @@ Later (not v1): local ASTAP solver option, custom object entries (user-added lab
 ## 14. Open questions
 
 - Nova rate limits: undocumented; we serialise solves (one at a time) and cache job results forever. Confirm behaviour under a burst of 5 uploads.
-- Object list size: wide fields can return 500+ HD stars. Default-hide `hd` type entirely? Current plan: hide by default, available in the list with a type filter. (nova adds `hd` entries only to fields of about 1° radius or less: the 2.4° Orion recording has none, the 1° Pelican recording in `tests/fixtures/nova-narrow/` has five, and a bright star can appear twice, as `bright` and as `hd` at the same pixel.)
-- Non-stellar objects nova returns with radius 0 (NGC 206, the star cloud in M 31) are hidden by the size rule. Enable NGC/IC objects regardless of size? Decide with the editor (milestone 3), where a click toggles them anyway.
-- Should exports be stored or generated on demand? Plan: stored (cheap) so the gallery can show them without re-rendering.
+- Object list size: wide fields can return 500+ HD stars. Decided 2026-09-11 (#37): `hd` entries are hidden by default and shown by the object list's type filter; a bright star that nova lists twice, as `bright` and as `hd` at the same pixel, keeps both rows (flagging the twin is post-v1 polish). The filter is tested against `tests/fixtures/nova-narrow/`: 8 objects, 5 `hd`, 3 labels enabled. (nova adds `hd` entries only to fields of about 1° radius or less: the 2.4° Orion recording has none.)
 - Touch support in the editor: out of scope for v1, but Konva makes pinch-zoom cheap. Revisit after milestone 5.

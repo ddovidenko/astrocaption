@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 
 def utcnow_iso() -> str:
@@ -485,6 +485,16 @@ class ConfigUpdate(BaseModel):
     max_upload_mb: int | None = Field(default=None, ge=MIN_UPLOAD_MB, le=MAX_UPLOAD_MB)
     nova_api_key: str | None = Field(default=None, max_length=200)
     default_style: StyleOverrides | None = None
+
+    @field_validator("site_title", "max_upload_mb", mode="before")
+    @classmethod
+    def _null_is_not_a_value(cls, value: object) -> object:
+        # ``None`` here only means "absent"; an explicit null has no meaning for these two
+        # fields (unlike ``nova_api_key``), so it is rejected instead of silently kept (#47).
+        # Fixed text: the 422 handler echoes this message.
+        if value is None:
+            raise ValueError("cannot be null; leave the field out to keep the current value")
+        return value
 
 
 def validation_message(error: Mapping[str, Any]) -> str:
