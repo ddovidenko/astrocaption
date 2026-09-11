@@ -17,6 +17,14 @@ import time
 from collections.abc import Callable
 
 from .config import Settings, update_config
+from .models import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH
+
+# Re-exported (mypy's --no-implicit-reexport needs the name in __all__, since ruff's
+# useless-import-alias rule rejects the ``import X as X`` idiom instead): api/auth.py,
+# main.py and cli.py import both names from here, not from .models, so the bounds stay
+# defined in one place (next to SetupRequest/LoginRequest in models.py) without moving
+# every caller.
+__all__ = ["MAX_PASSWORD_LENGTH", "MIN_PASSWORD_LENGTH"]
 
 log = logging.getLogger(__name__)
 
@@ -26,11 +34,6 @@ SCRYPT_P = 1
 SCRYPT_MAXMEM = 128 * 1024 * 1024  # n=2^15, r=8 needs ~32 MB; OpenSSL's default cap is exactly that
 SALT_BYTES = 32
 DIGEST_BYTES = 32
-MIN_PASSWORD_LENGTH = 8
-MAX_PASSWORD_LENGTH = 1024  # matches Field(max_length=...) on SetupRequest/LoginRequest in
-# models.py; kept in sync by hand, not by import, because models.py sits below config.py
-# and auth.py in the import graph (config.py already imports from models.py, and auth.py
-# imports from config.py) so models.py importing auth.py would be a circular import.
 
 COOKIE_NAME = "astrocaption_session"
 SESSION_TTL_SECONDS = 30 * 24 * 3600
