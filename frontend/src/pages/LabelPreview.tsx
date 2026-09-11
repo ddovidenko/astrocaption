@@ -9,8 +9,11 @@ const STARS = [
 ] as const
 
 const PREVIEW_SIZE = 22 // the label's font size inside this strip, whatever the image would use
-const PRIMARY = 'NGC 1976'
-const ALIASES = 'M 42 · Orion Nebula'
+/** One object, two ways round: the primary line follows the name preference (SPEC § 6.3). */
+const LINES = {
+  popular: { primary: 'M 42', aliases: 'NGC 1976 · Orion Nebula' },
+  ngc_ic: { primary: 'NGC 1976', aliases: 'M 42 · Orion Nebula' },
+} as const
 
 function fontFamilyFor(file: string): string {
   return file.replace(/\.ttf$/i, '')
@@ -49,6 +52,7 @@ export default function LabelPreview({ style, defaults }: { style: StyleForm; de
   const haloOn = style.halo === '' ? defaults.halo : style.halo === 'on'
   const haloColor = style.halo_color || defaults.halo_color
   const aliasesOn = style.show_aliases === '' ? defaults.show_aliases : style.show_aliases === 'on'
+  const lines = LINES[style.name_preference || defaults.name_preference]
   // Widths are stored in image pixels; the preview keeps their ratio to the font size.
   const scale = PREVIEW_SIZE / (Number(style.font_size) || 24)
   const px = (v: string, fallback: number) => Math.max(0.5, (Number(v) || fallback) * scale)
@@ -75,7 +79,7 @@ export default function LabelPreview({ style, defaults }: { style: StyleForm; de
         fontFamily={family}
         fontSize={PREVIEW_SIZE}
       >
-        {PRIMARY}
+        {lines.primary}
       </text>
       {aliasesOn && (
         <text
@@ -90,7 +94,7 @@ export default function LabelPreview({ style, defaults }: { style: StyleForm; de
           fontSize={aliasSize}
           opacity="0.9"
         >
-          {ALIASES}
+          {lines.aliases}
         </text>
       )}
     </svg>
