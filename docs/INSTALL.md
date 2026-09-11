@@ -37,11 +37,12 @@ you don't trust.
 
 Headless installs set `ASTROCAPTION_PASSWORD` instead: on start, if no password has been set
 yet, the app performs setup with it. The variable is read once, so you can remove it afterwards.
-Passwords shorter than 8 characters are ignored with a log line.
+Passwords outside 8 to 1024 characters are ignored with a log line.
 
 Sign-ins are rate-limited (five wrong passwords → 60 seconds). Forgot the password:
 `make reset-password` (or `docker compose exec app python -m app.cli reset-password`) asks for
-a new one and logs every browser out; see `docs/LOCKOUT.md` for the other lockout cases.
+a new one inside the running container and logs every browser out; on a source checkout it is
+`make reset-password-dev`. See `docs/LOCKOUT.md` for the other lockout cases.
 
 ## Configuration
 
