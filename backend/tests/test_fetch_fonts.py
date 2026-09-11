@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.fetch_fonts import FAMILIES, file_name, parse_css
+from scripts.fetch_fonts import FAMILIES, file_name, licence_path, parse_css
 
 CSS = """
 @font-face {
@@ -91,7 +91,7 @@ def test_parse_css_rejects_two_normal_blocks_of_the_same_weight() -> None:
         parse_css(css)
 
 
-def test_parse_css_treats_a_woff2_only_block_as_the_weight_being_missing() -> None:
+def test_parse_css_raises_when_a_normal_weight_block_has_no_ttf_src() -> None:
     css = """
 @font-face {
   font-family: 'Manrope';
@@ -110,8 +110,30 @@ def test_parse_css_treats_a_woff2_only_block_as_the_weight_being_missing() -> No
         parse_css(css)
 
 
+def test_parse_css_finds_the_ttf_url_among_several_quoted_srcs() -> None:
+    css = """
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  src: url( 'https://fonts.gstatic.com/s/manrope/v1/regular.woff2' ) format('woff2'),
+       url("https://fonts.gstatic.com/s/manrope/v1/regular.ttf") format('truetype');
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  src: url(https://fonts.gstatic.com/s/manrope/v1/bold.ttf) format('truetype');
+}
+"""
+    assert parse_css(css) == {
+        "400": "https://fonts.gstatic.com/s/manrope/v1/regular.ttf",
+        "700": "https://fonts.gstatic.com/s/manrope/v1/bold.ttf",
+    }
+
+
 def test_family_list_is_the_twelve_from_the_spec() -> None:
-    assert [f.name for f in FAMILIES] == [
+    assert FAMILIES == [
         "Inter",
         "Roboto",
         "Open Sans",
@@ -125,4 +147,5 @@ def test_family_list_is_the_twelve_from_the_spec() -> None:
         "Play",
         "Source Serif 4",
     ]
-    assert all(f.licence.endswith(("OFL.txt", "UFL.txt")) for f in FAMILIES)
+    assert licence_path("Ubuntu") == "ufl/ubuntu/UFL.txt"
+    assert licence_path("Source Serif 4") == "ofl/sourceserif4/OFL.txt"

@@ -81,7 +81,9 @@ out keeps its built-in default, and for `font_size`, `halo_width`, `marker_width
 `marker_min_radius` that default is derived from each image's size. Colours are `#RRGGBB`
 (`"#ffd54a"`, not `"yellow"`), sizes are whole numbers within the bounds the API accepts
 (font size 6-200, halo and marker width 0-40 and 1-40, marker minimum radius 1-400) and the
-font is a bundled file name. A value the page cannot represent — a colour by name, a size out
+font is a bundled file name. The bundled families are listed in `fonts/README.md`; a
+`font_file` that is not bundled is ignored with a server-log warning and the default
+`Inter-Regular.ttf` is used. A value the page cannot represent — a colour by name, a size out
 of range, a field that is not part of the style — is dropped when the file is read, with a
 warning in the server log naming the field; the rest of your `default_style` still applies.
 

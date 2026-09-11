@@ -11,12 +11,11 @@ curly apostrophe; tests/test_fonts.py checks the result.
 
 from __future__ import annotations
 
+import http.client
 import re
 import sys
-import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -30,39 +29,43 @@ WEIGHTS = {"400": "Regular", "700": "Bold"}
 TIMEOUT = 60
 
 
-@dataclass(frozen=True)
-class Family:
-    name: str
-    licence: str  # path inside github.com/google/fonts
-
-
-FAMILIES: list[Family] = [
-    Family("Inter", "ofl/inter/OFL.txt"),
-    Family("Roboto", "ofl/roboto/OFL.txt"),
-    Family("Open Sans", "ofl/opensans/OFL.txt"),
-    Family("Source Sans 3", "ofl/sourcesans3/OFL.txt"),
-    Family("Fira Sans", "ofl/firasans/OFL.txt"),
-    Family("IBM Plex Sans", "ofl/ibmplexsans/OFL.txt"),
-    Family("JetBrains Mono", "ofl/jetbrainsmono/OFL.txt"),
-    Family("Ubuntu", "ufl/ubuntu/UFL.txt"),
-    Family("Manrope", "ofl/manrope/OFL.txt"),
-    Family("Roboto Condensed", "ofl/robotocondensed/OFL.txt"),
-    Family("Play", "ofl/play/OFL.txt"),
-    Family("Source Serif 4", "ofl/sourceserif4/OFL.txt"),
+FAMILIES: list[str] = [
+    "Inter",
+    "Roboto",
+    "Open Sans",
+    "Source Sans 3",
+    "Fira Sans",
+    "IBM Plex Sans",
+    "JetBrains Mono",
+    "Ubuntu",
+    "Manrope",
+    "Roboto Condensed",
+    "Play",
+    "Source Serif 4",
 ]
+
+LICENCE_OVERRIDES: dict[str, str] = {"Ubuntu": "ufl/ubuntu/UFL.txt"}
+
+
+def licence_path(name: str) -> str:
+    """Path inside github.com/google/fonts for a family's licence text."""
+    return LICENCE_OVERRIDES.get(name, f"ofl/{_slug(name).lower()}/OFL.txt")
+
 
 _STYLE_NORMAL = re.compile(r"font-style:\s*normal")
 _WEIGHT = re.compile(r"font-weight:\s*(\d+)")
-_URL = re.compile(r"url\((https://[^)]+)\)")
+_URL = re.compile(r"url\(\s*['\"]?(https://[^)'\"]+)['\"]?\s*\)")
 
 
 def parse_css(css: str) -> dict[str, str]:
     """``{weight: ttf_url}`` from a CSS API response; both weights must be present.
 
     Works per ``@font-face`` block so an italic face never shadows a normal one of the
-    same weight: a block counts only when it is ``font-style: normal``, its
-    ``font-weight`` is one of ``WEIGHTS``, and its ``src`` includes a ``.ttf`` url (a
-    woff2-only block is treated the same as one with no usable src at all).
+    same weight: a block counts only when it is ``font-style: normal`` and its
+    ``font-weight`` is one of ``WEIGHTS``. Its ``src`` may list several urls (woff2 and
+    ttf side by side); the ``.ttf`` one is picked out of all of them. A normal-style
+    block for a known weight with no ``.ttf`` url is a hard error rather than being
+    treated as though the weight were simply absent.
     """
     found: dict[str, str] = {}
     for block in css.split("@font-face")[1:]:
@@ -71,13 +74,13 @@ def parse_css(css: str) -> dict[str, str]:
         weight_match = _WEIGHT.search(block)
         if weight_match is None or weight_match.group(1) not in WEIGHTS:
             continue
-        url_match = _URL.search(block)
-        if url_match is None or not url_match.group(1).endswith(".ttf"):
-            continue
         weight = weight_match.group(1)
+        ttf_urls = [url for url in _URL.findall(block) if url.endswith(".ttf")]
+        if not ttf_urls:
+            raise ValueError(f"no .ttf src in the weight {weight} block")
         if weight in found:
             raise ValueError(f"CSS response has weight {weight} twice")
-        found[weight] = url_match.group(1)
+        found[weight] = ttf_urls[0]
     missing = [w for w in WEIGHTS if w not in found]
     if missing:
         raise ValueError(f"CSS response lacks weight(s) {', '.join(missing)}")
@@ -98,42 +101,45 @@ def _get(url: str) -> bytes:
         return cast(bytes, response.read())
 
 
-def fetch_family(family: Family) -> list[str]:
-    query = urllib.parse.quote(family.name) + ":400,700&subset=" + SUBSETS
+def fetch_family(name: str) -> list[str]:
+    query = urllib.parse.quote(name) + ":400,700&subset=" + SUBSETS
     urls = parse_css(_get(f"{CSS_API}?family={query}").decode("utf-8"))
     written = []
     for weight, url in urls.items():
-        name = file_name(family.name, weight)
-        (FONTS_DIR / name).write_bytes(_get(url))
-        written.append(name)
-    licence = LICENSES_DIR / f"{_slug(family.name)}.txt"
-    licence.write_bytes(_get(LICENCE_BASE + family.licence))
+        file = file_name(name, weight)
+        (FONTS_DIR / file).write_bytes(_get(url))
+        written.append(file)
+    licence = LICENSES_DIR / f"{_slug(name)}.txt"
+    licence.write_bytes(_get(LICENCE_BASE + licence_path(name)))
     return written
 
 
 def main() -> int:
     LICENSES_DIR.mkdir(parents=True, exist_ok=True)
-    expected_fonts: set[str] = set()
-    for family in FAMILIES:
-        try:
-            written = fetch_family(family)
-        except (urllib.error.URLError, ValueError) as exc:
-            print(
-                f"fetch failed for {family.name}: {exc}; fonts/ may be half-updated, "
-                "run 'git checkout fonts/'"
-            )
-            return 1
-        expected_fonts.update(written)
-        print(f"{family.name}: {', '.join(written)}")
-    expected_licences = {f"{_slug(family.name)}.txt" for family in FAMILIES}
+    expected_fonts = {file_name(family, weight) for family in FAMILIES for weight in WEIGHTS}
+    expected_licences = {f"{_slug(family)}.txt" for family in FAMILIES}
     stray_fonts = sorted(p.name for p in FONTS_DIR.glob("*.ttf") if p.name not in expected_fonts)
     stray_licences = sorted(
         p.name for p in LICENSES_DIR.glob("*.txt") if p.name not in expected_licences
     )
     strays = stray_fonts + stray_licences
     if strays:
-        print(f"not in the family list, remove by hand: {', '.join(strays)}")
+        print(
+            f"not in the family list, remove by hand before refreshing: {', '.join(strays)}",
+            file=sys.stderr,
+        )
         return 1
+    for family in FAMILIES:
+        try:
+            written = fetch_family(family)
+        except (OSError, http.client.HTTPException, ValueError) as exc:
+            print(
+                f"fetch failed for {family}: {exc}; fonts/ may be half-updated; run "
+                "'git checkout fonts/' and 'git clean -n fonts/'",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"{family}: {', '.join(written)}")
     return 0
 
 
