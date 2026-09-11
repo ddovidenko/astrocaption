@@ -44,26 +44,30 @@ for (const name of FIXTURE_NAMES) {
 const fixture = (name) => files.get(name)
 const json = (name) => ({ type: 'application/json', body: fixture(name) })
 
-// How many times each poll endpoint has been asked since the last upload: the first answer
-// is "not yet", every later one is "done", which is the shortest path through the worker.
-let submissionPolls = 0
-let jobPolls = 0
+// A poll endpoint answers "not yet" once after each upload and "done" from then on: the
+// shortest path through the worker. Ids are not tracked; the fixtures carry fixed ones.
+const firstThenRest = () => {
+  let n = 0
+  return (first, rest) => (n++ === 0 ? first : rest)
+}
+let submission = firstThenRest()
+let job = firstThenRest()
 
 function route(method, path) {
   if ((method === 'GET' || method === 'HEAD') && path === '/') return { type: 'application/json', body: '{"ok": true}' }
   if (method === 'POST' && path === '/api/login') return json('login.json')
   if (method === 'POST' && path === '/api/upload') {
-    submissionPolls = 0
-    jobPolls = 0
+    submission = firstThenRest()
+    job = firstThenRest()
     return json('upload.json')
   }
   if (method === 'GET' && /^\/api\/submissions\/\d+$/.test(path)) {
-    return json(submissionPolls++ === 0 ? 'submission_pending.json' : 'submission_ready.json')
+    return json(submission('submission_pending.json', 'submission_ready.json'))
   }
   if (method === 'GET' && /^\/api\/jobs\/\d+\/annotations\/$/.test(path)) return json('annotations.json')
   if (method === 'GET' && /^\/api\/jobs\/\d+\/info\/$/.test(path)) return json('job_info.json')
   if (method === 'GET' && /^\/api\/jobs\/\d+$/.test(path)) {
-    return json(jobPolls++ === 0 ? 'job_solving.json' : 'job_success.json')
+    return json(job('job_solving.json', 'job_success.json'))
   }
   if (method === 'GET' && /^\/wcs_file\/\d+$/.test(path)) {
     return { type: 'application/octet-stream', body: fixture('wcs.fits') }
@@ -76,8 +80,14 @@ function route(method, path) {
 
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://fake-nova')
-  // Drain the request body (uploads are multipart) before answering.
+  // Drain the request body (uploads are multipart) before answering. Bodies are never
+  // parsed or validated: a malformed upload still gets upload.json; this is a replay, not
+  // a protocol check. A client that drops the connection mid-body fails only this request.
   req.on('data', () => undefined)
+  req.on('error', (err) => {
+    console.error(`fake nova: ${req.method} ${url.pathname} aborted (${err.message})`)
+    res.destroy()
+  })
   req.on('end', () => {
     const hit = route(req.method ?? 'GET', url.pathname)
     console.log(`${req.method} ${url.pathname} -> ${hit ? 200 : 404}`)

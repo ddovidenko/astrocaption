@@ -156,7 +156,9 @@ make e2e            # browser smoke test
 ```
 
 The browser test runs against a fake nova that replays recorded responses, so it never contacts
-nova.astrometry.net and never touches `./data`.
+nova.astrometry.net and never touches `./data`. The first run downloads Chromium (about 170 MB, into
+`~/.cache/ms-playwright`); on a fresh host without a desktop, install its libraries once with
+`cd frontend && npx playwright install-deps chromium` (needs sudo).
 
 The dev server uses `./data` in the repo (git-ignored).
 

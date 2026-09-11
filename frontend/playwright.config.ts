@@ -12,7 +12,10 @@ const startApp = process.env.E2E_START_APP === '1'
 const appPort = 8765
 const novaPort = process.env.FAKE_NOVA_PORT ?? '8901'
 const novaHost = process.env.FAKE_NOVA_HOST ?? '127.0.0.1'
-const baseURL = process.env.E2E_BASE_URL ?? `http://127.0.0.1:${appPort}`
+// When this config starts the app, the spec must talk to that app and nothing else: a
+// stray E2E_BASE_URL pointing at a dev server would otherwise pass readiness and be driven
+// through setup and uploads against real data.
+const baseURL = startApp ? `http://127.0.0.1:${appPort}` : process.env.E2E_BASE_URL?.trim() || `http://127.0.0.1:${appPort}`
 // Only mint a scratch data dir when this config is the one starting the app: CI supplies
 // E2E_BASE_URL for an already-running container and never touches E2E_DATA_DIR, so creating
 // one here (e.g. for `--list`) would just leak a directory nothing ever cleans up.
@@ -20,9 +23,8 @@ const suppliedDataDir = process.env.E2E_DATA_DIR?.trim()
 const dataDir = startApp ? suppliedDataDir || mkdtempSync(join(tmpdir(), 'astrocaption-e2e-')) : ''
 if (startApp) {
   process.env.E2E_DATA_DIR = dataDir
-  // Only the process that minted this dir cleans it up. Playwright registers webServer setup
-  // before globalTeardown, so a webServer that fails to start (busy port, missing venv) would
-  // leave the dir behind under that mechanism; an exit hook covers that path too.
+  // Only the process that minted this dir cleans it up. An exit hook (rather than Playwright's
+  // globalTeardown) also runs when a webServer fails to start: busy port, missing venv.
   if (!suppliedDataDir) {
     process.on('exit', () => rmSync(dataDir, { recursive: true, force: true }))
   }
@@ -58,21 +60,21 @@ export default defineConfig({
     ...(startApp
       ? [
           {
-            command: `${backend}/.venv/bin/uvicorn app.main:app --port ${appPort}`,
+            // Playwright always merges the developer's shell into a webServer's env, and any
+            // ASTROCAPTION_* / TRUST_PROXY / API-key variable there would lock a field the spec
+            // edits or change the first-run flow, so uvicorn gets a closed environment instead.
+            command: [
+              'env -i',
+              `PATH="${process.env.PATH}"`,
+              `HOME="${process.env.HOME}"`,
+              `ASTROCAPTION_DATA_DIR="${dataDir}"`,
+              `ASTROCAPTION_STATIC_DIR="${backend}/static"`,
+              `NOVA_BASE_URL=http://127.0.0.1:${novaPort}`,
+              'NOVA_API_KEY=fixture',
+              `${backend}/.venv/bin/uvicorn app.main:app --port ${appPort}`,
+            ].join(' '),
             cwd: backend,
             url: `${baseURL}/api/health`,
-            env: {
-              ASTROCAPTION_DATA_DIR: dataDir,
-              ASTROCAPTION_STATIC_DIR: `${backend}/static`,
-              NOVA_BASE_URL: `http://127.0.0.1:${novaPort}`,
-              NOVA_API_KEY: 'fixture',
-              // The app inherits the developer's environment; pin these empty so none of them
-              // locks the field the spec edits (empty is treated as unset, see _from_env in
-              // backend/app/config.py).
-              ASTROCAPTION_SITE_TITLE: '',
-              ASTROCAPTION_MAX_UPLOAD_MB: '',
-              ASTROMETRY_API_KEY: '',
-            },
             reuseExistingServer: false,
             timeout: 30_000,
           },

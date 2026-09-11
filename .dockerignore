@@ -12,3 +12,6 @@ tests
 backend/static
 backend/tests
 frontend/dist
+frontend/e2e
+frontend/test-results
+frontend/playwright-report

@@ -9,7 +9,7 @@ NPM       := npm --prefix frontend
 .PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors names-catalog record-fixtures favicons e2e-fixture e2e clean
 
 help:
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 install: $(VENV)/.installed frontend/node_modules ## Create the backend venv and install frontend packages
 
@@ -116,7 +116,7 @@ record-fixtures: $(VENV)/.installed ## Record nova fixtures from a real solve: m
 e2e: install ## Browser smoke test: built frontend + uvicorn on a scratch data dir + a fake nova
 	$(NPM) run build
 	cd frontend && npx playwright install chromium
-	cd frontend && E2E_START_APP=1 npx playwright test
+	E2E_START_APP=1 $(NPM) run e2e
 
 clean: ## Remove build artefacts (keeps data/)
 	rm -rf backend/static frontend/dist backend/.pytest_cache backend/.mypy_cache backend/.ruff_cache
