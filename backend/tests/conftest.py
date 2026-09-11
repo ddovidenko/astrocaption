@@ -215,7 +215,13 @@ def make_worker(
     return SolveWorker(db, settings, lambda: solver, **kwargs)
 
 
-ENV_ISOLATED = ("NOVA_API_KEY", "ASTROMETRY_API_KEY", "ASTROCAPTION_SITE_TITLE", "TRUST_PROXY")
+ENV_ISOLATED = (
+    "NOVA_API_KEY",
+    "ASTROMETRY_API_KEY",
+    "ASTROCAPTION_SITE_TITLE",
+    "ASTROCAPTION_MAX_UPLOAD_MB",
+    "TRUST_PROXY",
+)
 
 
 def env_app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **env: str) -> TestClient:

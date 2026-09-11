@@ -48,12 +48,60 @@ export interface HealthOut {
   locked: string[]
 }
 
+export type NamePreference = 'popular' | 'ngc_ic'
+
+/** The owner's default_style: only the fields they chose to override. Mirrors StyleOverrides. */
+export interface StyleOverrides {
+  font_file?: string
+  font_size?: number
+  text_color?: string
+  marker_color?: string
+  leader_color?: string
+  halo?: boolean
+  halo_color?: string
+  halo_width?: number
+  marker_width?: number
+  marker_min_radius?: number
+  show_aliases?: boolean
+  name_preference?: NamePreference
+}
+
+/** Built-in values for fields with no override (sizes are per image, so not listed). */
+export interface StyleDefaults {
+  font_file: string
+  text_color: string
+  marker_color: string
+  leader_color: string
+  halo: boolean
+  halo_color: string
+  show_aliases: boolean
+  name_preference: NamePreference
+}
+
 export interface ConfigOut {
   site_title: string
   max_upload_mb: number
   nova_api_key_set: boolean
-  default_style: Record<string, unknown>
+  default_style: StyleOverrides
+  style_defaults: StyleDefaults
   locked: string[]
+  /** Locked field -> the environment variable that pins it (never its value). */
+  locked_by: Record<string, string>
+}
+
+/** Partial: absent keeps, `nova_api_key: null` clears; `default_style` replaces the override set. */
+export interface ConfigUpdate {
+  site_title?: string
+  max_upload_mb?: number
+  nova_api_key?: string | null
+  default_style?: StyleOverrides
+}
+
+export interface FontOut {
+  file: string
+  family: string
+  weight: string
+  sample: string
 }
 
 export interface SetupRequest {
@@ -168,6 +216,8 @@ export const api = {
     request<void>('/api/login', json('POST', { password }), { sessionAware: false }),
   logout: () => request<void>('/api/logout', json('POST')),
   config: () => request<ConfigOut>('/api/config'),
+  fonts: () => request<FontOut[]>('/api/fonts'),
+  updateConfig: (body: ConfigUpdate) => request<ConfigOut>('/api/config', json('PUT', body)),
   listImages: () => request<ImageOut[]>('/api/images'),
   upload(file: File, title: string): Promise<ImageOut> {
     const form = new FormData()

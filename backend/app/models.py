@@ -6,11 +6,12 @@ Geometry is always in original-image pixels (see CLAUDE.md).
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 
 def utcnow_iso() -> str:
@@ -331,6 +332,9 @@ class ImageRecord(BaseModel):
 # API payloads
 # ---------------------------------------------------------------------------
 
+MIN_UPLOAD_MB = 1
+MAX_UPLOAD_MB = 1024  # the bounds config.json is clamped to and PUT /api/config validates
+
 
 class ImageOut(BaseModel):
     id: str
@@ -406,6 +410,23 @@ class HealthOut(BaseModel):
     locked: list[str] = []  # field names pinned by environment variables, never their values
 
 
+class StyleDefaults(BaseModel):
+    """The built-in style values the page shows for fields with no override.
+
+    Exactly ``StyleConfig``'s fields minus ``layout.SIZE_RELATIVE`` (the four sizes, which are
+    derived from each image and so have no single default to show).
+    """
+
+    font_file: str
+    text_color: str
+    marker_color: str
+    leader_color: str
+    halo: bool
+    halo_color: str
+    show_aliases: bool
+    name_preference: NamePreference
+
+
 class ConfigOut(BaseModel):
     """Owner-facing settings. The nova key is write-only: only its presence is reported."""
 
@@ -414,6 +435,63 @@ class ConfigOut(BaseModel):
     nova_api_key_set: bool
     default_style: dict[str, object]
     locked: list[str]  # fields pinned by environment variables
+    locked_by: dict[str, str]  # locked field -> the variable that pins it, never its value
+    style_defaults: StyleDefaults  # built-ins for fields with no override
+
+
+HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
+
+
+class StyleOverrides(BaseModel):
+    """The owner's ``default_style``: only the fields they chose; the rest stay size-relative.
+
+    Bounds mirror ``StyleConfig``. Colours are ``#RRGGBB`` (what ``<input type="color">``
+    produces and what Pillow accepts). Unknown fields are refused so a typo cannot be stored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    font_file: str | None = Field(default=None, max_length=100)
+    font_size: int | None = Field(default=None, ge=MIN_FONT_SIZE, le=MAX_FONT_SIZE)
+    text_color: str | None = Field(default=None, pattern=HEX_COLOR)
+    marker_color: str | None = Field(default=None, pattern=HEX_COLOR)
+    leader_color: str | None = Field(default=None, pattern=HEX_COLOR)
+    halo: bool | None = None
+    halo_color: str | None = Field(default=None, pattern=HEX_COLOR)
+    halo_width: int | None = Field(default=None, ge=0, le=MAX_STROKE_WIDTH)
+    marker_width: int | None = Field(default=None, ge=1, le=MAX_STROKE_WIDTH)
+    marker_min_radius: int | None = Field(default=None, ge=1, le=MAX_MARKER_MIN_RADIUS)
+    show_aliases: bool | None = None
+    name_preference: NamePreference | None = None
+
+    def overrides(self) -> dict[str, object]:
+        """The chosen fields only, with validated values (real ints, bools, ``#RRGGBB``)."""
+        return self.model_dump(exclude_none=True)
+
+
+class ConfigUpdate(BaseModel):
+    """Partial update: absent fields are kept; ``nova_api_key: null`` clears the key.
+
+    ``default_style`` is not merged: it replaces the whole override set, so a field left out
+    of it goes back to the built-in (size-relative, for the four size fields) default.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    site_title: (
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+        | None
+    ) = None
+    max_upload_mb: int | None = Field(default=None, ge=MIN_UPLOAD_MB, le=MAX_UPLOAD_MB)
+    nova_api_key: str | None = Field(default=None, max_length=200)
+    default_style: StyleOverrides | None = None
+
+
+def validation_message(error: Mapping[str, Any]) -> str:
+    """Pydantic's reason for one rejected value, never the value itself (CLAUDE.md)."""
+    if error.get("type") == "json_invalid":
+        return "the body is not valid JSON"
+    return str(error.get("msg", "is not valid"))
 
 
 # A custom ``@field_validator`` message is echoed verbatim by the 422 handler in main.py,

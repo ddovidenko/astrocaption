@@ -21,6 +21,7 @@ from .api import auth, config, docs, fonts, health, images
 from .auth import MIN_PASSWORD_LENGTH, LoginLimiter, perform_setup
 from .config import Settings, SettingsSource
 from .db import Database
+from .models import validation_message
 from .solver import Solver
 from .solver.nova import NovaSolver
 from .worker import SolveWorker
@@ -92,7 +93,9 @@ def create_app(
     app.state.db = db
     app.state.worker = worker
     app.state.login_limiter = LoginLimiter()
-    app.state.setup_lock = asyncio.Lock()  # one first-run setup at a time (SPEC § 5.1)
+    # One config.json read-modify-write at a time, whoever writes: first-run setup (SPEC
+    # § 5.1) and the config page share the file, so they share the lock.
+    app.state.config_write_lock = asyncio.Lock()
     app.add_middleware(images.UploadGuard, settings_source=source)
 
     app.add_exception_handler(RequestValidationError, plain_validation_error)  # type: ignore[arg-type]
@@ -110,6 +113,19 @@ def create_app(
     return app
 
 
+MAX_LABEL_CHARS = 60
+MAX_REPORTED_ERRORS = 5  # a body with hundreds of bad keys must not flood the log or the page
+
+
+def _safe_label(parts: list[str]) -> str:
+    """A field path fit to echo: the client chooses these names, so it could send a control
+    character to forge a log line, or a very long one to bury the message."""
+    cleaned = (
+        "".join(c if c.isascii() and c.isprintable() else "?" for c in part) for part in parts
+    )
+    return ".".join(cleaned)[:MAX_LABEL_CHARS] or "request"
+
+
 async def plain_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
     """Plain-language 422s: the default FastAPI body echoes the submitted value (a
     password, here) in ``input`` and returns a list. Neither belongs in a response."""
@@ -123,14 +139,13 @@ async def plain_validation_error(_: Request, exc: RequestValidationError) -> JSO
             for part in error.get("loc", ())
             if isinstance(part, str) and part not in {"body", "query", "path"}
         ]
-        label = ".".join(named) or "request"
+        label = _safe_label(named)
         labels.append(label)
-        msg = (
-            "the body is not valid JSON"
-            if error.get("type") == "json_invalid"
-            else str(error.get("msg", "is not valid"))
-        )
-        messages.append(f"{label}: {msg}")
+        messages.append(f"{label}: {validation_message(error)}")
+    extra = len(messages) - MAX_REPORTED_ERRORS
+    if extra > 0:
+        labels, messages = labels[:MAX_REPORTED_ERRORS], messages[:MAX_REPORTED_ERRORS]
+        messages.append(f"and {extra} more problems")
     log.info("request validation failed: %s", ", ".join(labels) or "request")
     detail = "; ".join(messages) or "Invalid request."
     return JSONResponse({"detail": detail}, status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)

@@ -17,5 +17,5 @@ async def health(request: Request, settings: SettingsDep) -> HealthOut:
         setup_required=settings.setup_required,
         authenticated=is_authenticated(request, settings),
         config_error=settings.config_error,
-        locked=sorted(settings.env_locked),
+        locked=sorted(settings.locked_by),
     )

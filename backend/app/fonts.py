@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from pathlib import Path
 
 from PIL import ImageFont
 
 from .models import FontOut
+
+log = logging.getLogger(__name__)
 
 
 class FontNotFoundError(LookupError):
@@ -33,6 +36,10 @@ def load_font(fonts_dir: Path, file: str, size: int) -> ImageFont.FreeTypeFont:
 def list_fonts(fonts_dir: Path) -> list[FontOut]:
     fonts: list[FontOut] = []
     for path in sorted(fonts_dir.glob("*.ttf")):
-        family, style = ImageFont.truetype(str(path), 24).getname()
+        try:
+            family, style = ImageFont.truetype(str(path), 24).getname()
+        except OSError:  # a truncated or non-TTF file must not cost the page its font list
+            log.warning("skipping unreadable font %s", path.name)
+            continue
         fonts.append(FontOut(file=path.name, family=family or path.stem, weight=style or "Regular"))
     return fonts

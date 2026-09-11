@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Navigate, Route, Routes, useNavigate } from 'react-router'
+import { Link, Navigate, NavLink, Route, Routes, useNavigate } from 'react-router'
 import { api, describeError, setUnauthorizedHandler, type HealthOut } from './api'
+import ConfigPage from './pages/ConfigPage'
 import ImagesPage from './pages/ImagesPage'
 import LoginPage from './pages/LoginPage'
 import SetupPage from './pages/SetupPage'
@@ -76,10 +77,16 @@ export default function App() {
   return (
     <>
       <header>
-        <h1>{health?.site_title ?? 'AstroCaption'}</h1>
+        <h1>
+          <Link to="/">{health?.site_title ?? 'AstroCaption'}</Link>
+        </h1>
         {health && <span className="version">v{health.version}</span>}
         {health?.authenticated && (
           <nav>
+            <NavLink to="/" end>
+              Images
+            </NavLink>
+            <NavLink to="/config">Config</NavLink>
             <button className="secondary" onClick={() => void logout()}>
               Log out
             </button>
@@ -106,6 +113,14 @@ export default function App() {
               element={
                 <Guard health={health}>
                   <ImagesPage health={health} refreshHealth={refreshHealth} />
+                </Guard>
+              }
+            />
+            <Route
+              path="/config"
+              element={
+                <Guard health={health}>
+                  <ConfigPage refreshHealth={refreshHealth} />
                 </Guard>
               }
             />

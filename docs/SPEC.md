@@ -62,8 +62,9 @@ No multi-user, no roles, no invites in v1.
    password hash, the app performs step 4 with that password. The variable is read once and never stored.
 7. A `config.json` that exists but cannot be parsed is **not** "not set up": setup stays closed
    (`POST /setup` answers 409), login is refused, and `/api/health` carries `config_error` so the owner can
-   fix or delete the file. `config_error` is a fixed plain sentence ("config.json is not valid JSON; fix or
-   remove it and restart"); the parser's reason and the file's path go to the server log only.
+   fix or delete the file. `config_error` is a fixed plain sentence ("config.json is not valid JSON; fix
+   it, or remove it and run setup again (removing it resets the owner password)"); the parser's reason and
+   the file's path go to the server log only.
 8. A `config.json` holding only one of `password_hash`/`session_secret` cannot authenticate anybody, so it
    reopens setup; setup writes both halves fresh and merges them into whatever else the file holds.
    Concurrent setup submissions are serialised: the first wins, the rest get the 404 of step 5.
@@ -230,10 +231,20 @@ Owner (cookie session):
 - `POST /setup` {password, nova_api_key?, site_title?} → 404 once set up; `POST /login` {password} → sets the
   cookie, 401 on a wrong password, 429 with `Retry-After` during the cooldown; `POST /logout` clears it.
   Logged-out calls to any owner route get 401 with a plain message.
-- `GET/PUT /config` → {site_title, max_upload_mb, nova_api_key_set, default_style, locked}. The key is
-  write-only (`nova_api_key: null` in a PUT clears it, absent keeps it). `default_style` is validated against
-  the style model and the bundled fonts. `locked` lists the fields set by environment variables; a PUT that
-  changes one is rejected with a plain message.
+- `GET/PUT /config` → {site_title, max_upload_mb, nova_api_key_set, default_style, style_defaults, locked,
+  locked_by}. `PUT` is partial: absent fields are kept, `nova_api_key: null` clears the key, and
+  `default_style` replaces the owner's whole override set — a save from the page therefore stores exactly the
+  fields it shows filled in, and every field left blank goes back to the built-in default (derived from the
+  image size for `font_size`, `halo_width`, `marker_width` and `marker_min_radius`). It is validated against
+  the style model and the bundled fonts. `default_style` read from `config.json` is normalised through the
+  same model, field by field: what `GET` reports is always something `PUT` accepts, and anything the model
+  cannot represent is dropped at load with a server-log warning naming the field (never its value). `locked`
+  lists the fields pinned by environment variables and `locked_by` maps each of them to the variable that set
+  it (`nova_api_key` may be pinned by `NOVA_API_KEY` or `ASTROMETRY_API_KEY`); a `PUT` that touches one is
+  rejected with a plain message naming that variable. `style_defaults` carries the built-in font, colours,
+  booleans and name preference for fields without an override. Writes go through the atomic config.json
+  writer under a lock, the running app re-reads the file immediately, and a `PUT` with nothing to change
+  never rewrites it.
 - `POST /images` (multipart) → id, starts solve
 - `GET /images`, `GET /images/{id}`, `DELETE /images/{id}`
 - `POST /images/{id}/solve` (re-solve, optional scale hints)

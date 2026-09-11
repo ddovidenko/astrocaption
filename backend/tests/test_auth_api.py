@@ -195,8 +195,8 @@ def test_setup_reports_a_data_directory_it_cannot_write(
             data_dir.chmod(0o700)
     assert resp.status_code == 500
     assert resp.json() == {
-        "detail": "The password could not be saved: the data directory is not writable. "
-        "Check the permissions on ./data and try again."
+        "detail": "The password could not be saved: the server could not write to ./data. "
+        "The server log says why."
     }
     assert str(data_dir) not in resp.text  # the server path stays in the log
 

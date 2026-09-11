@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -10,9 +11,11 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.config import Settings
+from app.config import CONFIG_FIX_HINT, Settings
 from app.db import Database
+from app.layout import SIZE_RELATIVE
 from app.main import create_app
+from app.models import StyleConfig
 from tests.conftest import (
     NOVA_NARROW_FIXTURES,
     TEST_PASSWORD_HASH,
@@ -44,12 +47,15 @@ def test_health_and_fonts(client: TestClient) -> None:
         "locked": [],
     }
     config = client.get("/api/config").json()
+    style_defaults = StyleConfig().model_dump(exclude=set(SIZE_RELATIVE))
     assert config == {
         "site_title": "Test Site",
         "max_upload_mb": 5,
         "nova_api_key_set": False,
         "default_style": {},
         "locked": [],
+        "locked_by": {},
+        "style_defaults": style_defaults,
     }
     fonts = client.get("/api/fonts").json()
     assert len(fonts) == 24
@@ -57,6 +63,24 @@ def test_health_and_fonts(client: TestClient) -> None:
     assert (inter["family"], inter["weight"], inter["sample"]) == ("Inter", "Regular", "NGC 1976")
     font = client.get("/fonts/Inter-Regular.ttf")
     assert font.status_code == 200 and font.headers["content-type"] == "font/ttf"
+
+
+def test_font_list_skips_a_file_it_cannot_read(
+    tmp_path: Path, settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    """One junk .ttf in the fonts directory must not cost the config page its whole list."""
+    from app.fonts import list_fonts
+
+    fonts_dir = tmp_path / "fonts"
+    fonts_dir.mkdir()
+    (fonts_dir / "Junk-Regular.ttf").write_bytes(b"not a font at all")
+    (fonts_dir / "Inter-Regular.ttf").write_bytes(
+        (settings.fonts_dir / "Inter-Regular.ttf").read_bytes()
+    )
+    with caplog.at_level(logging.WARNING, logger="app.fonts"):
+        fonts = list_fonts(fonts_dir)
+    assert [f.file for f in fonts] == ["Inter-Regular.ttf"]
+    assert "skipping unreadable font Junk-Regular.ttf" in caplog.text
 
 
 def test_upload_stores_original_untouched_with_derivatives(
@@ -443,7 +467,7 @@ def test_health_reports_a_broken_config_file(env_client: tuple[TestClient, Path]
     (data_dir / "config.json").write_text('{"nova_api_key": "k",')
     body = client.get("/api/health").json()
     assert body["setup_required"] is False and body["authenticated"] is False
-    assert body["config_error"] == "config.json is not valid JSON; fix or remove it and restart"
+    assert body["config_error"] == f"config.json is not valid JSON; {CONFIG_FIX_HINT}"
     # No raw exception text and no server path reaches the page (CLAUDE.md).
     assert "line 1" not in body["config_error"] and str(data_dir) not in body["config_error"]
     broken = client.post("/api/setup", json={"password": "hunter2hunter2"})

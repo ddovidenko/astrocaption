@@ -31,6 +31,24 @@ def _clamp(v: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, v))
 
 
+def _size_kwargs(scale: float) -> dict[str, int]:
+    """The style fields derived from the image size, at ``scale`` (``scale_unit``)."""
+    return {
+        "font_size": _clamp(round(12 * scale), 8, MAX_FONT_SIZE),
+        "halo_width": _clamp(round(2 * scale), 1, MAX_STROKE_WIDTH),
+        "marker_width": _clamp(round(1.5 * scale), 1, MAX_STROKE_WIDTH),
+        "marker_min_radius": _clamp(round(6 * scale), 4, MAX_MARKER_MIN_RADIUS),
+    }
+
+
+SIZE_RELATIVE: frozenset[str] = frozenset(_size_kwargs(1.0))
+"""Style fields with no fixed built-in: they are derived from each image's size.
+
+The config page shows them blank ("auto") instead of a default value, so ``style_defaults``
+in ``GET /api/config`` leaves them out. Derived here, so the two can never drift apart.
+"""
+
+
 def default_style(
     width: int,
     height: int,
@@ -43,13 +61,7 @@ def default_style(
     ``font_file`` override that is not a bundled font is dropped with a warning rather than
     failing every solve after nova has already succeeded.
     """
-    s = scale_unit(width, height)
-    base = StyleConfig(
-        font_size=_clamp(round(12 * s), 8, MAX_FONT_SIZE),
-        halo_width=_clamp(round(2 * s), 1, MAX_STROKE_WIDTH),
-        marker_width=_clamp(round(1.5 * s), 1, MAX_STROKE_WIDTH),
-        marker_min_radius=_clamp(round(6 * s), 4, MAX_MARKER_MIN_RADIUS),
-    )
+    base = StyleConfig.model_validate(_size_kwargs(scale_unit(width, height)))
     if not overrides:
         return base
     merged: dict[str, object] = {**base.model_dump(), **overrides}
