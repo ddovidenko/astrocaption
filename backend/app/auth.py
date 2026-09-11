@@ -19,13 +19,6 @@ from collections.abc import Callable
 from .config import Settings, update_config
 from .models import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH
 
-# Re-exported (mypy's --no-implicit-reexport needs the name in __all__, since ruff's
-# useless-import-alias rule rejects the ``import X as X`` idiom instead): api/auth.py,
-# main.py and cli.py import both names from here, not from .models, so the bounds stay
-# defined in one place (next to SetupRequest/LoginRequest in models.py) without moving
-# every caller.
-__all__ = ["MAX_PASSWORD_LENGTH", "MIN_PASSWORD_LENGTH"]
-
 log = logging.getLogger(__name__)
 
 SCRYPT_N = 2**15
@@ -60,6 +53,20 @@ def _scrypt(password: str, salt: bytes, n: int, r: int, p: int, dklen: int) -> b
     return hashlib.scrypt(
         password.encode("utf-8"), salt=salt, n=n, r=r, p=p, maxmem=SCRYPT_MAXMEM, dklen=dklen
     )
+
+
+def validate_new_password(password: str) -> str | None:
+    """Why this password may not be used, as one plain sentence, or ``None`` when it may.
+
+    The one place the bound is applied: the setup route, the headless
+    ``ASTROCAPTION_PASSWORD`` start and ``app.cli reset-password`` all ask here, so a
+    password one of them accepts is never one the login endpoint would reject.
+    """
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
+    if len(password) > MAX_PASSWORD_LENGTH:
+        return f"Password must be at most {MAX_PASSWORD_LENGTH} characters."
+    return None
 
 
 def hash_password(password: str) -> str:

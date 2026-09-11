@@ -10,11 +10,11 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 
 from ..auth import (
     COOKIE_NAME,
-    MIN_PASSWORD_LENGTH,
     SESSION_TTL_SECONDS,
     LoginLimiter,
     issue_session,
     perform_setup,
+    validate_new_password,
     verify_password,
 )
 from ..config import ConfigError, Settings
@@ -58,11 +58,9 @@ async def setup(body: SetupRequest, request: Request) -> None:
             raise HTTPException(status.HTTP_409_CONFLICT, settings.config_error)
         if not settings.setup_required:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Setup has already been completed.")
-        if len(body.password) < MIN_PASSWORD_LENGTH:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_CONTENT,
-                f"Password must be at least {MIN_PASSWORD_LENGTH} characters.",
-            )
+        refusal = validate_new_password(body.password)
+        if refusal is not None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, refusal)
         try:
             await asyncio.to_thread(
                 perform_setup,
