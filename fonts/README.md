@@ -12,7 +12,7 @@ checks every file.
 | Family | Files | Licence |
 |---|---|---|
 | Inter | `Inter-Regular.ttf`, `Inter-Bold.ttf` | OFL (`LICENSES/Inter.txt`) |
-| Roboto | `Roboto-*.ttf` | OFL |
+| Roboto | `Roboto-*.ttf` | OFL (`LICENSES/Roboto.txt`) |
 | Open Sans | `OpenSans-*.ttf` | OFL |
 | Source Sans 3 | `SourceSans3-*.ttf` | OFL |
 | Fira Sans | `FiraSans-*.ttf` | OFL |

@@ -39,6 +39,77 @@ def test_file_names_follow_the_bundle_convention() -> None:
     assert file_name("Source Serif 4", "700") == "SourceSerif4-Bold.ttf"
 
 
+def test_parse_css_prefers_normal_over_a_preceding_italic_of_the_same_weight() -> None:
+    css = """
+@font-face {
+  font-family: 'Manrope';
+  font-style: italic;
+  font-weight: 400;
+  src: url(https://fonts.gstatic.com/s/manrope/v1/italic.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  src: url(https://fonts.gstatic.com/s/manrope/v1/regular.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  src: url(https://fonts.gstatic.com/s/manrope/v1/bold.ttf) format('truetype');
+}
+"""
+    assert parse_css(css) == {
+        "400": "https://fonts.gstatic.com/s/manrope/v1/regular.ttf",
+        "700": "https://fonts.gstatic.com/s/manrope/v1/bold.ttf",
+    }
+
+
+def test_parse_css_rejects_two_normal_blocks_of_the_same_weight() -> None:
+    css = """
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  src: url(https://fonts.gstatic.com/s/manrope/v1/regular.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  src: url(https://fonts.gstatic.com/s/manrope/v1/regular-2.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  src: url(https://fonts.gstatic.com/s/manrope/v1/bold.ttf) format('truetype');
+}
+"""
+    with pytest.raises(ValueError, match="400"):
+        parse_css(css)
+
+
+def test_parse_css_treats_a_woff2_only_block_as_the_weight_being_missing() -> None:
+    css = """
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400;
+  src: url(https://fonts.gstatic.com/s/manrope/v1/regular.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  src: url(https://fonts.gstatic.com/s/manrope/v1/bold.woff2) format('woff2');
+}
+"""
+    with pytest.raises(ValueError, match="700"):
+        parse_css(css)
+
+
 def test_family_list_is_the_twelve_from_the_spec() -> None:
     assert [f.name for f in FAMILIES] == [
         "Inter",

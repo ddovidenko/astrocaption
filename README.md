@@ -20,6 +20,7 @@ Then visit http://localhost:8080 and choose the owner password.
 - Code map: `docs/ARCHITECTURE.md`
 - Locked out: `docs/LOCKOUT.md`
 
-Licence: MIT. Bundled fonts carry their own OFL licences in `fonts/LICENSES/`; the object-name
+Licence: MIT. Bundled fonts carry their own open-font licences in `fonts/LICENSES/` (OFL, and
+the Ubuntu Font Licence for Ubuntu); the object-name
 table in `backend/app/catalog/names.json` is derived from [OpenNGC](https://github.com/mattiaverga/OpenNGC)
 under CC BY-SA 4.0 (see `backend/app/catalog/OPENNGC-LICENSE.md`).
