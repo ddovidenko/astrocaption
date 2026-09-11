@@ -6,10 +6,10 @@ VENV      := backend/.venv
 PY        := $(VENV)/bin/python
 NPM       := npm --prefix frontend
 
-.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors names-catalog record-fixtures favicons clean
+.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors names-catalog record-fixtures favicons e2e-fixture e2e clean
 
 help:
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 install: $(VENV)/.installed frontend/node_modules ## Create the backend venv and install frontend packages
 
@@ -106,9 +106,17 @@ names-catalog: $(VENV)/.installed ## Rebuild backend/app/catalog/names.json from
 favicons: $(VENV)/.installed ## Regenerate frontend/public/ icons from frontend/icon/icon-source.png
 	cd backend && .venv/bin/python scripts/make_favicons.py
 
+e2e-fixture: $(VENV)/.installed ## Regenerate frontend/e2e/fixtures/field.jpg (3000×2250, matches the nova fixtures)
+	cd backend && .venv/bin/python scripts/make_e2e_fixture.py
+
 record-fixtures: $(VENV)/.installed ## Record nova fixtures from a real solve: make record-fixtures IMAGE=path.jpg [OUT=backend/tests/fixtures/nova-narrow]
 	@test -n "$(IMAGE)" || { echo "usage: make record-fixtures IMAGE=path/to/image.jpg [OUT=dir]"; exit 2; }
 	cd backend && .venv/bin/python scripts/record_nova_fixtures.py "$(abspath $(IMAGE))" $(if $(OUT),"$(abspath $(OUT))",)
+
+e2e: install ## Browser smoke test: built frontend + uvicorn on a scratch data dir + a fake nova
+	$(NPM) run build
+	cd frontend && npx playwright install chromium
+	E2E_START_APP=1 $(NPM) run e2e
 
 clean: ## Remove build artefacts (keeps data/)
 	rm -rf backend/static frontend/dist backend/.pytest_cache backend/.mypy_cache backend/.ruff_cache

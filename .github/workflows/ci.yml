@@ -51,9 +51,34 @@ jobs:
           size=$(docker image inspect astrocaption:ci --format '{{.Size}}')
           echo "image size: $((size / 1024 / 1024)) MB"
           test "$size" -lt $((400 * 1024 * 1024))
-      - name: smoke test
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm --prefix frontend ci --no-audit --no-fund
+      - name: install Chromium for Playwright
+        run: cd frontend && npx playwright install --with-deps --only-shell chromium
+      - name: boot the image and run the browser smoke test against it
         run: |
-          docker run -d --rm --name ac -p 8000:8000 astrocaption:ci
+          docker run -d --name ac -p 8000:8000 \
+            --add-host=host.docker.internal:host-gateway \
+            -e NOVA_BASE_URL=http://host.docker.internal:8901 -e NOVA_API_KEY=fixture \
+            astrocaption:ci
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/api/health && break; sleep 1; done
           curl -fsS http://127.0.0.1:8000/api/health
-          docker stop ac
+          FAKE_NOVA_HOST=0.0.0.0 E2E_BASE_URL=http://127.0.0.1:8000 CI=1 npm --prefix frontend run e2e
+      - name: container log
+        if: failure()
+        continue-on-error: true
+        run: docker logs ac
+      - name: remove the container
+        if: always()
+        continue-on-error: true
+        run: docker rm -f ac
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
