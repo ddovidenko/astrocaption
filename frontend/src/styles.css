@@ -62,7 +62,6 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
 .field-note { color: var(--muted); font-size: 0.85rem; }
 .field input, .field select { width: 100%; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem 1.25rem; }
-.row2 .field:first-child { grid-column: span 1; }
 .row2-action { grid-template-columns: 1fr auto; align-items: end; }
 .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.1rem 1.25rem; margin-top: 1rem; align-items: end; }
 .grid3 .span2 { grid-column: span 2; }
@@ -73,9 +72,10 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
 .swatch { display: flex; align-items: center; gap: 0.6rem; width: 100%; padding: 0.35rem 0.5rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-weight: 500; text-align: left; }
 .swatch-chip { width: 1.5rem; height: 1.5rem; border-radius: 3px; border: 1px solid rgba(255, 255, 255, 0.15); flex: none; }
 .swatch-hex { font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
-.swatch-note { margin-left: auto; color: var(--muted); font-size: 0.8rem; font-weight: 400; }
+.swatch-note { color: var(--muted); font-size: 0.8rem; font-weight: 400; }
 .popover { position: absolute; z-index: 10; top: calc(100% + 0.4rem); left: 0; min-width: 232px; display: grid; gap: 0.6rem; padding: 0.75rem; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); }
 .popover .react-colorful { width: 200px; height: 160px; }
+.grid3 > :nth-child(3n) .popover { left: auto; right: 0; } /* the last column opens leftwards, so it stays on screen */
 .popover-row { display: flex; gap: 0.5rem; align-items: center; }
 .popover-row button { white-space: nowrap; }
 .popover-row input { width: 6.5rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 0.35rem 0.5rem; font: inherit; font-variant-numeric: tabular-nums; }

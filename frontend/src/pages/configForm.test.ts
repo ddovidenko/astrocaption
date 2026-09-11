@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ConfigOut } from '../api'
-import { buildUpdate, overridesFromStyleForm, sameOverrides, styleFormFromOverrides, type StyleForm } from './configForm'
+import { buildUpdate, normalizeHex, overridesFromStyleForm, sameOverrides, styleFormFromOverrides, type StyleForm } from './configForm'
 
 const empty: StyleForm = {
   font_file: '',
@@ -75,8 +75,22 @@ describe('config form helpers', () => {
     })
 
     it('never sends a locked field', () => {
-      const locked = { ...config, locked: ['site_title', 'max_upload_mb'], locked_by: { site_title: 'ASTROCAPTION_SITE_TITLE', max_upload_mb: 'ASTROCAPTION_MAX_UPLOAD_MB' } }
-      expect(buildUpdate({ ...form, siteTitle: 'Other', uploadMb: '9' }, locked)).toEqual({})
+      const locked = {
+        ...config,
+        locked: ['site_title', 'max_upload_mb', 'nova_api_key'],
+        locked_by: { site_title: 'ASTROCAPTION_SITE_TITLE', max_upload_mb: 'ASTROCAPTION_MAX_UPLOAD_MB', nova_api_key: 'NOVA_API_KEY' },
+      }
+      expect(buildUpdate({ ...form, siteTitle: 'Other', uploadMb: '9', novaKey: 'abc' }, locked)).toEqual({})
+    })
+
+    it('stores colours in the six-digit form the server accepts', () => {
+      expect(normalizeHex('#fff')).toBe('#ffffff')
+      expect(normalizeHex('AbC')).toBe('#AAbbCC')
+      expect(normalizeHex(' #ff8800 ')).toBe('#ff8800')
+      expect(normalizeHex('red')).toBe('red') // left for the server's plain 422
+      expect(buildUpdate({ ...form, style: { ...form.style, text_color: '#fff' } }, config)).toEqual({
+        default_style: { font_file: 'Roboto-Bold.ttf', text_color: '#ffffff' },
+      })
     })
 
     it('sends a typed key trimmed and never an empty one', () => {

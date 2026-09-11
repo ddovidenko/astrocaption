@@ -45,17 +45,18 @@ const num = (v: string): number | undefined => {
 }
 const bool = (v: Tri): boolean | undefined => (v === '' ? undefined : v === 'on')
 const text = (v: string): string | undefined => (v.trim() === '' ? undefined : v.trim())
+const hex = (v: string): string | undefined => (v.trim() === '' ? undefined : normalizeHex(v))
 
 /** Blank fields are dropped so the server keeps its size-relative defaults for them. */
 export function overridesFromStyleForm(f: StyleForm): StyleOverrides {
   const o: StyleOverrides = {
     font_file: text(f.font_file),
     font_size: num(f.font_size),
-    text_color: text(f.text_color),
-    marker_color: text(f.marker_color),
-    leader_color: text(f.leader_color),
+    text_color: hex(f.text_color),
+    marker_color: hex(f.marker_color),
+    leader_color: hex(f.leader_color),
     halo: bool(f.halo),
-    halo_color: text(f.halo_color),
+    halo_color: hex(f.halo_color),
     halo_width: num(f.halo_width),
     marker_width: num(f.marker_width),
     marker_min_radius: num(f.marker_min_radius),
@@ -100,4 +101,13 @@ export function buildUpdate(form: ConfigForm, config: ConfigOut): ConfigUpdate {
   }
   if (!locked('nova_api_key') && form.novaKey.trim()) body.nova_api_key = form.novaKey.trim()
   return body
+}
+
+/** The six-digit form the server accepts: `#abc` becomes `#aabbcc`, a missing `#` is added, case is
+ *  kept so a stored value round-trips unchanged; anything else is returned as typed for the server. */
+export function normalizeHex(value: string): string {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(value.trim())
+  if (!m) return value
+  const digits = m[1] ?? ''
+  return `#${digits.length === 3 ? [...digits].map((c) => c + c).join('') : digits}`
 }

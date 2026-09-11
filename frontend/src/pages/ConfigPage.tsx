@@ -81,13 +81,15 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
     }
   }
 
-  /** Removing the key is its own action, done at once: nothing to stage, nothing to explain. */
+  /** Removing the key is its own action, done at once: nothing to stage, nothing to explain.
+   *  Only the key changes, so the owner's unsaved edits elsewhere on the page stay put. */
   async function removeKey() {
     setBusy(true)
     setError(null)
     setSaved(null)
     try {
-      adopt(await api.updateConfig({ nova_api_key: null }))
+      setConfig(await api.updateConfig({ nova_api_key: null }))
+      setNovaKey('')
       setSaved('Key removed.')
     } catch (err) {
       setError(pageError(err))
@@ -190,6 +192,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
         <LabelPreview style={style} defaults={d} />
         <p className="field-note">
           Applies to newly solved images. Blank fields keep the built-in defaults; the four sizes then scale with each image.
+          The preview is drawn at one fixed text size, so widths show their proportion to the font.
         </p>
         <div className="grid3">
           <label className="field span2">
