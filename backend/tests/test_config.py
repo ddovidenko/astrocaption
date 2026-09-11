@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import stat
+import threading
 from pathlib import Path
 
 import pytest
@@ -93,8 +94,40 @@ def test_update_config_merges_atomically_with_private_mode(tmp_path: Path) -> No
     update_config(path, {"site_title": "Two", "nova_api_key": None, "extra": [1, 2]})
     assert json.loads(path.read_text()) == {"site_title": "Two", "extra": [1, 2]}
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert not path.with_suffix(".json.tmp").exists()
-    assert sorted(os.listdir(tmp_path)) == ["config.json"]
+    # Only the file and the (empty) lock handle survive: no temp file is left behind.
+    assert sorted(os.listdir(tmp_path)) == ["config.json", "config.json.lock"]
+    assert (tmp_path / "config.json.lock").read_bytes() == b""
+
+
+def test_update_config_serialises_two_writers(tmp_path: Path) -> None:
+    """The CLI is a second process on the same file; neither writer may lose the other's key."""
+    path = tmp_path / "config.json"
+    errors: list[BaseException] = []
+
+    def hammer(key: str) -> None:
+        try:
+            for i in range(50):
+                update_config(path, {key: i})
+                assert set(json.loads(path.read_text())) <= {"a", "b"}
+        except BaseException as exc:  # noqa: BLE001 - re-raised on the main thread below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=hammer, args=(key,)) for key in ("a", "b")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert json.loads(path.read_text()) == {"a": 49, "b": 49}
+
+
+def test_update_config_ignores_a_leftover_lock_file(tmp_path: Path) -> None:
+    """A lock file from a killed run is just a handle; it must not block or corrupt a write."""
+    path = tmp_path / "config.json"
+    lock = tmp_path / "config.json.lock"
+    lock.write_text("stale")
+    update_config(path, {"site_title": "One"})
+    assert json.loads(path.read_text()) == {"site_title": "One"}
 
 
 def test_update_config_refuses_to_overwrite_a_corrupt_file(tmp_path: Path) -> None:
@@ -166,6 +199,12 @@ def test_perform_setup_skips_fields_pinned_by_the_environment(
 
 
 def test_settings_source_reload_reads_a_same_stamp_write(tmp_path: Path) -> None:
+    """``current()`` can be stale; ``reload()`` never is.
+
+    ``update_config`` publishes with ``os.replace``, so its writes always change the inode
+    and are always noticed. Only an in-place edit by something else - an editor that writes
+    through the file, with the timestamp put back - can hide behind an unchanged stamp.
+    """
     from app.config import SettingsSource, update_config
 
     env = env_for(tmp_path)
@@ -173,12 +212,31 @@ def test_settings_source_reload_reads_a_same_stamp_write(tmp_path: Path) -> None
     update_config(path, {"site_title": "AAAA"})
     source = SettingsSource(env=env)
     assert source.current().site_title == "AAAA"
-    # Same length, and force the same mtime so the stamp cannot notice the change.
-    update_config(path, {"site_title": "BBBB"})
-    os.utime(path, ns=(source._stamp[0], source._stamp[0]))  # type: ignore[index]
+    before = path.stat()
+    text = path.read_text()
+    with path.open("w", encoding="utf-8") as fh:  # same inode, same length
+        fh.write(text.replace("AAAA", "BBBB"))
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert path.stat().st_size == before.st_size and path.stat().st_ino == before.st_ino
     assert source.current().site_title == "AAAA"  # stamp unchanged: stale by design
     assert source.reload().site_title == "BBBB"
     assert source.current().site_title == "BBBB"
+
+
+def test_settings_source_notices_a_same_size_same_second_rewrite(tmp_path: Path) -> None:
+    """A password reset swaps one fixed-length hash for another; current() must see it."""
+    from app.config import SettingsSource, update_config
+
+    env = env_for(tmp_path)
+    path = tmp_path / "config.json"
+    update_config(path, {"site_title": "AAAA"})
+    source = SettingsSource(env=env)
+    assert source.current().site_title == "AAAA"
+    before = path.stat()
+    update_config(path, {"site_title": "BBBB"})
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))  # same mtime, same size
+    assert path.stat().st_size == before.st_size
+    assert source.current().site_title == "BBBB"  # the new inode gives it away
 
 
 def test_lockable_covers_every_lockable_field(tmp_path: Path) -> None:
