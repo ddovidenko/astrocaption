@@ -19,7 +19,7 @@ from ..auth import (
 )
 from ..config import ConfigError, Settings
 from ..models import LoginRequest, SetupRequest
-from .deps import SettingsDep
+from .deps import SettingsDep, is_authenticated
 from .errors import config_write_error
 
 log = logging.getLogger(__name__)
@@ -114,5 +114,9 @@ async def login(
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(response: Response, settings: SettingsDep) -> None:
-    response.delete_cookie(COOKIE_NAME, **session_cookie_params(settings))
+async def logout(request: Request, response: Response, settings: SettingsDep) -> None:
+    # Public route, but the clearing Set-Cookie only goes out to the owner's own session.
+    # SameSite=Lax keeps a cross-site POST from carrying the cookie, so without this check a
+    # third-party page could force-log-out the owner (#39). No session: nothing to clear, 204.
+    if is_authenticated(request, settings):
+        response.delete_cookie(COOKIE_NAME, **session_cookie_params(settings))

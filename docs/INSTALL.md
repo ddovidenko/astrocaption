@@ -148,7 +148,7 @@ cookie. Reach the site over https, or leave the variable unset until the proxy i
 ## Running from source (development)
 
 ```sh
-make install        # backend venv + frontend packages (needs python3 ≥ 3.13 and node ≥ 22)
+make install        # backend venv + frontend packages (needs python3 ≥ 3.13 and node ≥ 22.22)
 make dev            # API on :8000, Vite on :5173 with /api and /fonts proxied
 make test           # pytest + vitest
 make lint           # ruff + mypy + eslint + tsc

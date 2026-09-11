@@ -25,6 +25,7 @@ frontend/src/App.tsx ──fetch──▶ /api/images ...           (backend/app
 
 | Module | Responsibility |
 |---|---|
+| `app/main.py` | App factory: routers, the plain-language 422 handler, headless first-run setup from `ASTROCAPTION_PASSWORD`, SPA mount. |
 | `app/config.py` | `Settings` from env + `data/config.json`. The only reader of secrets. |
 | `app/db.py` | Schema, `PRAGMA user_version` migrations, typed row mapping. One connection per call, WAL. |
 | `app/models.py` | Pydantic models: `SolveObject`, `StyleConfig`, `Label`, `Annotations`, API payloads. |
@@ -38,6 +39,9 @@ frontend/src/App.tsx ──fetch──▶ /api/images ...           (backend/app
 | `app/render.py` | Pillow text metrics and the export renderer. Its layout rules are the parity contract for the canvas. |
 | `app/fonts.py` | Bundled font lookup by file name. |
 | `app/auth.py` | scrypt password hashes, stateless HMAC session tokens, login cooldown, first-run setup writer. Standard library only. |
+| `app/api/images.py` | Upload (size-guarded before the body is read), list/get/delete, re-solve, objects, annotations, export, file serving. |
+| `app/api/health.py`, `app/api/fonts.py` | Public health for the Docker healthcheck; the bundled font list. |
+| `app/api/errors.py` | The plain sentences shared by every route that writes `config.json`. |
 | `app/api/deps.py` | Request-scoped dependencies; `require_owner` gates every owner router on the session cookie. |
 | `app/api/auth.py` | `/api/setup`, `/api/login`, `/api/logout`. |
 | `app/api/config.py` | Owner settings: `GET`, and `PUT` with locked-field and style validation, serialised through the atomic writer. |
@@ -61,3 +65,8 @@ applies it once, at ingest. A label's `(x, y)` is the top-left corner of its tex
 `ceil(size × 1.2)`, alias line at `0.7 × size`, marker radius `max(catalogue radius,
 style.marker_min_radius)`, leader from the marker edge to the closest point of the text box,
 drawn automatically when that gap exceeds `12·s` (`s = max(W, H) / 1000`).
+
+Two tests hold the contract (CLAUDE.md): `backend/tests/test_render_parity.py` checks the metrics
+(text boxes, anchors, leader geometry) from shared vectors, and `frontend/e2e/parity.spec.ts` pixel-diffs
+the Konva stage, exported as PNG at a fixed zoom, against the server's annotated preview within a
+tolerance. The pixel diff runs under Playwright because Konva needs a browser. Both arrive with milestone 3.

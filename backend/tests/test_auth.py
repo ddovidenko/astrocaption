@@ -6,6 +6,7 @@ import logging
 import pytest
 
 from app.auth import (
+    CLOCK_SKEW_SECONDS,
     SESSION_TTL_SECONDS,
     LoginLimiter,
     hash_password,
@@ -89,6 +90,9 @@ def test_session_roundtrip_and_expiry() -> None:
     assert session_is_valid(token, "secret", HASH, now=1_000_000.0 + 10)
     assert session_is_valid(token, "secret", HASH, now=1_000_000.0 + SESSION_TTL_SECONDS)
     assert not session_is_valid(token, "secret", HASH, now=1_000_000.0 + SESSION_TTL_SECONDS + 1)
+    # Clock skew: a token issued exactly CLOCK_SKEW_SECONDS ahead is still accepted, one more is not.
+    assert session_is_valid(token, "secret", HASH, now=1_000_000.0 - CLOCK_SKEW_SECONDS)
+    assert not session_is_valid(token, "secret", HASH, now=1_000_000.0 - CLOCK_SKEW_SECONDS - 1)
     assert not session_is_valid(
         token, "secret", HASH, now=1_000_000.0 - 120
     )  # issued in the future
@@ -120,6 +124,7 @@ def test_login_limiter_locks_after_five_failures() -> None:
     now = [100.0]
     limiter = LoginLimiter(max_failures=5, cooldown=60.0, clock=lambda: now[0])
     assert limiter.max_failures == 5
+    assert limiter.retry_after() == 0  # allowed before any failure
     for _ in range(4):
         assert limiter.record_failure() is False  # only the locking failure reports True
         assert limiter.retry_after() == 0

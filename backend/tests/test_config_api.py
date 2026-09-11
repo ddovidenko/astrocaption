@@ -77,6 +77,18 @@ def test_nova_key_set_keep_and_clear(tmp_path: Path, monkeypatch: pytest.MonkeyP
         assert "abc" not in client.get("/api/config").text
 
 
+def test_explicit_null_is_rejected_except_for_the_nova_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only ``nova_api_key: null`` means something; for the other two it was a silent no-op (#47)."""
+    with owner_client(tmp_path, monkeypatch) as client:
+        for field in ("site_title", "max_upload_mb"):
+            resp = client.put("/api/config", json={field: None})
+            assert resp.status_code == 422, resp.text
+            assert field in resp.json()["detail"] and "null" in resp.json()["detail"]
+        assert client.get("/api/config").json()["site_title"] == "Sky"
+
+
 def test_locked_fields_are_rejected_with_the_variable_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
