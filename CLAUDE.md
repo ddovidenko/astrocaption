@@ -26,7 +26,8 @@ make test         # pytest + vitest
 make lint         # ruff + mypy + eslint + tsc --noEmit
 make build        # docker build -t astrocaption:local .
 make up           # docker compose up (uses ./data as volume)
-make reset-password   # see docs/LOCKOUT.md
+make reset-password   # in the compose container; see docs/LOCKOUT.md
+make reset-password-dev   # the same on a make dev checkout
 make placement-vectors   # regenerate tests/fixtures/placement/*.json from the Python placer
 make names-catalog       # rebuild backend/app/catalog/names.json from OpenNGC (network)
 make favicons            # regenerate frontend/public/ icons from frontend/icon/icon-source.png

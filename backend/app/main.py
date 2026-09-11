@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .api import auth, config, docs, fonts, health, images
-from .auth import MIN_PASSWORD_LENGTH, LoginLimiter, perform_setup
+from .auth import LoginLimiter, set_owner_password, validate_new_password
 from .config import Settings, SettingsSource
 from .db import Database
 from .models import validation_message
@@ -173,13 +173,11 @@ def _headless_setup(source: SettingsSource, password: str | None) -> None:
             "variable, see docs/INSTALL.md to reset the password"
         )
         return
-    if len(password) < MIN_PASSWORD_LENGTH:
-        log.error(
-            "ASTROCAPTION_PASSWORD ignored: shorter than %d characters; open /setup instead",
-            MIN_PASSWORD_LENGTH,
-        )
+    refusal = validate_new_password(password)
+    if refusal is not None:  # the same bound the login endpoint enforces; never the value
+        log.error("ASTROCAPTION_PASSWORD ignored: %s Open /setup instead.", refusal)
         return
-    perform_setup(current, password)
+    set_owner_password(current, password)
     log.info("owner password set from ASTROCAPTION_PASSWORD")
 
 

@@ -6,7 +6,7 @@ VENV      := backend/.venv
 PY        := $(VENV)/bin/python
 NPM       := npm --prefix frontend
 
-.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up placement-vectors names-catalog record-fixtures favicons clean
+.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors names-catalog record-fixtures favicons clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -90,6 +90,12 @@ build: ## docker build -t astrocaption:local .
 
 up: ## docker compose up --build (uses ./data as the volume)
 	docker compose up --build
+
+reset-password: ## Choose a new owner password inside the running container (docs/LOCKOUT.md)
+	docker compose exec app python -m app.cli reset-password
+
+reset-password-dev: $(VENV)/.installed ## Choose a new owner password on this checkout (make dev installs)
+	cd backend && .venv/bin/python -m app.cli reset-password
 
 placement-vectors: $(VENV)/.installed ## Regenerate tests/fixtures/placement/*.json from the Python placer
 	cd backend && .venv/bin/python scripts/make_placement_vectors.py

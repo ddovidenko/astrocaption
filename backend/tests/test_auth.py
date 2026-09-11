@@ -98,7 +98,8 @@ def test_session_rejects_tampering_other_secret_and_password_change() -> None:
     token = issue_session("secret", HASH, now=1_000_000.0)
     issued, sig = token.split(".")
     assert not session_is_valid(f"{int(issued) + 1}.{sig}", "secret", HASH, now=1_000_100.0)
-    assert not session_is_valid(f"{issued}.{sig[:-1]}0", "secret", HASH, now=1_000_100.0)
+    flipped = "1" if sig[-1] == "0" else "0"  # always a different last character
+    assert not session_is_valid(f"{issued}.{sig[:-1]}{flipped}", "secret", HASH, now=1_000_100.0)
     assert not session_is_valid(token, "other-secret", HASH, now=1_000_100.0)
     assert not session_is_valid(token, "secret", hash_password("new password"), now=1_000_100.0)
     assert not session_is_valid(None, "secret", HASH)

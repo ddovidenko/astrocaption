@@ -1,7 +1,7 @@
 # Installing AstroCaption
 
-> Status: milestone 2. Upload, solve, export, the owner login and the config page work; the
-> lockout CLI follows in this milestone.
+> Status: milestone 2. Upload, solve, export, the owner login, the config page and the
+> lockout tools work; the editor arrives in milestone 3.
 
 ## Requirements
 
@@ -37,13 +37,12 @@ you don't trust.
 
 Headless installs set `ASTROCAPTION_PASSWORD` instead: on start, if no password has been set
 yet, the app performs setup with it. The variable is read once, so you can remove it afterwards.
-Passwords shorter than 8 characters are ignored with a log line.
+Passwords outside 8 to 1024 characters are ignored with a log line.
 
-Sign-ins are rate-limited (five wrong passwords → 60 seconds). Forgot the password: stop the
-container, delete the `password_hash` line from `data/config.json` (or the whole file, which
-also drops the key and title), start it again and the setup page returns; images and the
-database are untouched. A `reset-password` command and `docs/LOCKOUT.md` arrive later in this
-milestone.
+Sign-ins are rate-limited (five wrong passwords → 60 seconds). Forgot the password:
+`make reset-password` (or `docker compose exec app python -m app.cli reset-password`) asks for
+a new one inside the running container and logs every browser out; on a source checkout it is
+`make reset-password-dev`. See `docs/LOCKOUT.md` for the other lockout cases.
 
 ## Configuration
 
@@ -104,6 +103,7 @@ returned by the API; `GET /api/config` (owner-only) reports only whether one is 
 data/
   astrocaption.sqlite        images, catalogue objects, annotation layouts
   config.json                optional, see above
+  config.json.lock           empty; serialises writers to config.json (safe to leave alone)
   uploads/<id>/original.*    your file, byte-for-byte; never modified
   uploads/<id>/preview.jpg   ≤ 2048 px
   uploads/<id>/thumb.jpg     ≤ 400 px

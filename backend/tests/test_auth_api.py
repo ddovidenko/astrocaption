@@ -207,6 +207,19 @@ def test_headless_setup_ignores_a_short_password(
     with env_app_client(tmp_path, monkeypatch, ASTROCAPTION_PASSWORD="abc") as client:
         assert client.get("/api/health").json()["setup_required"] is True
     assert "ASTROCAPTION_PASSWORD" in caplog.text and "abc" not in caplog.text
+    assert "at least 8" in caplog.text
+
+
+def test_headless_setup_ignores_an_over_long_password(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Over the bound, setup would store a hash the login endpoint's model rejects at 422:
+    an install nobody can sign in to. Refuse it with the same sentence the API uses."""
+    long_password = "x" * 2000
+    with env_app_client(tmp_path, monkeypatch, ASTROCAPTION_PASSWORD=long_password) as client:
+        assert client.get("/api/health").json()["setup_required"] is True
+    assert "at most 1024" in caplog.text and long_password not in caplog.text
+    assert not (tmp_path / "data" / "config.json").exists()
 
 
 def test_validation_errors_are_plain_language_without_input_echo(anon_client: TestClient) -> None:

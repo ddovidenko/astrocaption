@@ -17,6 +17,7 @@ import time
 from collections.abc import Callable
 
 from .config import Settings, update_config
+from .models import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +27,6 @@ SCRYPT_P = 1
 SCRYPT_MAXMEM = 128 * 1024 * 1024  # n=2^15, r=8 needs ~32 MB; OpenSSL's default cap is exactly that
 SALT_BYTES = 32
 DIGEST_BYTES = 32
-MIN_PASSWORD_LENGTH = 8
 
 COOKIE_NAME = "astrocaption_session"
 SESSION_TTL_SECONDS = 30 * 24 * 3600
@@ -53,6 +53,20 @@ def _scrypt(password: str, salt: bytes, n: int, r: int, p: int, dklen: int) -> b
     return hashlib.scrypt(
         password.encode("utf-8"), salt=salt, n=n, r=r, p=p, maxmem=SCRYPT_MAXMEM, dklen=dklen
     )
+
+
+def validate_new_password(password: str) -> str | None:
+    """Why this password may not be used, as one plain sentence, or ``None`` when it may.
+
+    The one place the bound is applied: the setup route, the headless
+    ``ASTROCAPTION_PASSWORD`` start and ``app.cli reset-password`` all ask here, so a
+    password one of them accepts is never one the login endpoint would reject.
+    """
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
+    if len(password) > MAX_PASSWORD_LENGTH:
+        return f"Password must be at most {MAX_PASSWORD_LENGTH} characters."
+    return None
 
 
 def hash_password(password: str) -> str:
@@ -180,7 +194,7 @@ class LoginLimiter:
         self._locked_until = 0.0
 
 
-def perform_setup(
+def set_owner_password(
     settings: Settings,
     password: str,
     *,

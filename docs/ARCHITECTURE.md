@@ -42,6 +42,7 @@ frontend/src/App.tsx ──fetch──▶ /api/images ...           (backend/app
 | `app/api/auth.py` | `/api/setup`, `/api/login`, `/api/logout`. |
 | `app/api/config.py` | Owner settings: `GET`, and `PUT` with locked-field and style validation, serialised through the atomic writer. |
 | `app/api/docs.py` | Owner-only Swagger UI and OpenAPI document (`/api/docs`, `/api/openapi.json`). |
+| `app/cli.py` | `python -m app.cli reset-password`: rewrites the password hash (or completes setup) through the same writer as the API. |
 
 Every router except health and the setup/login/logout router carries the require_owner
 dependency; the cookie is validated per request against the secret and password hash in

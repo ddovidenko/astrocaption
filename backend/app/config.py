@@ -10,10 +10,14 @@ endpoint.
 
 from __future__ import annotations
 
+import errno
+import fcntl
 import json
 import logging
 import os
-from collections.abc import Mapping
+import tempfile
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -39,6 +43,22 @@ LOCKABLE: dict[str, tuple[str, ...]] = {
 The keys are exactly the fields ``load_settings`` may report in ``locked_by``; the values are
 tried in order, so the first one set wins and is the name reported in ``locked_by``.
 """
+
+DISK_FULL_ERRNOS = frozenset({errno.ENOSPC, errno.EDQUOT})
+
+
+def write_failure_message(subject: str, *, disk_full: bool) -> str:
+    """What the owner is told when ``subject`` could not be written to ./data (API and CLI)."""
+    if disk_full:
+        return (
+            f"{subject} could not be saved: the disk holding ./data is full. "
+            "Free some space and try again."
+        )
+    return (
+        f"{subject} could not be saved: the server could not write to ./data. "
+        "The server log says why."
+    )
+
 
 CONFIG_FIX_HINT = "fix it, or remove it and run setup again (removing it resets the owner password)"
 """How every ``config_error`` sentence ends: what the owner can actually do about it."""
@@ -240,12 +260,19 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     )
 
 
-def _file_stamp(path: Path) -> tuple[int, int] | None:
+def _file_stamp(path: Path) -> tuple[int, int, int] | None:
+    """What "the file changed" means here: mtime, size *and* inode.
+
+    ``update_config`` publishes every write with ``os.replace``, so the inode is new each
+    time. A password reset (a fixed-length hash swapped for another, in the same second on a
+    coarse-mtime filesystem) is therefore always noticed, and the app logs the browsers out
+    without a restart.
+    """
     try:
         st = path.stat()
     except OSError:
         return None
-    return st.st_mtime_ns, st.st_size
+    return st.st_mtime_ns, st.st_size, st.st_ino
 
 
 class SettingsSource:
@@ -281,36 +308,60 @@ class SettingsSource:
         return self._current
 
 
+@contextmanager
+def _config_write_lock(path: Path) -> Iterator[None]:
+    """Hold ``config.json.lock`` exclusively while config.json is read and rewritten.
+
+    The app's own writers share an asyncio lock, but the CLI (``app.cli reset-password``)
+    is a second process on the same file: without this, its read-modify-write could
+    interleave with the config page's and drop one of the two changes. The lock file is
+    only a handle for ``flock`` - it stays empty, and a leftover one is harmless.
+    """
+    fd = os.open(path.with_suffix(".json.lock"), os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)  # releases the lock
+
+
 def update_config(path: Path, updates: Mapping[str, object | None]) -> None:
     """Merge ``updates`` into config.json atomically. ``None`` removes a key.
 
+    The file is published with ``os.replace``, so the process that writes becomes its owner:
+    a root run leaves a file the app's own user cannot read (the CLI refuses that case).
+
     Written as a private file (0600): it holds the password hash and the session secret.
-    A file that cannot be parsed is left untouched and reported, never replaced.
+    A file that cannot be parsed is left untouched and reported, never replaced. Parse,
+    write and rename happen under a cross-process lock, so two writers never lose an update.
     """
-    current: dict[str, object] = _parse_config(path) if path.is_file() else {}
-    for key, value in updates.items():
-        if value is None:
-            current.pop(key, None)
-        else:
-            current[key] = value
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".json.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(current, fh, indent=2)
-            fh.write("\n")
-            fh.flush()
-            os.fsync(fh.fileno())  # the bytes, before the rename that publishes them
-        os.replace(tmp, path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
-    _fsync_dir(path.parent)  # and the rename itself, or a crash can lose the whole file
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        log.warning("could not restrict permissions on %s", path.name)
+    with _config_write_lock(path):
+        current: dict[str, object] = _parse_config(path) if path.is_file() else {}
+        for key, value in updates.items():
+            if value is None:
+                current.pop(key, None)
+            else:
+                current[key] = value
+        # A unique temp name, not a fixed one: two writers (and a crashed earlier run)
+        # must never share the half-written file that is about to be published.
+        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".config-", suffix=".tmp")
+        tmp = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(current, fh, indent=2)
+                fh.write("\n")
+                fh.flush()
+                os.fsync(fh.fileno())  # the bytes, before the rename that publishes them
+            os.replace(tmp, path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        _fsync_dir(path.parent)  # and the rename itself, or a crash can lose the whole file
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            log.warning("could not restrict permissions on %s", path.name)
 
 
 def _fsync_dir(directory: Path) -> None:

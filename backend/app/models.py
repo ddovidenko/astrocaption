@@ -494,13 +494,17 @@ def validation_message(error: Mapping[str, Any]) -> str:
     return str(error.get("msg", "is not valid"))
 
 
+MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_LENGTH = 1024
+
+
 # A custom ``@field_validator`` message is echoed verbatim by the 422 handler in main.py,
 # so it must describe the rule and never include the submitted value (a password, here).
 class SetupRequest(BaseModel):
-    password: str = Field(max_length=1024)
+    password: str = Field(max_length=MAX_PASSWORD_LENGTH)
     nova_api_key: str | None = Field(default=None, max_length=200)
     site_title: str | None = Field(default=None, max_length=200)
 
 
 class LoginRequest(BaseModel):
-    password: str = Field(max_length=1024)
+    password: str = Field(max_length=MAX_PASSWORD_LENGTH)

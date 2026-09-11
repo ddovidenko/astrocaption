@@ -292,6 +292,9 @@ renders "NGC 1976" in each and compares bounding boxes within 1 px at 100 px siz
   `config.json` to re-run setup while keeping images (images are not tied to the password).
 - Setup route is only reachable when `config.json` has no password hash (absent file, or a file with only
   a key/title). Changing the password is done with the CLI, not from the config page.
+- A new password is 8 to 1024 characters wherever it is chosen (setup page, `ASTROCAPTION_PASSWORD`,
+  CLI); the CLI refuses to write a `config.json` owned by another user and says which command to run
+  as whom, so a reset can never leave the app unable to read its own config.
 
 ## 11. Docker & distribution
 
