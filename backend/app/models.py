@@ -496,6 +496,9 @@ def validation_message(error: Mapping[str, Any]) -> str:
 
 # A custom ``@field_validator`` message is echoed verbatim by the 422 handler in main.py,
 # so it must describe the rule and never include the submitted value (a password, here).
+# 1024 matches auth.MAX_PASSWORD_LENGTH (kept in sync by hand: models.py cannot import
+# auth.py without a circular import, since config.py already imports from models.py and
+# auth.py imports from config.py).
 class SetupRequest(BaseModel):
     password: str = Field(max_length=1024)
     nova_api_key: str | None = Field(default=None, max_length=200)
@@ -503,4 +506,4 @@ class SetupRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    password: str = Field(max_length=1024)
+    password: str = Field(max_length=1024)  # keep in sync with auth.MAX_PASSWORD_LENGTH

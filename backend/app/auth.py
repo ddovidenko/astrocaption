@@ -27,6 +27,10 @@ SCRYPT_MAXMEM = 128 * 1024 * 1024  # n=2^15, r=8 needs ~32 MB; OpenSSL's default
 SALT_BYTES = 32
 DIGEST_BYTES = 32
 MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_LENGTH = 1024  # matches Field(max_length=...) on SetupRequest/LoginRequest in
+# models.py; kept in sync by hand, not by import, because models.py sits below config.py
+# and auth.py in the import graph (config.py already imports from models.py, and auth.py
+# imports from config.py) so models.py importing auth.py would be a circular import.
 
 COOKIE_NAME = "astrocaption_session"
 SESSION_TTL_SECONDS = 30 * 24 * 3600

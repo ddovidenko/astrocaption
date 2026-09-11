@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import io
 import json
 import os
@@ -72,7 +73,19 @@ def test_reset_completes_setup_when_there_is_no_password_yet(tmp_path: Path) -> 
     assert s.auth_ready and s.password_hash and verify_password(NEW, s.password_hash)
 
 
-def test_mismatch_and_short_passwords_write_nothing(tmp_path: Path) -> None:
+def test_reset_completes_setup_from_a_half_written_config(tmp_path: Path) -> None:
+    """A password_hash with no session_secret can't authenticate anyone; setup runs again."""
+    (tmp_path / "config.json").write_text(json.dumps({"password_hash": "not-checked"}))
+
+    code, out, _, _ = run(tmp_path, NEW, NEW)
+
+    assert code == EXIT_OK and "setup" in out.lower()
+    after = read_config(tmp_path)
+    assert after.get("password_hash") and after.get("session_secret")
+    assert verify_password(NEW, str(after["password_hash"]))
+
+
+def test_mismatch_and_short_and_long_passwords_write_nothing(tmp_path: Path) -> None:
     perform_setup(load_settings(env_for(tmp_path)), OLD)
     before = (tmp_path / "config.json").read_bytes()
 
@@ -84,6 +97,39 @@ def test_mismatch_and_short_passwords_write_nothing(tmp_path: Path) -> None:
     assert code == EXIT_REFUSED and "at least 8" in err and "Nothing was changed" in err
     assert len(asked) == 1  # refused before the repeat prompt
 
+    code, _, err, asked = run(tmp_path, "x" * 1025)
+    assert code == EXIT_REFUSED and "at most 1024" in err and "Nothing was changed" in err
+    assert len(asked) == 1  # refused before the repeat prompt
+
+    assert (tmp_path / "config.json").read_bytes() == before
+
+
+def test_cancelled_prompt_writes_nothing(tmp_path: Path) -> None:
+    perform_setup(load_settings(env_for(tmp_path)), OLD)
+    before = (tmp_path / "config.json").read_bytes()
+
+    def prompt(_text: str) -> str:
+        raise EOFError
+
+    out, err = io.StringIO(), io.StringIO()
+    code = reset_password(prompt=prompt, env=env_for(tmp_path), out=out, err=err)
+
+    assert code == EXIT_REFUSED and "Cancelled" in err.getvalue()
+    assert (tmp_path / "config.json").read_bytes() == before
+
+
+def test_foreign_owned_config_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run as root (e.g. by mistake) on a source checkout, the write would leave a root-owned
+    config.json the app (uid 1000) can no longer read: a harder lockout than the one being
+    fixed. Refuse before prompting when the file belongs to someone else."""
+    perform_setup(load_settings(env_for(tmp_path)), OLD)
+    before = (tmp_path / "config.json").read_bytes()
+    real_uid = (tmp_path / "config.json").stat().st_uid
+    monkeypatch.setattr("app.cli.os.geteuid", lambda: real_uid + 1)
+
+    code, _, err, asked = run(tmp_path, NEW, NEW)
+
+    assert code == EXIT_CONFIG and "belongs to another user" in err and asked == []
     assert (tmp_path / "config.json").read_bytes() == before
 
 
@@ -103,6 +149,19 @@ def test_unwritable_data_dir_is_reported(tmp_path: Path) -> None:
     finally:
         tmp_path.chmod(0o700)
     assert code == EXIT_CONFIG and "not writable" in err
+    assert verify_password(OLD, str(read_config(tmp_path)["password_hash"]))
+
+
+def test_disk_full_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    perform_setup(load_settings(env_for(tmp_path)), OLD)
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError(errno.ENOSPC, "no space")
+
+    monkeypatch.setattr("app.cli.update_config", boom)
+    code, _, err, _ = run(tmp_path, NEW, NEW)
+
+    assert code == EXIT_CONFIG and "could not be written" in err and "no space" in err
     assert verify_password(OLD, str(read_config(tmp_path)["password_hash"]))
 
 
