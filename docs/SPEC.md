@@ -325,7 +325,8 @@ Public repo. Using GitHub Pro where useful:
   *Current state:* the repository allows squash merges only, so history is linear already; the PR-required
   and CI-green rules are switched on in milestone 6.
 - **Actions**:
-  - `ci.yml` on PR: lint, backend tests, frontend tests, docker build (no push).
+  - `ci.yml` on PR: lint, backend tests, frontend tests, docker build (no push), and a browser
+    smoke test against the built image with a fake nova.
   - `release.yml` on tag `v*`: build multi-arch image, push to GHCR, attach `compose.yml` and a
     changelog to the GitHub Release. Uses `docker/build-push-action` with layer cache.
   - `dependabot.yml`: weekly pip, npm, actions, docker updates.
