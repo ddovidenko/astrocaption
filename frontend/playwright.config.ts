@@ -13,17 +13,25 @@ const appPort = 8765
 const novaPort = process.env.FAKE_NOVA_PORT ?? '8901'
 const novaHost = process.env.FAKE_NOVA_HOST ?? '127.0.0.1'
 const baseURL = process.env.E2E_BASE_URL ?? `http://127.0.0.1:${appPort}`
-const dataDir = process.env.E2E_DATA_DIR ?? mkdtempSync(join(tmpdir(), 'astrocaption-e2e-'))
-process.env.E2E_DATA_DIR_CREATED = process.env.E2E_DATA_DIR ? '' : dataDir
-process.env.E2E_DATA_DIR = dataDir
+// Only mint a scratch data dir when this config is the one starting the app: CI supplies
+// E2E_BASE_URL for an already-running container and never touches E2E_DATA_DIR, so creating
+// one here (e.g. for `--list`) would just leak a directory nothing ever cleans up.
+const dataDir = startApp ? (process.env.E2E_DATA_DIR ?? mkdtempSync(join(tmpdir(), 'astrocaption-e2e-'))) : ''
+process.env.E2E_DATA_DIR_CREATED = startApp && !process.env.E2E_DATA_DIR ? dataDir : ''
+if (startApp) process.env.E2E_DATA_DIR = dataDir
 
 const backend = resolve(fileURLToPath(new URL('..', import.meta.url)), 'backend')
 
 export default defineConfig({
   testDir: 'e2e',
-  timeout: 90_000,
+  // A full solve plus a full-resolution Pillow render on a shared runner: bigger than the
+  // two 60s step budgets the spec waits on, so it never clips a step that is merely slow.
+  timeout: 240_000,
   expect: { timeout: 15_000 },
-  retries: process.env.CI ? 1 : 0,
+  // The run is stateful (first-run setup happens once per data dir), so a retry cannot
+  // recreate it: attempt 2 would deterministically fail at the /setup redirect and bury
+  // whatever actually broke in attempt 1.
+  retries: 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: { baseURL, trace: 'retain-on-failure' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
