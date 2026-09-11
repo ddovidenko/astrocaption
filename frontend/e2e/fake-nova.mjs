@@ -14,7 +14,34 @@ const fixtures = process.env.NOVA_FIXTURES ?? join(here, '..', '..', 'backend', 
 const port = Number(process.env.FAKE_NOVA_PORT ?? 8901)
 const host = process.env.FAKE_NOVA_HOST ?? '127.0.0.1'
 
-const fixture = (name) => readFileSync(join(fixtures, name))
+// Load every fixture the server can serve once at startup, so a missing or unreadable
+// fixture fails fast with a plain message instead of crashing mid-request.
+const FIXTURE_NAMES = [
+  'login.json',
+  'upload.json',
+  'submission_pending.json',
+  'submission_ready.json',
+  'job_solving.json',
+  'job_success.json',
+  'annotations.json',
+  'job_info.json',
+  'wcs.fits',
+]
+
+const files = new Map()
+for (const name of FIXTURE_NAMES) {
+  const path = join(fixtures, name)
+  try {
+    files.set(name, readFileSync(path))
+  } catch (err) {
+    console.error(
+      `fake nova: cannot read ${path} (${err.code}); set NOVA_FIXTURES to the directory holding the recorded nova responses`
+    )
+    process.exit(2)
+  }
+}
+
+const fixture = (name) => files.get(name)
 const json = (name) => ({ type: 'application/json', body: fixture(name) })
 
 // How many times each poll endpoint has been asked since the last upload: the first answer
@@ -62,6 +89,15 @@ const server = createServer((req, res) => {
     res.writeHead(200, { 'content-type': hit.type })
     res.end(hit.body)
   })
+})
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`fake nova: port ${port} on ${host} is already in use; stop the other process or set FAKE_NOVA_PORT`)
+  } else {
+    console.error(`fake nova: ${err.message}`)
+  }
+  process.exit(2)
 })
 
 server.listen(port, host, () => console.log(`fake nova listening on http://${host}:${port} (fixtures: ${fixtures})`))
