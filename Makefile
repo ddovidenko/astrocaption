@@ -6,7 +6,7 @@ VENV      := backend/.venv
 PY        := $(VENV)/bin/python
 NPM       := npm --prefix frontend
 
-.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors names-catalog record-fixtures favicons e2e-fixture e2e clean
+.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors names-catalog fonts record-fixtures favicons e2e-fixture e2e clean
 
 help:
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -102,6 +102,9 @@ placement-vectors: $(VENV)/.installed ## Regenerate tests/fixtures/placement/*.j
 
 names-catalog: $(VENV)/.installed ## Rebuild backend/app/catalog/names.json from OpenNGC (network)
 	cd backend && .venv/bin/python scripts/build_names_catalog.py
+
+fonts: $(VENV)/.installed ## Refresh fonts/*.ttf and fonts/LICENSES from Google Fonts (network)
+	cd backend && .venv/bin/python scripts/fetch_fonts.py
 
 favicons: $(VENV)/.installed ## Regenerate frontend/public/ icons from frontend/icon/icon-source.png
 	cd backend && .venv/bin/python scripts/make_favicons.py

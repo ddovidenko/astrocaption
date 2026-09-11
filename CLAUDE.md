@@ -30,6 +30,7 @@ make reset-password   # in the compose container; see docs/LOCKOUT.md
 make reset-password-dev   # the same on a make dev checkout
 make placement-vectors   # regenerate tests/fixtures/placement/*.json from the Python placer
 make names-catalog       # rebuild backend/app/catalog/names.json from OpenNGC (network)
+make fonts               # refresh fonts/*.ttf + LICENSES from Google Fonts (network); family list in backend/scripts/fetch_fonts.py
 make favicons            # regenerate frontend/public/ icons from frontend/icon/icon-source.png
 make record-fixtures IMAGE=path.jpg [OUT=dir]   # record nova fixtures from a real solve into backend/tests/fixtures/nova/ or OUT (network, needs the key)
 make e2e          # Playwright smoke test: built frontend + uvicorn on a scratch data dir + a fake nova
