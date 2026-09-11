@@ -10,6 +10,7 @@ endpoint.
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import json
 import logging
@@ -42,6 +43,22 @@ LOCKABLE: dict[str, tuple[str, ...]] = {
 The keys are exactly the fields ``load_settings`` may report in ``locked_by``; the values are
 tried in order, so the first one set wins and is the name reported in ``locked_by``.
 """
+
+DISK_FULL_ERRNOS = frozenset({errno.ENOSPC, errno.EDQUOT})
+
+
+def write_failure_message(subject: str, *, disk_full: bool) -> str:
+    """What the owner is told when ``subject`` could not be written to ./data (API and CLI)."""
+    if disk_full:
+        return (
+            f"{subject} could not be saved: the disk holding ./data is full. "
+            "Free some space and try again."
+        )
+    return (
+        f"{subject} could not be saved: the server could not write to ./data. "
+        "The server log says why."
+    )
+
 
 CONFIG_FIX_HINT = "fix it, or remove it and run setup again (removing it resets the owner password)"
 """How every ``config_error`` sentence ends: what the owner can actually do about it."""
@@ -311,6 +328,9 @@ def _config_write_lock(path: Path) -> Iterator[None]:
 def update_config(path: Path, updates: Mapping[str, object | None]) -> None:
     """Merge ``updates`` into config.json atomically. ``None`` removes a key.
 
+    The file is published with ``os.replace``, so the process that writes becomes its owner:
+    a root run leaves a file the app's own user cannot read (the CLI refuses that case).
+
     Written as a private file (0600): it holds the password hash and the session secret.
     A file that cannot be parsed is left untouched and reported, never replaced. Parse,
     write and rename happen under a cross-process lock, so two writers never lose an update.
@@ -329,10 +349,6 @@ def update_config(path: Path, updates: Mapping[str, object | None]) -> None:
         tmp = Path(tmp_name)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                try:
-                    os.fchmod(fh.fileno(), 0o600)  # mkstemp already does; belt and braces
-                except OSError:
-                    pass  # the chmod below reports a filesystem that refuses modes
                 json.dump(current, fh, indent=2)
                 fh.write("\n")
                 fh.flush()

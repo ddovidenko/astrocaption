@@ -45,7 +45,7 @@ It asks for the new password twice, nothing echoed: 8 to 1024 characters, and th
 must match. Ctrl-C or Ctrl-D cancels. Any of these — too short, too long, mismatched,
 cancelled — exits 1 with "Nothing was changed." and writes nothing.
 
-Once accepted, it rewrites the password hash in `data/config.json` and prints one line. The
+Once accepted, it stores a new password hash and session secret in `data/config.json` and prints one line. The
 running app picks the file up at once: every signed-in browser is logged out, and the new
 password works immediately. Your nova key, site title and default style stay as they were.
 

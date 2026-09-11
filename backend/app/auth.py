@@ -194,7 +194,7 @@ class LoginLimiter:
         self._locked_until = 0.0
 
 
-def perform_setup(
+def set_owner_password(
     settings: Settings,
     password: str,
     *,

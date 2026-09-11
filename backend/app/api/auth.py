@@ -13,7 +13,7 @@ from ..auth import (
     SESSION_TTL_SECONDS,
     LoginLimiter,
     issue_session,
-    perform_setup,
+    set_owner_password,
     validate_new_password,
     verify_password,
 )
@@ -63,7 +63,7 @@ async def setup(body: SetupRequest, request: Request) -> None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, refusal)
         try:
             await asyncio.to_thread(
-                perform_setup,
+                set_owner_password,
                 settings,
                 body.password,
                 nova_api_key=body.nova_api_key,

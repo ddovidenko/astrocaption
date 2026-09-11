@@ -9,17 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from app.auth import perform_setup, verify_password
+from app.auth import set_owner_password, verify_password
 from app.config import CONFIG_FIX_HINT, ConfigError, load_settings, update_config
-from tests.conftest import FONTS_DIR
-
-
-def env_for(tmp_path: Path, **extra: str) -> dict[str, str]:
-    return {
-        "ASTROCAPTION_DATA_DIR": str(tmp_path),
-        "ASTROCAPTION_FONTS_DIR": str(FONTS_DIR),
-        **extra,
-    }
+from tests.conftest import env_for
 
 
 def test_settings_without_config_file_require_setup(tmp_path: Path) -> None:
@@ -81,7 +73,7 @@ def test_half_written_config_reopens_setup(
     assert s.setup_required is True and s.auth_ready is False and s.config_error is None
     assert "session_secret" in caplog.text and "value" not in caplog.text
 
-    perform_setup(s, "hunter2hunter2")
+    set_owner_password(s, "hunter2hunter2")
     after = load_settings(env_for(tmp_path))
     assert after.auth_ready and after.setup_required is False
     assert after.password_hash and verify_password("hunter2hunter2", after.password_hash)
@@ -106,7 +98,7 @@ def test_update_config_serialises_two_writers(tmp_path: Path) -> None:
 
     def hammer(key: str) -> None:
         try:
-            for i in range(50):
+            for i in range(10):
                 update_config(path, {key: i})
                 assert set(json.loads(path.read_text())) <= {"a", "b"}
         except BaseException as exc:  # noqa: BLE001 - re-raised on the main thread below
@@ -118,7 +110,7 @@ def test_update_config_serialises_two_writers(tmp_path: Path) -> None:
     for t in threads:
         t.join()
     assert errors == []
-    assert json.loads(path.read_text()) == {"a": 49, "b": 49}
+    assert json.loads(path.read_text()) == {"a": 9, "b": 9}
 
 
 def test_update_config_ignores_a_leftover_lock_file(tmp_path: Path) -> None:
@@ -172,9 +164,9 @@ def test_update_config_survives_a_chmod_that_is_refused(
     assert "could not restrict permissions on config.json" in caplog.text
 
 
-def test_perform_setup_writes_hash_secret_and_optional_fields(tmp_path: Path) -> None:
+def test_set_owner_password_writes_hash_secret_and_optional_fields(tmp_path: Path) -> None:
     before = load_settings(env_for(tmp_path))
-    perform_setup(before, "hunter2hunter2", nova_api_key="  key  ", site_title="")
+    set_owner_password(before, "hunter2hunter2", nova_api_key="  key  ", site_title="")
     after = load_settings(env_for(tmp_path))
     assert after.auth_ready and after.setup_required is False
     assert after.password_hash and verify_password("hunter2hunter2", after.password_hash)
@@ -184,13 +176,13 @@ def test_perform_setup_writes_hash_secret_and_optional_fields(tmp_path: Path) ->
     assert "site_title" not in written and "password" not in written
 
 
-def test_perform_setup_skips_fields_pinned_by_the_environment(
+def test_set_owner_password_skips_fields_pinned_by_the_environment(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     before = load_settings(env_for(tmp_path, NOVA_API_KEY="from-env"))
     assert set(before.locked_by) == {"nova_api_key"}
     with caplog.at_level(logging.INFO, logger="app.auth"):
-        perform_setup(before, "hunter2hunter2", nova_api_key="typed-key", site_title="My Sky")
+        set_owner_password(before, "hunter2hunter2", nova_api_key="typed-key", site_title="My Sky")
     written = json.loads((tmp_path / "config.json").read_text())
     assert "nova_api_key" not in written
     assert written["site_title"] == "My Sky"

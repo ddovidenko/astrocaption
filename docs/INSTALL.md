@@ -103,6 +103,7 @@ returned by the API; `GET /api/config` (owner-only) reports only whether one is 
 data/
   astrocaption.sqlite        images, catalogue objects, annotation layouts
   config.json                optional, see above
+  config.json.lock           empty; serialises writers to config.json (safe to leave alone)
   uploads/<id>/original.*    your file, byte-for-byte; never modified
   uploads/<id>/preview.jpg   ≤ 2048 px
   uploads/<id>/thumb.jpg     ≤ 400 px

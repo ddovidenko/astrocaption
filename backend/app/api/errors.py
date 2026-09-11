@@ -2,26 +2,11 @@
 
 from __future__ import annotations
 
-import errno
-
 from fastapi import HTTPException, status
 
-from ..config import ConfigError
+from ..config import DISK_FULL_ERRNOS, ConfigError, write_failure_message
 
-DISK_FULL_ERRNOS = frozenset({errno.ENOSPC, errno.EDQUOT})
-
-
-def write_failure_message(subject: str, *, disk_full: bool) -> str:
-    """What the owner is told when ``subject`` could not be written to ./data."""
-    if disk_full:
-        return (
-            f"{subject} could not be saved: the disk holding ./data is full. "
-            "Free some space and try again."
-        )
-    return (
-        f"{subject} could not be saved: the server could not write to ./data. "
-        "The server log says why."
-    )
+__all__ = ["DISK_FULL_ERRNOS", "config_write_error", "write_failure_message"]
 
 
 def config_write_error(exc: ConfigError | OSError, subject: str) -> HTTPException:

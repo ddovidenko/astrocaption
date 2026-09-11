@@ -11,16 +11,12 @@ from pathlib import Path
 
 import pytest
 
-from app.auth import issue_session, perform_setup, session_is_valid, verify_password
+from app.auth import issue_session, session_is_valid, verify_password
 from app.cli import EXIT_CONFIG, EXIT_OK, EXIT_REFUSED, main, reset_password, run
 from app.config import CONFIG_NOT_JSON, ConfigError, load_settings, update_config
-from tests.conftest import FONTS_DIR, env_app_client, login
+from tests.conftest import TEST_PASSWORD, env_app_client, env_for, login, read_config, seed_owner
 
-OLD, NEW = "old-password-1", "new-password-22"
-
-
-def env_for(tmp_path: Path) -> dict[str, str]:
-    return {"ASTROCAPTION_DATA_DIR": str(tmp_path), "ASTROCAPTION_FONTS_DIR": str(FONTS_DIR)}
+OLD, NEW = TEST_PASSWORD, "new-password-22"
 
 
 def prompts(*answers: str) -> tuple[list[str], Callable[[str], str]]:
@@ -70,22 +66,18 @@ def run_with(tmp_path: Path, prompt: Callable[[str], str]) -> tuple[int, str, st
     return code, out.getvalue(), err.getvalue()
 
 
-def read_config(tmp_path: Path) -> dict[str, object]:
-    data: dict[str, object] = json.loads((tmp_path / "config.json").read_text())
-    return data
-
-
 def test_reset_rewrites_only_the_hash_and_logs_everyone_out(tmp_path: Path) -> None:
-    perform_setup(load_settings(env_for(tmp_path)), OLD, site_title="Sky")
-    before = read_config(tmp_path)
+    seed_owner(tmp_path, site_title="Sky")
+    before = read_config(tmp_path / "config.json")
     old_token = issue_session(str(before["session_secret"]), str(before["password_hash"]))
 
     code, out, err, asked = run_cli(tmp_path, NEW, NEW)
 
     assert code == EXIT_OK and err == ""
     assert "reset" in out.lower() and "logged out" in out.lower()
-    after = read_config(tmp_path)
-    assert after["session_secret"] == before["session_secret"] and after["site_title"] == "Sky"
+    after = read_config(tmp_path / "config.json")
+    assert after["session_secret"] != before["session_secret"]  # rotated: nothing can use it
+    assert after["site_title"] == "Sky"
     assert verify_password(NEW, str(after["password_hash"]))
     assert not verify_password(OLD, str(after["password_hash"]))
     assert not session_is_valid(
@@ -111,13 +103,13 @@ def test_reset_completes_setup_from_a_half_written_config(tmp_path: Path) -> Non
     code, out, _, _ = run_cli(tmp_path, NEW, NEW)
 
     assert code == EXIT_OK and "setup" in out.lower()
-    after = read_config(tmp_path)
+    after = read_config(tmp_path / "config.json")
     assert after.get("password_hash") and after.get("session_secret")
     assert verify_password(NEW, str(after["password_hash"]))
 
 
 def test_mismatch_and_short_and_long_passwords_write_nothing(tmp_path: Path) -> None:
-    perform_setup(load_settings(env_for(tmp_path)), OLD)
+    seed_owner(tmp_path)
     before = (tmp_path / "config.json").read_bytes()
 
     code, _, err, asked = run_cli(tmp_path, NEW, NEW + "x")
@@ -136,7 +128,7 @@ def test_mismatch_and_short_and_long_passwords_write_nothing(tmp_path: Path) -> 
 
 
 def test_cancelled_prompt_writes_nothing(tmp_path: Path) -> None:
-    perform_setup(load_settings(env_for(tmp_path)), OLD)
+    seed_owner(tmp_path)
     before = (tmp_path / "config.json").read_bytes()
 
     for exc, answers in ((EOFError(), ()), (KeyboardInterrupt(), ()), (EOFError(), (NEW,))):
@@ -146,7 +138,7 @@ def test_cancelled_prompt_writes_nothing(tmp_path: Path) -> None:
 
 
 def test_a_prompt_that_cannot_be_read_as_text_writes_nothing(tmp_path: Path) -> None:
-    perform_setup(load_settings(env_for(tmp_path)), OLD)
+    seed_owner(tmp_path)
     before = (tmp_path / "config.json").read_bytes()
     broken = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
 
@@ -159,7 +151,7 @@ def test_a_prompt_that_cannot_be_read_as_text_writes_nothing(tmp_path: Path) -> 
 
 def test_a_prompt_that_cannot_be_used_writes_nothing(tmp_path: Path) -> None:
     """No controlling terminal (a cron job, a detached exec): say so, do not crash."""
-    perform_setup(load_settings(env_for(tmp_path)), OLD)
+    seed_owner(tmp_path)
     before = (tmp_path / "config.json").read_bytes()
     no_tty = OSError(errno.ENOTTY, "Inappropriate ioctl for device")
 
@@ -175,7 +167,7 @@ def test_foreign_owned_config_is_refused(tmp_path: Path, monkeypatch: pytest.Mon
     """Run as the wrong user on a source checkout, the write would leave a config.json the
     app can no longer read: a harder lockout than the one being fixed. Refuse before
     prompting when the file belongs to someone else."""
-    perform_setup(load_settings(env_for(tmp_path)), OLD)
+    seed_owner(tmp_path)
     before = (tmp_path / "config.json").read_bytes()
     real_uid = (tmp_path / "config.json").stat().st_uid
     monkeypatch.setattr("app.cli.os.geteuid", lambda: real_uid + 1)
@@ -193,7 +185,7 @@ def test_a_root_owned_config_names_the_chown_that_fixes_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The classic self-inflicted lockout: `sudo` on the command, once."""
-    perform_setup(load_settings(env_for(tmp_path)), OLD)
+    seed_owner(tmp_path)
     before = (tmp_path / "config.json").read_bytes()
     monkeypatch.setattr(Path, "stat", stat_reporting_uid(0))
 
@@ -220,7 +212,7 @@ def test_a_foreign_data_dir_is_refused_before_the_file_exists(
 
 
 def test_an_unreadable_owner_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    perform_setup(load_settings(env_for(tmp_path)), OLD)
+    seed_owner(tmp_path)
     before = (tmp_path / "config.json").read_bytes()
 
     def refuse(_self: Path, **_kwargs: object) -> os.stat_result:
@@ -245,7 +237,7 @@ def test_corrupt_config_is_left_alone(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
 def test_unwritable_data_dir_is_reported(tmp_path: Path) -> None:
-    perform_setup(load_settings(env_for(tmp_path)), OLD)
+    seed_owner(tmp_path)
     before = (tmp_path / "config.json").read_bytes()
     tmp_path.chmod(0o500)
     try:
@@ -255,21 +247,21 @@ def test_unwritable_data_dir_is_reported(tmp_path: Path) -> None:
     assert code == EXIT_CONFIG and out == ""
     assert "not writable" in err and "Nothing was changed" in err
     assert (tmp_path / "config.json").read_bytes() == before
-    assert verify_password(OLD, str(read_config(tmp_path)["password_hash"]))
+    assert verify_password(OLD, str(read_config(tmp_path / "config.json")["password_hash"]))
 
 
 def test_disk_full_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    perform_setup(load_settings(env_for(tmp_path)), OLD)
+    seed_owner(tmp_path)
     before = (tmp_path / "config.json").read_bytes()
 
     def boom(*_args: object, **_kwargs: object) -> None:
         raise OSError(errno.ENOSPC, "no space")
 
-    monkeypatch.setattr("app.cli.update_config", boom)
+    monkeypatch.setattr("app.auth.update_config", boom)
     code, out, err, _ = run_cli(tmp_path, NEW, NEW)
 
     assert code == EXIT_CONFIG and out == ""
-    assert "could not be written" in err and "no space" in err
+    assert "is full" in err and "Nothing was changed" in err
     assert (tmp_path / "config.json").read_bytes() == before
 
 
@@ -283,20 +275,20 @@ def test_a_failed_setup_write_is_reported(tmp_path: Path, monkeypatch: pytest.Mo
     code, out, err, _ = run_cli(tmp_path, NEW, NEW)
 
     assert code == EXIT_CONFIG and out == ""
-    assert "could not be written" in err and "no space" in err
+    assert "is full" in err and "Nothing was changed" in err
     assert not (tmp_path / "config.json").exists()
 
 
 def test_a_config_error_on_the_write_path_is_logged_and_shown_in_plain_language(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    perform_setup(load_settings(env_for(tmp_path)), OLD)
+    seed_owner(tmp_path)
     before = (tmp_path / "config.json").read_bytes()
 
     def boom(*_args: object, **_kwargs: object) -> None:
         raise ConfigError(CONFIG_NOT_JSON, "line 3 column 5")
 
-    monkeypatch.setattr("app.cli.update_config", boom)
+    monkeypatch.setattr("app.auth.update_config", boom)
     with caplog.at_level(logging.ERROR, logger="app.cli"):
         code, out, err, _ = run_cli(tmp_path, NEW, NEW)
 
@@ -311,7 +303,7 @@ def test_a_config_removed_while_typing_completes_setup_instead_of_half_resetting
 ) -> None:
     """Deciding from the read taken before the prompts would write a hash into an empty
     file - no session_secret, nobody can sign in - and call it a reset."""
-    perform_setup(load_settings(env_for(tmp_path)), OLD)
+    seed_owner(tmp_path)
     answers = iter([NEW, NEW])
 
     def prompt(_text: str) -> str:
@@ -331,17 +323,17 @@ def test_a_config_removed_while_typing_completes_setup_instead_of_half_resetting
 def test_a_config_left_incomplete_by_the_write_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Another writer dropped the session_secret as the hash was going in: the file cannot
-    sign anybody in, so the command must not claim it can."""
-    perform_setup(load_settings(env_for(tmp_path)), OLD)
+    """Another writer dropped the session_secret right after the write landed: the file
+    cannot sign anybody in, so the command must not claim it can."""
+    seed_owner(tmp_path)
 
-    def strip_the_secret_then_write(path: Path, updates: dict[str, object | None]) -> None:
+    def write_then_lose_the_secret(path: Path, updates: dict[str, object | None]) -> None:
+        update_config(path, updates)
         data = json.loads(path.read_text())
         data.pop("session_secret")
         path.write_text(json.dumps(data))
-        update_config(path, updates)
 
-    monkeypatch.setattr("app.cli.update_config", strip_the_secret_then_write)
+    monkeypatch.setattr("app.auth.update_config", write_then_lose_the_secret)
     code, out, err, _ = run_cli(tmp_path, NEW, NEW)
 
     assert code == EXIT_CONFIG and out == ""

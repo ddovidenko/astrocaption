@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .api import auth, config, docs, fonts, health, images
-from .auth import LoginLimiter, perform_setup, validate_new_password
+from .auth import LoginLimiter, set_owner_password, validate_new_password
 from .config import Settings, SettingsSource
 from .db import Database
 from .models import validation_message
@@ -177,7 +177,7 @@ def _headless_setup(source: SettingsSource, password: str | None) -> None:
     if refusal is not None:  # the same bound the login endpoint enforces; never the value
         log.error("ASTROCAPTION_PASSWORD ignored: %s Open /setup instead.", refusal)
         return
-    perform_setup(current, password)
+    set_owner_password(current, password)
     log.info("owner password set from ASTROCAPTION_PASSWORD")
 
 

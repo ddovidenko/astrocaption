@@ -14,11 +14,16 @@ import logging
 import os
 import sys
 from collections.abc import Callable, Mapping
-from pathlib import Path
 from typing import TextIO
 
-from .auth import hash_password, perform_setup, validate_new_password
-from .config import ConfigError, Settings, load_settings, update_config
+from .auth import set_owner_password, validate_new_password
+from .config import (
+    DISK_FULL_ERRNOS,
+    ConfigError,
+    Settings,
+    load_settings,
+    write_failure_message,
+)
 
 log = logging.getLogger(__name__)
 
@@ -37,32 +42,34 @@ ENCODING_MESSAGE = (
 UNEXPECTED_MESSAGE = "Something went wrong; nothing was changed. See the message above."
 
 
-def _config_owner(settings: Settings) -> tuple[int | None, Path, str | None]:
-    """Who owns config.json, or the data directory when there is no config.json yet.
+def _owner_problem(settings: Settings) -> str | None:
+    """Why this process must not write config.json, or None when it may.
 
-    Returns ``(uid, the path it came from, None)``; ``(None, path, message)`` when the owner
-    cannot be read at all; and ``(None, config_path, None)`` when neither exists yet, which
-    is a fresh install this command may create.
+    ``update_config`` publishes the file with ``os.replace``, so whoever runs this command
+    becomes its owner. A root run against a uid-1000 install would leave a file the app can
+    no longer read: a harder lockout than the one being fixed. The directory decides when
+    there is no config.json yet (a fresh install this command may create).
     """
+    euid = os.geteuid()
     for path in (settings.config_path, settings.data_dir):
         try:
-            return path.stat().st_uid, path, None
+            owner = path.stat().st_uid
         except FileNotFoundError:
-            continue  # no config.json yet: the directory that will hold it decides
+            continue
         except OSError as exc:
-            reason = exc.strerror or "cannot be read"
-            return None, path, f"{path} could not be read ({reason}). {UNCHANGED}"
-    return None, settings.config_path, None
-
-
-def _foreign_owner_message(path: Path, owner_uid: int, euid: int) -> str:
-    if owner_uid == 0:
-        return f"{path} is owned by root; restore it with: sudo chown {euid} {path}  {UNCHANGED}"
-    return (
-        f"{path} belongs to uid {owner_uid}; run this command as that user. Inside the "
-        f"container: make reset-password; on a source checkout: make reset-password-dev. "
-        f"{UNCHANGED}"
-    )
+            return f"{path} could not be read ({exc.strerror or 'cannot be read'}). {UNCHANGED}"
+        if owner == euid:
+            return None
+        if owner == 0:
+            return (
+                f"{path} is owned by root; restore it with: sudo chown {euid} {path}  {UNCHANGED}"
+            )
+        return (
+            f"{path} belongs to uid {owner}; run this command as that user. Inside the "
+            f"container: make reset-password; on a source checkout: make reset-password-dev. "
+            f"{UNCHANGED}"
+        )
+    return None
 
 
 def reset_password(
@@ -71,7 +78,7 @@ def reset_password(
     out: TextIO | None = None,
     err: TextIO | None = None,
 ) -> int:
-    """Ask for a new owner password twice and store its hash; complete setup if there is none.
+    """Ask for a new owner password twice and store it; complete setup if there is none.
 
     The running app re-reads config.json as soon as it changes, and every session token is
     bound to the hash, so a reset logs every browser out without a restart (SPEC § 10).
@@ -81,22 +88,16 @@ def reset_password(
     ask = prompt or getpass.getpass
     out = out or sys.stdout
     err = err or sys.stderr
+
+    def refuse(message: str, code: int = EXIT_REFUSED) -> int:
+        print(message, file=err)
+        return code
+
     settings = load_settings(env)
-
-    owner_uid, owned_path, problem = _config_owner(settings)
-    if problem is not None:
-        print(problem, file=err)
-        return EXIT_CONFIG
-    euid = os.geteuid()
-    if owner_uid is not None and owner_uid != euid:
-        # Writing anyway would publish a file the app's own user can no longer read: a
-        # harder lockout than the one being fixed. Refuse before asking for anything.
-        print(_foreign_owner_message(owned_path, owner_uid, euid), file=err)
-        return EXIT_CONFIG
-
+    if (problem := _owner_problem(settings)) is not None:
+        return refuse(problem, EXIT_CONFIG)
     if settings.config_error is not None:
-        print(f"{settings.config_path}: {settings.config_error}", file=err)
-        return EXIT_CONFIG
+        return refuse(f"{settings.config_path}: {settings.config_error}", EXIT_CONFIG)
 
     def ask_or_refuse(text: str) -> tuple[str | None, str]:
         """``(password, "")`` or ``(None, why it could not be read)``."""
@@ -112,59 +113,53 @@ def reset_password(
 
     password, refusal = ask_or_refuse("New owner password: ")
     if password is None:
-        print(refusal, file=err)
-        return EXIT_REFUSED
-    too = validate_new_password(password)
-    if too is not None:
-        print(f"{too} {UNCHANGED}", file=err)
-        return EXIT_REFUSED
-
+        return refuse(refusal)
+    if (too := validate_new_password(password)) is not None:
+        return refuse(f"{too} {UNCHANGED}")
     repeat, refusal = ask_or_refuse("Repeat the new password: ")
     if repeat is None:
-        print(refusal, file=err)
-        return EXIT_REFUSED
+        return refuse(refusal)
     if repeat != password:
-        print(f"The two passwords do not match. {UNCHANGED}", file=err)
-        return EXIT_REFUSED
+        return refuse(f"The two passwords do not match. {UNCHANGED}")
 
     # Read again: typing a password takes as long as the owner takes, and config.json may
-    # have been set up, reset or removed meanwhile. Which write is right is decided here.
+    # have been set up, reset or removed meanwhile. The write is the same either way (a new
+    # hash and session secret: the hash change alone logs every browser out); the second
+    # read only decides what to call it.
     settings = load_settings(env)
+    was_setup = settings.setup_required
     try:
-        if settings.setup_required:
-            perform_setup(settings, password)
-            done = f"Setup completed: the owner password hash is stored in {settings.config_path}."
-        else:
-            update_config(settings.config_path, {"password_hash": hash_password(password)})
-            done = "Owner password reset. Every signed-in browser has been logged out."
+        set_owner_password(settings, password)
     except ConfigError as exc:  # the file changed under us since it was read
         log.error("config.json could not be used: %s", exc.detail)
-        print(exc.public, file=err)
-        return EXIT_CONFIG
+        return refuse(exc.public, EXIT_CONFIG)
     except OSError as exc:
         if exc.errno in (errno.EACCES, errno.EPERM):
             reason = exc.strerror or "permission denied"
-            print(
+            return refuse(
                 f"{settings.config_path} is not writable by this user ({reason}). "
                 f"Inside the container the app runs as uid 1000; fix the permissions on "
                 f"./data. {UNCHANGED}",
-                file=err,
+                EXIT_CONFIG,
             )
-        else:
-            reason = exc.strerror or "write failed"
-            print(f"{settings.config_path} could not be written ({reason}). {UNCHANGED}", file=err)
-        return EXIT_CONFIG
+        sentence = write_failure_message("The password", disk_full=exc.errno in DISK_FULL_ERRNOS)
+        return refuse(f"{sentence} {UNCHANGED}", EXIT_CONFIG)
 
     if not load_settings(env).auth_ready:
         # Someone else rewrote the file between the read above and the write: the result
         # cannot sign anybody in, so do not claim it can.
-        print(
+        return refuse(
             f"{settings.config_path} changed while the password was being typed and is now "
             "incomplete; run the command again.",
-            file=err,
+            EXIT_CONFIG,
         )
-        return EXIT_CONFIG
-    print(done, file=out)
+    if was_setup:
+        print(
+            f"Setup completed: the owner password hash is stored in {settings.config_path}.",
+            file=out,
+        )
+    else:
+        print("Owner password reset. Every signed-in browser has been logged out.", file=out)
     return EXIT_OK
 
 
@@ -177,10 +172,8 @@ def main(argv: list[str] | None = None) -> int:
         "reset-password",
         help="choose a new owner password (or complete setup); every session is logged out",
     )
-    args = parser.parse_args(argv)
-    if args.command == "reset-password":
-        return reset_password()
-    parser.error(f"unknown command {args.command}")  # argparse exits 2
+    parser.parse_args(argv)  # the only command; argparse rejects anything else with exit 2
+    return reset_password()
 
 
 def run(argv: list[str] | None = None) -> int:

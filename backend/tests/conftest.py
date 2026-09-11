@@ -224,6 +224,34 @@ ENV_ISOLATED = (
 )
 
 
+def env_for(tmp_path: Path, **extra: str) -> dict[str, str]:
+    """Settings environment for a scratch data dir (``load_settings(env_for(tmp_path))``)."""
+    return {
+        "ASTROCAPTION_DATA_DIR": str(tmp_path),
+        "ASTROCAPTION_FONTS_DIR": str(FONTS_DIR),
+        **extra,
+    }
+
+
+def read_config(path: Path) -> dict[str, object]:
+    data: dict[str, object] = json.loads(path.read_text(encoding="utf-8"))
+    return data
+
+
+def seed_owner(tmp_path: Path, **extra: object) -> Path:
+    """A config.json whose owner password is TEST_PASSWORD, written directly with the cached
+    hash (scrypt is deliberately slow) rather than through setup."""
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {"password_hash": TEST_PASSWORD_HASH, "session_secret": TEST_SESSION_SECRET, **extra}
+        ),
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
+    return path
+
+
 def env_app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **env: str) -> TestClient:
     """An app configured from the environment, so config.json in ``tmp_path/data`` is live.
 
