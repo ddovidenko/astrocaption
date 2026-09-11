@@ -6,7 +6,8 @@ repository. Run from backend/:  python scripts/fetch_fonts.py   (or `make fonts`
 root). Network access is needed; tests never run this.
 
 Every family must cover Greek (Bayer letters such as θ1 Ori C), the middle dot and the
-curly apostrophe; tests/test_fonts.py checks the result.
+curly apostrophe; the script checks this on every TTF as it is written, and
+tests/test_fonts.py runs the same check against the bundled files.
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import cast
+
+from PIL import Image, ImageDraw, ImageFont
 
 FONTS_DIR = Path(__file__).resolve().parent.parent.parent / "fonts"
 LICENSES_DIR = FONTS_DIR / "LICENSES"
@@ -45,6 +48,12 @@ FAMILIES: list[str] = [
 ]
 
 LICENCE_OVERRIDES: dict[str, str] = {"Ubuntu": "ufl/ubuntu/UFL.txt"}
+
+# Every lowercase Greek letter alpha-omega (including final sigma), since a Bayer
+# designation can use any of them, plus the middle dot and the curly apostrophe.
+REQUIRED_GLYPHS = "".join(chr(c) for c in range(0x3B1, 0x3CA)) + "·’"
+_NOT_A_CHARACTER = "￿"  # never mapped by any font: renders the .notdef box
+_GLYPH_CHECK_SIZE = 60
 
 
 def licence_path(name: str) -> str:
@@ -95,10 +104,30 @@ def file_name(family: str, weight: str) -> str:
     return f"{_slug(family)}-{WEIGHTS[weight]}.ttf"
 
 
+def licence_file_name(family: str) -> str:
+    return f"{_slug(family)}.txt"
+
+
 def _get(url: str) -> bytes:
     request = urllib.request.Request(url, headers=LEGACY_UA)
     with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
         return cast(bytes, response.read())
+
+
+def _ink(font: ImageFont.FreeTypeFont, text: str) -> bytes:
+    img = Image.new("L", (_GLYPH_CHECK_SIZE * 2, _GLYPH_CHECK_SIZE * 2), 0)
+    ImageDraw.Draw(img).text(
+        (_GLYPH_CHECK_SIZE // 2, _GLYPH_CHECK_SIZE // 2), text, font=font, fill=255
+    )
+    return img.tobytes()
+
+
+def missing_glyphs(path: Path) -> list[str]:
+    """``REQUIRED_GLYPHS`` that ``path`` cannot render (blank, or falls back to .notdef)."""
+    font = ImageFont.truetype(str(path), _GLYPH_CHECK_SIZE)
+    notdef = _ink(font, _NOT_A_CHARACTER)
+    blank = _ink(font, "")
+    return [ch for ch in REQUIRED_GLYPHS if _ink(font, ch) in (notdef, blank)]
 
 
 def fetch_family(name: str) -> list[str]:
@@ -107,9 +136,13 @@ def fetch_family(name: str) -> list[str]:
     written = []
     for weight, url in urls.items():
         file = file_name(name, weight)
-        (FONTS_DIR / file).write_bytes(_get(url))
+        path = FONTS_DIR / file
+        path.write_bytes(_get(url))
+        missing = missing_glyphs(path)
+        if missing:
+            raise ValueError(f"{name} cannot render {''.join(missing)!r}")
         written.append(file)
-    licence = LICENSES_DIR / f"{_slug(name)}.txt"
+    licence = LICENSES_DIR / licence_file_name(name)
     licence.write_bytes(_get(LICENCE_BASE + licence_path(name)))
     return written
 
@@ -117,12 +150,13 @@ def fetch_family(name: str) -> list[str]:
 def main() -> int:
     LICENSES_DIR.mkdir(parents=True, exist_ok=True)
     expected_fonts = {file_name(family, weight) for family in FAMILIES for weight in WEIGHTS}
-    expected_licences = {f"{_slug(family)}.txt" for family in FAMILIES}
-    stray_fonts = sorted(p.name for p in FONTS_DIR.glob("*.ttf") if p.name not in expected_fonts)
-    stray_licences = sorted(
-        p.name for p in LICENSES_DIR.glob("*.txt") if p.name not in expected_licences
-    )
-    strays = stray_fonts + stray_licences
+    expected_licences = {licence_file_name(family) for family in FAMILIES}
+    strays: list[str] = []
+    for directory, pattern, expected in [
+        (FONTS_DIR, "*.ttf", expected_fonts),
+        (LICENSES_DIR, "*.txt", expected_licences),
+    ]:
+        strays.extend(sorted(p.name for p in directory.glob(pattern) if p.name not in expected))
     if strays:
         print(
             f"not in the family list, remove by hand before refreshing: {', '.join(strays)}",
