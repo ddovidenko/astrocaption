@@ -45,8 +45,8 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
   the same annotation JSON and the same font files. Any change to one renderer requires the
   same change to the other, plus a pixel-diff test in `backend/tests/test_render_parity.py`.
 - Never call nova.astrometry.net during tests. Use the recorded fixtures in `backend/tests/fixtures/nova/`
-  (3.9° Orion field) and `backend/tests/fixtures/nova-narrow/` (1° Pelican field with `hd` stars),
-  and `frontend/e2e/fake-nova.mjs` replays them for the browser test.
+  (3.9° Orion field) and `backend/tests/fixtures/nova-narrow/` (1° Pelican field with `hd` stars);
+  `frontend/e2e/fake-nova.mjs` replays the Orion set for the browser test.
 - Secrets (nova API key, password hash, session secret) live only in `data/config.json`
   and env vars. Never in the repo, never in logs, never returned by any API endpoint.
 - Public (logged-out) routes are read-only and must never expose the editor, the config,

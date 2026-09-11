@@ -113,8 +113,9 @@ record-fixtures: $(VENV)/.installed ## Record nova fixtures from a real solve: m
 	@test -n "$(IMAGE)" || { echo "usage: make record-fixtures IMAGE=path/to/image.jpg [OUT=dir]"; exit 2; }
 	cd backend && .venv/bin/python scripts/record_nova_fixtures.py "$(abspath $(IMAGE))" $(if $(OUT),"$(abspath $(OUT))",)
 
-e2e: install ## Browser smoke test: built frontend + uvicorn on a scratch data dir + a fake nova (needs `npx playwright install chromium` once)
+e2e: install ## Browser smoke test: built frontend + uvicorn on a scratch data dir + a fake nova
 	$(NPM) run build
+	cd frontend && npx playwright install chromium
 	cd frontend && E2E_START_APP=1 npx playwright test
 
 clean: ## Remove build artefacts (keeps data/)

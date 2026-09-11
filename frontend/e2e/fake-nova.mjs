@@ -50,7 +50,7 @@ let submissionPolls = 0
 let jobPolls = 0
 
 function route(method, path) {
-  if (method === 'GET' && path === '/') return { type: 'application/json', body: '{"ok": true}' }
+  if ((method === 'GET' || method === 'HEAD') && path === '/') return { type: 'application/json', body: '{"ok": true}' }
   if (method === 'POST' && path === '/api/login') return json('login.json')
   if (method === 'POST' && path === '/api/upload') {
     submissionPolls = 0
@@ -87,7 +87,7 @@ const server = createServer((req, res) => {
       return
     }
     res.writeHead(200, { 'content-type': hit.type })
-    res.end(hit.body)
+    res.end(req.method === 'HEAD' ? undefined : hit.body)
   })
 })
 

@@ -72,10 +72,11 @@ jobs:
             -e NOVA_BASE_URL=http://host.docker.internal:8901 -e NOVA_API_KEY=fixture \
             astrocaption:ci
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/api/health && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8000/api/health
           cd frontend && FAKE_NOVA_HOST=0.0.0.0 E2E_BASE_URL=http://127.0.0.1:8000 CI=1 npx playwright test
       - name: stop the image
         if: always()
-        run: docker stop ac-e2e || true
+        run: docker logs ac-e2e || true; docker stop ac-e2e || true
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

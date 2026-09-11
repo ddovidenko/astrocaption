@@ -42,7 +42,13 @@ test('first run: setup, sign in, solve, export, config, sign out', async ({ page
   // toBeVisible() alone passes on a broken image (the alt text still gives it a box); confirm
   // the browser actually decoded pixels.
   await expect.poll(() => img.evaluate((e: HTMLImageElement) => e.naturalWidth)).toBeGreaterThan(0)
-  await expect(card.getByRole('link', { name: 'Download full-resolution export' })).toBeVisible()
+  const downloadLink = card.getByRole('link', { name: 'Download full-resolution export' })
+  await expect(downloadLink).toBeVisible()
+  const href = await downloadLink.getAttribute('href')
+  expect(href).toBeTruthy()
+  const res = await page.request.get(href!)
+  expect(res.status()).toBe(200)
+  expect(res.headers()['content-type']).toContain('image/jpeg')
 
   await page.getByRole('link', { name: 'Config' }).click()
   await expect(page).toHaveURL(/\/config$/)
