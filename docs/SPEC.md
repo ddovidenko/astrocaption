@@ -40,11 +40,11 @@ No multi-user, no roles, no invites in v1.
 |---|---|---|
 | Backend | Python 3.13+, FastAPI, uvicorn | Pillow and the nova API client are Python; FastAPI gives typed schemas and OpenAPI for free. |
 | Storage | SQLite (stdlib `sqlite3`, explicit SQL, `PRAGMA user_version` migrations) + filesystem | One container, one volume. Nothing to administer. *M1 note:* no ORM; three tables did not justify the dependency. |
-| Frontend | React 18 + TypeScript + Vite | Interactive canvas editor needs real state management. |
+| Frontend | React 19 + TypeScript + Vite, react-router | Interactive canvas editor needs real state management. |
 | Canvas | react-konva (Konva.js) | Draggable text, hit-testing, zoom/pan, and export-parity math are all easier than raw Canvas 2D. |
 | State | Zustand | Small, no boilerplate. |
 | Export render | Pillow (server) | Guarantees full-res output regardless of client GPU/memory. |
-| Auth | Signed session cookie (itsdangerous), bcrypt password | Light, no external dependency. |
+| Auth | Stateless HMAC session cookie, `hashlib.scrypt` password (§ 10) | Standard library only; a password reset re-keys every session. |
 | Container | Multi-stage Dockerfile, `python:3.14-slim` final | Node only in build stage. |
 | CI | GitHub Actions → GHCR | Public image `ghcr.io/ddovidenko/astrocaption`. |
 
@@ -287,6 +287,8 @@ renders "NGC 1976" in each and compares bounding boxes within 1 px at 100 px siz
 - Rate limit login: 5 failures → 60 s cooldown, in-memory and global (one owner; per-IP is meaningless
   behind a proxy). A failed sign-in and the start of a cooldown are logged (never the password).
 - `POST /logout` is client-side only: the design is stateless, so it clears the cookie and nothing more.
+  It clears it only for a request that carries a valid session (a cross-site POST cannot, under
+  SameSite=Lax, so a third-party page cannot force a logout); otherwise it is a 204 with no `Set-Cookie`.
   A token captured before logout stays valid until it expires (30 days) or the password changes, which
   re-keys every token. That is the trade for having no session table.
 - Lockout recovery (`docs/LOCKOUT.md`): `docker compose exec app python -m app.cli reset-password`
@@ -353,6 +355,6 @@ Later (not v1): local ASTAP solver option, custom object entries (user-added lab
 
 ## 14. Open questions
 
-- Nova rate limits: undocumented; we serialise solves (one at a time) and cache job results forever. Confirm behaviour under a burst of 5 uploads.
+- Nova rate limits: undocumented; we serialise solves (one at a time) and cache job results forever. Confirm behaviour under a burst of 5 uploads. (#56)
 - Object list size: wide fields can return 500+ HD stars. Decided 2026-09-11 (#37): `hd` entries are hidden by default and shown by the object list's type filter; a bright star that nova lists twice, as `bright` and as `hd` at the same pixel, keeps both rows (flagging the twin is post-v1 polish). The filter is tested against `tests/fixtures/nova-narrow/`: 8 objects, 5 `hd`, 3 labels enabled. (nova adds `hd` entries only to fields of about 1° radius or less: the 2.4° Orion recording has none.)
-- Touch support in the editor: out of scope for v1, but Konva makes pinch-zoom cheap. Revisit after milestone 5.
+- Touch support in the editor: out of scope for v1, but Konva makes pinch-zoom cheap. Revisit after milestone 5 (#57).
