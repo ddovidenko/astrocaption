@@ -66,7 +66,7 @@ def run_with(tmp_path: Path, prompt: Callable[[str], str]) -> tuple[int, str, st
     return code, out.getvalue(), err.getvalue()
 
 
-def test_reset_rewrites_only_the_hash_and_logs_everyone_out(tmp_path: Path) -> None:
+def test_reset_stores_a_new_hash_and_secret_and_logs_everyone_out(tmp_path: Path) -> None:
     seed_owner(tmp_path, site_title="Sky")
     before = read_config(tmp_path / "config.json")
     old_token = issue_session(str(before["session_secret"]), str(before["password_hash"]))
