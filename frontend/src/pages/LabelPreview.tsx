@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { StyleDefaults } from '../api'
+import { loadBundledFont } from '../editor/fonts'
 import { fontFamilyFor } from '../editor/metrics'
 import type { StyleForm } from './configForm'
 import { PREVIEW_SIZE, previewGeometry, previewLines } from './labelPreview'
@@ -12,40 +13,19 @@ const STARS = [
 
 const FALLBACK_FAMILY = 'Inter, system-ui, sans-serif'
 
-/** One load per file for the life of the page: the promise resolves to the family name, or null
- *  when the file is missing or its name cannot be a CSS family. */
-const fontLoads = new Map<string, Promise<string | null>>()
-
-function loadBundledFont(file: string): Promise<string | null> {
-  const pending = fontLoads.get(file)
-  if (pending) return pending
-  const family = fontFamilyFor(file)
-  let promise: Promise<string | null>
-  try {
-    // Both arguments are parsed as CSS; quote them so an odd file name cannot throw here.
-    const face = new FontFace(JSON.stringify(family), `url("/fonts/${encodeURIComponent(file)}")`)
-    promise = face
-      .load()
-      .then((loaded) => {
-        document.fonts.add(loaded)
-        return family
-      })
-      .catch(() => null)
-  } catch {
-    promise = Promise.resolve(null)
-  }
-  fontLoads.set(file, promise)
-  return promise
-}
-
 function useBundledFont(file: string): string {
   const [ready, setReady] = useState<string | null>(null)
   useEffect(() => {
     if (typeof FontFace === 'undefined') return
     let cancelled = false
-    void loadBundledFont(file).then((family) => {
-      if (!cancelled) setReady(family)
-    })
+    void loadBundledFont(file).then(
+      (family) => {
+        if (!cancelled) setReady(family)
+      },
+      () => {
+        if (!cancelled) setReady(null)
+      },
+    )
     return () => {
       cancelled = true
     }
