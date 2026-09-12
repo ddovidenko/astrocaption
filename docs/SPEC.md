@@ -277,7 +277,9 @@ Inter, Roboto, Open Sans, Source Sans 3, Fira Sans, IBM Plex Sans, JetBrains Mon
 Roboto Condensed, Play, Source Serif 4. Regular + Bold weights; all OFL except Ubuntu (Ubuntu Font
 Licence). Every family must cover Greek (Bayer letters), the middle dot and the apostrophe; a test
 renders those glyphs in every file. `make fonts` refreshes the bundle from Google Fonts. Frontend loads
-them via `@font-face` from `/fonts/`; server loads the same files with `ImageFont.truetype`. The
+them via `@font-face` from `/fonts/`; server loads the same files with `ImageFont.truetype`.
+Pillow lays text out with its raqm engine (kerning); the Docker image installs libfribidi for
+it, and the parity test asserts the engine is present. The
 render contract is pinned by `tests/fixtures/render/vectors.json` (`make render-vectors`): text boxes,
 line heights, alias sizes, ascents, leader segments and anchor boxes that `render.py` computes for real
 label strings from the nova fixtures, in every bundled font. `backend/tests/test_render_parity.py` and

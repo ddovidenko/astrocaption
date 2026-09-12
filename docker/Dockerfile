@@ -23,6 +23,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN useradd --uid 1000 --user-group --create-home app \
     && mkdir -p /data && chown app:app /data
 
+# Pillow's wheel bundles raqm (kerning, complex shaping) but loads libfribidi at runtime;
+# without it Pillow silently falls back to its basic layout engine and text widths differ
+# from the render contract (tests/fixtures/render/vectors.json) and the editor's canvas.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libfribidi0 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY backend/pyproject.toml /app/src/pyproject.toml
 COPY backend/app /app/src/app

@@ -19,7 +19,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.fonts import DEFAULT_FONT_FILE, list_fonts, load_font
+from app.fonts import DEFAULT_FONT_FILE, layout_engine_available, list_fonts, load_font
 from app.layout import default_style
 from app.models import MAX_FONT_SIZE, MIN_FONT_SIZE, Label, LeaderMode, SolveObject, StyleConfig
 from app.objects import objects_from_nova
@@ -236,6 +236,10 @@ def anchor_vectors() -> list[dict[str, Any]]:
 
 
 def build_vectors(fonts_dir: Path) -> dict[str, Any]:
+    if not layout_engine_available():
+        raise SystemExit(
+            "refusing to write the contract without Pillow's raqm engine (libfribidi missing)"
+        )
     objects = fixture_objects()
     return {
         "min_font_size": MIN_FONT_SIZE,

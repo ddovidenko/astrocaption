@@ -6,7 +6,7 @@ import logging
 from functools import lru_cache
 from pathlib import Path
 
-from PIL import ImageFont
+from PIL import ImageFont, features
 
 from .models import MAX_FONT_SIZE, MIN_FONT_SIZE, FontOut, StyleConfig
 
@@ -14,6 +14,12 @@ log = logging.getLogger(__name__)
 
 DEFAULT_FONT_FILE = StyleConfig().font_file
 FONT_SIZES = range(MIN_FONT_SIZE, MAX_FONT_SIZE + 1)
+
+
+def layout_engine_available() -> bool:
+    """True when Pillow can use raqm. The render contract and the editor's canvas assume it;
+    without libfribidi Pillow's basic engine drops kerning and every text width changes."""
+    return bool(features.check("raqm"))
 
 
 class FontNotFoundError(LookupError):

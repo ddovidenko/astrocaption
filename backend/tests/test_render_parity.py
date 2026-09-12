@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 
+from app.fonts import layout_engine_available
 from scripts.make_render_vectors import (
     GLYPH_STRINGS,
     OUT,
@@ -28,6 +29,12 @@ def test_render_vectors_are_current() -> None:
     assert set(built) == set(stored)
     for key, value in built.items():
         assert value == stored[key], f"vectors.json '{key}' is stale: run make render-vectors"
+
+
+def test_pillow_uses_the_raqm_engine() -> None:
+    assert layout_engine_available(), (
+        "install libfribidi (Docker: libfribidi0); the render contract assumes Pillow's raqm layout"
+    )
 
 
 def test_glyph_strings_are_real_fixture_labels() -> None:
