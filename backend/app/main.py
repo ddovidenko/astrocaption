@@ -21,6 +21,7 @@ from .api import auth, config, docs, fonts, health, images
 from .auth import LoginLimiter, set_owner_password, validate_new_password
 from .config import Settings, SettingsSource
 from .db import Database
+from .fonts import FontNotFoundError
 from .models import validation_message
 from .solver import Solver
 from .solver.nova import NovaSolver
@@ -99,6 +100,7 @@ def create_app(
     app.add_middleware(images.UploadGuard, settings_source=source)
 
     app.add_exception_handler(RequestValidationError, plain_validation_error)  # type: ignore[arg-type]
+    app.add_exception_handler(FontNotFoundError, font_not_found_error)  # type: ignore[arg-type]
 
     app.include_router(health.router)
     app.include_router(auth.router)
@@ -149,6 +151,20 @@ async def plain_validation_error(_: Request, exc: RequestValidationError) -> JSO
     log.info("request validation failed: %s", ", ".join(labels) or "request")
     detail = "; ".join(messages) or "Invalid request."
     return JSONResponse({"detail": detail}, status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
+
+
+async def font_not_found_error(_: Request, exc: FontNotFoundError) -> JSONResponse:
+    """The bundled default font itself is missing from the fonts directory (fonts.py logs
+    the same fact when it happens during resolution); ``load_font`` then raises this out of
+    ``export_image`` and Starlette would otherwise answer a bare 500. ``exc.args[0]`` is a
+    bare file name, never a path (``font_path`` raises with the name it was given)."""
+    file = exc.args[0]
+    log.error("font bundle is incomplete: %s is missing from the fonts directory", file)
+    detail = (
+        f"The server's font bundle is incomplete: {file} is missing from the fonts "
+        "directory. Restore the bundled fonts and restart."
+    )
+    return JSONResponse({"detail": detail}, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 def _headless_setup(source: SettingsSource, password: str | None) -> None:

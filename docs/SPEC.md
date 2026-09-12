@@ -270,11 +270,16 @@ Public besides the two gallery routes: `/api/health`, the font files under `/fon
 
 ## 9. Fonts
 
-Bundle 12 open-licence TTFs (all OFL as shipped by Google Fonts) in `fonts/`, checked into the repo with licences:
-Inter, Roboto, Open Sans, Source Sans 3, Lato, Montserrat, Poppins, Raleway, Nunito,
-Fira Sans, IBM Plex Sans, JetBrains Mono. Regular + Bold weights. Frontend loads them via
-`@font-face` from `/fonts/`; server loads the same files with `ImageFont.truetype`. Parity test
-renders "NGC 1976" in each and compares bounding boxes within 1 px at 100 px size.
+Bundle 12 open-licence families as static TTFs in `fonts/`, checked into the repo with licences:
+Inter, Roboto, Open Sans, Source Sans 3, Fira Sans, IBM Plex Sans, JetBrains Mono, Ubuntu, Manrope,
+Roboto Condensed, Play, Source Serif 4. Regular + Bold weights; all OFL except Ubuntu (Ubuntu Font
+Licence). Every family must cover Greek (Bayer letters), the middle dot and the apostrophe; a test
+renders those glyphs in every file. `make fonts` refreshes the bundle from Google Fonts. Frontend loads
+them via `@font-face` from `/fonts/`; server loads the same files with `ImageFont.truetype`. The
+render-parity tests (milestone 3) measure real label strings in every font. A stored per-image
+style whose `font_file` is no longer bundled renders, places and is served by `GET /annotations`
+with the built-in default and a server-log warning naming the file; the stored row is left alone
+until the editor next saves it.
 
 ## 10. Auth & lockout
 

@@ -15,6 +15,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ..config import Settings, SettingsSource
 from ..db import Database
+from ..fonts import resolved_style
 from ..models import (
     Annotations,
     ExportOut,
@@ -291,12 +292,12 @@ def _object_out(o: SolveObject, preference: NamePreference) -> ObjectOut:
 
 
 @router.get("/{image_id}/annotations")
-async def get_annotations(image_id: str, db: DbDep) -> Annotations:
+async def get_annotations(image_id: str, settings: SettingsDep, db: DbDep) -> Annotations:
     _get_or_404(db, image_id)
     ann = db.get_annotations(image_id)
     if ann is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Image has not been solved yet.")
-    return ann
+    return ann.model_copy(update={"style": resolved_style(settings.fonts_dir, ann.style)})
 
 
 def _render_export(

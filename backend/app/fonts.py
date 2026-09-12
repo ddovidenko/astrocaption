@@ -8,9 +8,11 @@ from pathlib import Path
 
 from PIL import ImageFont
 
-from .models import FontOut
+from .models import FontOut, StyleConfig
 
 log = logging.getLogger(__name__)
+
+DEFAULT_FONT_FILE = StyleConfig().font_file
 
 
 class FontNotFoundError(LookupError):
@@ -25,6 +27,34 @@ def font_path(fonts_dir: Path, file: str) -> Path:
     if not path.is_file():
         raise FontNotFoundError(file)
     return path
+
+
+@lru_cache(maxsize=512)
+def resolve_font_file(fonts_dir: Path, file: str) -> str:
+    """``file`` if it is a bundled font, else the built-in default with a warning.
+
+    Stored styles outlive the bundle (a family can be dropped in an upgrade); rendering and
+    placement must keep working, and the warning names the file so the owner can pick another.
+    Cached so a stored style with a gone font logs once per process, not once per request.
+    """
+    try:
+        font_path(fonts_dir, file)
+    except FontNotFoundError:
+        log.warning("font %r is not bundled; using %s", file, DEFAULT_FONT_FILE)
+        try:
+            font_path(fonts_dir, DEFAULT_FONT_FILE)
+        except FontNotFoundError:
+            log.error("default font %s is missing from the fonts directory", DEFAULT_FONT_FILE)
+        return DEFAULT_FONT_FILE
+    return file
+
+
+def resolved_style(fonts_dir: Path, style: StyleConfig) -> StyleConfig:
+    """``style`` unchanged when its font is bundled, else with the font swapped for the default."""
+    font = resolve_font_file(fonts_dir, style.font_file)
+    if font == style.font_file:
+        return style
+    return style.model_copy(update={"font_file": font})
 
 
 @lru_cache(maxsize=512)

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from .fonts import font_path
+from .fonts import resolve_font_file, resolved_style
 from .models import (
     MAX_FONT_SIZE,
     MAX_MARKER_MIN_RADIUS,
@@ -67,11 +67,10 @@ def default_style(
     merged: dict[str, object] = {**base.model_dump(), **overrides}
     font = merged.get("font_file")
     if isinstance(font, str):
-        try:
-            font_path(fonts_dir, font)
-        except LookupError:
+        resolved = resolve_font_file(fonts_dir, font)
+        if resolved != font:
             log.warning("ignoring default_style.font_file %r: not a bundled font", font)
-            merged["font_file"] = base.font_file
+        merged["font_file"] = resolved
     try:
         return StyleConfig.model_validate(merged)
     except ValidationError as exc:
@@ -96,6 +95,7 @@ def autoplace(
     keep: frozenset[int] = frozenset(),
 ) -> list[Label]:
     """Run the placer on every enabled label not in ``keep``; others become obstacles."""
+    style = resolved_style(fonts_dir, style)
     by_id = {o.id: o for o in objects}
     items: list[PlacementItem] = []
     fixed_boxes: list[Box] = []
