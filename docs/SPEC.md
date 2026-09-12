@@ -131,6 +131,10 @@ The editor is a full-viewport canvas with a collapsible side panel.
 
 ### 6.1 Canvas
 
+Milestone 3 PR 4 delivers the canvas itself: preview, markers, leaders, labels, zoom/pan,
+hover, and the `F`/`1` keyboard shortcuts below. The rest of § 6.1–6.3 (click-to-toggle,
+drag, autosave, the side panel) arrives with PR 5.
+
 - Shows the 2048-px preview scaled to fit. All geometry stored in original-image pixel coordinates.
 - **Mouse wheel**: zoom, centred on cursor. **Drag on empty canvas / middle mouse / space+drag**: pan.
 - Hovering an object's position highlights it (subtle ring + name tooltip), whether or not it is enabled.
@@ -295,7 +299,7 @@ label strings from the nova fixtures, in every bundled font. `backend/tests/test
 `frontend/src/editor/metrics.test.ts` replay it exactly. The browser measures text with
 `textRendering: geometricPrecision` and must return every vector string's width within 0.5 px of
 Pillow's; the editor's rendering of the e2e field may differ from the server's annotated preview in at
-most 1 % of pixels by more than 48 (of 255) in any channel (`frontend/e2e/parity.spec.ts`, milestone 3).
+most 1 % of pixels by more than 48 (of 255) in any channel (`frontend/e2e/parity.spec.ts`).
 Box widths are rounded up to whole pixels, so a difference under 0.5 px can still move a box edge, and
 with it a leader endpoint, by one pixel; the pixel budget allows for it.
 A stored per-image

@@ -71,8 +71,20 @@ label strings of both nova fixtures in every bundled font, to `tests/fixtures/re
 Three tests hold the contract (CLAUDE.md): `backend/tests/test_render_parity.py` rebuilds the file
 from `render.py` and fails when it is stale; `frontend/src/editor/metrics.test.ts` replays it against
 the TypeScript port `frontend/src/editor/metrics.ts` with Pillow's widths standing in for the canvas;
-and `frontend/e2e/parity.spec.ts` (arriving with the editor canvas) measures the same strings on a real
+and `frontend/e2e/parity.spec.ts` measures the same strings on a real
 canvas and pixel-diffs the Konva stage against the server's annotated preview within a tolerance
 (SPEC § 9). The pixel diff runs under Playwright because Konva needs a browser. `GET /api/fonts`
 carries Pillow's ascent per size, because the browser draws on the alphabetic baseline and Pillow on
 the ascender line.
+
+## Editor
+
+`frontend/src/editor/` holds the canvas: `store.ts` (zustand document state), `load.ts` (fetches
+an image's objects/annotations and builds the editor document), `fonts.ts` (strict bundled-font
+loader), `view.ts` (zoom/pan view-transform math), `metrics.ts` (the TypeScript port of the parity
+contract above), `LabelTextShape.tsx` (the Konva text node for a label) and `EditorCanvas.tsx`
+(the Konva stage: preview image, markers, leaders, labels, hover ring and tooltip, wheel zoom
+about the cursor, drag/middle-mouse/space pan, `F` fit and `1` 100 %), mounted by `EditorPage.tsx`
+at `/images/:id`. The canvas exposes `window.__astrocaptionEditor = { stage, imageWidth,
+renderAt(scale) }` so `frontend/e2e/parity.spec.ts` can read Konva text widths and force a
+render at a fixed scale for the pixel diff.
