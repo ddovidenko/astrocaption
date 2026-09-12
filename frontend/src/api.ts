@@ -90,6 +90,9 @@ export interface Annotations {
   updated_at: string
 }
 
+/** What the editor sends back: its document minus the server-owned fields. Mirrors AnnotationsUpdate. */
+export type AnnotationsUpdate = Pick<Annotations, 'style' | 'labels' | 'version'>
+
 /** A catalogued object; `primary_name` already follows the image's name preference. Mirrors ObjectOut. */
 export interface ObjectOut {
   id: number
@@ -267,6 +270,13 @@ export const api = {
   },
   resolve: (id: string, hints?: SolveHints) =>
     request<ImageOut>(`/api/images/${id}/solve`, json('POST', hints)),
+  objects: (id: string) => request<ObjectOut[]>(`/api/images/${id}/objects`),
+  annotations: (id: string) => request<Annotations>(`/api/images/${id}/annotations`),
+  /** 409 (ApiError.status) means the stored version moved: reload before editing further. */
+  saveAnnotations: (id: string, doc: AnnotationsUpdate) =>
+    request<Annotations>(`/api/images/${id}/annotations`, json('PUT', doc)),
+  autoarrange: (id: string, doc: AnnotationsUpdate) =>
+    request<Annotations>(`/api/images/${id}/autoarrange`, json('POST', doc)),
   /** `quality` null = match the original JPEG's tables and subsampling (the default). */
   exportImage: (id: string, quality: number | null, scale: number) =>
     request<ExportOut>(`/api/images/${id}/export`, json('POST', { quality, scale })),

@@ -251,8 +251,16 @@ Owner (cookie session):
 - `GET /images`, `GET /images/{id}`, `DELETE /images/{id}`
 - `POST /images/{id}/solve` (re-solve, optional scale hints)
 - `GET /images/{id}/objects`
-- `GET/PUT /images/{id}/annotations` (PUT is autosaved by the editor, debounced 500 ms)
-- `POST /images/{id}/autoarrange` → new labels array (server runs the same placer)
+- `GET/PUT /images/{id}/annotations`. `PUT` is the editor's autosave (debounced 500 ms): body = {style, labels,
+  version as loaded}; every `labels[].object_id` must be one of the image's objects and appear once, `style.font_file`
+  must be bundled, colours are `#RRGGBB`, else a plain 422. Stored as `version + 1` with a fresh `updated_at`, and the
+  stored document is the response. If the stored version differs from the submitted one: 409
+  `This image was changed elsewhere. Reload to continue editing.` and nothing is written (a compare-and-swap in the
+  database, so two editors cannot both win). 404 before the first solve, 409 while a solve is running. A stored style
+  whose font is no longer bundled is served by GET with the built-in default (§ 9), so the editor's next autosave
+  stores the resolved name.
+- `POST /images/{id}/autoarrange` → the same document with every enabled label re-placed by the placer (§ 6.4, no
+  fixed labels), same version, not stored; the editor applies it and autosaves. Validated like `PUT`.
 - `POST /images/{id}/export` {quality: int|null, scale} → {export_url, annotated_preview_url, width, height, bytes, exported_at, encoding};
   `quality: null` (the default) reuses the source JPEG's quantisation tables (§ 5.4). `GET /images/{id}/export` → file
 - `GET /images/{id}/files/{original|preview|thumb|annotated-preview}` → the file itself
