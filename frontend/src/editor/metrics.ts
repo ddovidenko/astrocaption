@@ -47,6 +47,15 @@ export function markerRadius(obj: ObjectOut, style: StyleConfig): number {
   return Math.max(obj.radius, style.marker_min_radius)
 }
 
+/** The radius to give a centred canvas stroke so the ring lands where Pillow puts it: Pillow's
+ *  `ImageDraw.ellipse(..., width=w)` grows the outline INWARD from the bounding box (the ring
+ *  occupies radii r−w…r) while Konva centres the stroke on the radius, so the stroke has to sit
+ *  half a width inside the geometric radius. The geometric radius (`markerRadius`) still drives
+ *  leader starts, the hover ring and hit-testing. */
+export function markerStrokeRadius(obj: ObjectOut, style: StyleConfig): number {
+  return Math.max(0, markerRadius(obj, style) - style.marker_width / 2)
+}
+
 /** Pillow's ascent at `size`: the baseline sits that far below the label's top edge (`y`). */
 export function ascentFor(font: FontOut, size: number): number {
   const ascent = font.ascents[size - MIN_FONT_SIZE]

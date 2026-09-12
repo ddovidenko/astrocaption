@@ -23,6 +23,8 @@ test('the canvas measures every vector string within 0.5 px of Pillow', async ({
   const files = [...new Set(texts.map(([file]) => file))]
   const { unloaded, widths } = await page.evaluate(
     async ({ files, texts, probe }) => {
+      // Keep in step with `fontFamilyFor` in src/editor/metrics.ts: this closure runs in the
+      // browser, so the helper itself cannot be imported here.
       const family = (file: string) => file.replace(/\.ttf$/i, '')
       for (const file of files) {
         // The family is taken verbatim, exactly as src/editor/fonts.ts does: quoting it here

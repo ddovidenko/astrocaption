@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 import { Shape } from 'react-konva'
 import type Konva from 'konva'
-import type { FontOut, Label, StyleConfig } from '../api'
+import { describeError, type FontOut, type Label, type StyleConfig } from '../api'
 import { ascentFor, fontFamilyFor, type LabelBox, type LabelLines } from './metrics'
 
 interface Props {
@@ -53,7 +53,7 @@ export function LabelTextShape({ label, style, font, box, text, onDrawError }: P
       }
     } catch (err) {
       failedRef.current = true
-      onDrawError?.(err instanceof Error ? err.message : String(err))
+      onDrawError?.(describeError(err))
     }
   }
   return (
@@ -65,7 +65,9 @@ export function LabelTextShape({ label, style, font, box, text, onDrawError }: P
         ctx.closePath()
         ctx.fillStrokeShape(shape)
       }}
-      listening
+      // Hover is served by the canvas overlay's hit circles; the hit area above stays so the
+      // rectangle is ready. PR 5: drag/select will turn this on.
+      listening={false}
     />
   )
 }

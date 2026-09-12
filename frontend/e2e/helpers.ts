@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { EditorTestHook } from '../src/editor/EditorCanvas'
 
 // Shared steps for the e2e specs. The whole run shares one data dir (`make e2e` mints a scratch
 // one) and one worker, so whichever spec runs first performs the real first-run setup and the
@@ -12,14 +13,8 @@ export const FIXTURE = resolve(fileURLToPath(new URL('.', import.meta.url)), 'fi
 
 declare global {
   interface Window {
-    /** Published by `EditorCanvas` once the preview bitmap has loaded (src/editor/EditorCanvas.tsx,
-     *  `EditorTestHook` — the source of truth for this shape; keep the two in step). */
-    __astrocaptionEditor?: {
-      stage: unknown
-      imageWidth: number
-      labelCount: number
-      renderAt(scale: number): string
-    }
+    /** Published by `EditorCanvas` once the preview bitmap has loaded. */
+    __astrocaptionEditor?: EditorTestHook
   }
 }
 

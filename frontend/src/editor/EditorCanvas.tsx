@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { Circle, Group, Image as KImage, Layer, Line, Rect, Stage, Text } from 'react-konva'
 import type Konva from 'konva'
 import { useShallow } from 'zustand/react/shallow'
-import type { Label, ObjectOut } from '../api'
+import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
 import { LabelTextShape } from './LabelTextShape'
 import {
   canvasMeasurer,
@@ -10,6 +10,7 @@ import {
   leaderSegment,
   leaderVisible,
   markerRadius,
+  markerStrokeRadius,
   measureLabel,
   scaleUnit,
   type LabelBox,
@@ -21,7 +22,11 @@ import { actualSize, fitView, toScreen, zoomAt } from './view'
 
 /** What the parity spec (PR 4's Playwright test) drives the canvas with. `renderAt` returns a PNG
  *  data URL of the annotated image alone — no hover overlay, no collided badges — at `scale`
- *  original pixels per screen pixel, so it can be diffed against the server's annotated preview. */
+ *  original pixels per screen pixel, so it can be diffed against the server's annotated preview.
+ *
+ *  The hook is production code on purpose: `make e2e` and CI drive the built bundle, so an env gate
+ *  would strip it exactly where the test needs it — and Konva's own `Konva.stages` reaches the
+ *  stage anyway. */
 export interface EditorTestHook {
   stage: Konva.Stage
   /** The original image width, so a caller can pick the scale that matches a server render. */
@@ -55,6 +60,68 @@ interface Entry {
 }
 
 const HOVER_COLOR = '#8ab4ff'
+
+/** The layer that draws exactly what the export draws. It is memoised and deliberately blind to
+ *  the view transform (the Stage carries zoom and pan), so panning and zooming never rebuild it. */
+const AnnotationLayer = memo(function AnnotationLayer({
+  entries,
+  style,
+  font,
+  onDrawError,
+  badgesRef,
+}: {
+  entries: Entry[]
+  style: StyleConfig
+  font: FontOut
+  onDrawError: (message: string) => void
+  badgesRef: RefObject<Konva.Group | null>
+}) {
+  return (
+    // Hover is served by the overlay's hit circles, so nothing here has to listen.
+    // PR 5: drag/select will turn this on.
+    <Layer listening={false}>
+      {entries.map(({ label, obj, box, text, seg, leader }) => (
+        <Group key={label.object_id}>
+          {/* Not the stored radius: the stroke sits half a marker width inside it so Konva's
+              centred stroke lands where Pillow's inward outline does (see markerStrokeRadius). */}
+          <Circle
+            x={obj.x}
+            y={obj.y}
+            radius={markerStrokeRadius(obj, style)}
+            stroke={style.marker_color}
+            strokeWidth={style.marker_width}
+            listening={false}
+          />
+          {seg && leader && (
+            <Line
+              points={[seg.from[0], seg.from[1], seg.to[0], seg.to[1]]}
+              stroke={style.leader_color}
+              strokeWidth={style.marker_width}
+              listening={false}
+            />
+          )}
+          <LabelTextShape label={label} style={style} font={font} box={box} text={text} onDrawError={onDrawError} />
+        </Group>
+      ))}
+      {/* UI chrome, not part of the export: hidden by renderAt. */}
+      <Group ref={badgesRef}>
+        {entries
+          .filter(({ label }) => label.collided)
+          .map(({ label, box }) => (
+            <Text
+              key={label.object_id}
+              text="⚠"
+              x={label.x + box.width + box.primarySize * 0.2}
+              y={label.y}
+              fontSize={box.primarySize * 0.6}
+              fill="#ffd54a"
+              listening={false}
+            />
+          ))}
+      </Group>
+    </Layer>
+  )
+})
 
 export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<CanvasControls | null> }) {
   const image = useEditor((s) => s.image)
@@ -163,7 +230,7 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
     }
   }, [image])
 
-  // 9. One offscreen context for every width the canvas measures (design § 3).
+  // 3. One offscreen context for every width the canvas measures (design § 3).
   const measure = useMemo(() => {
     const ctx = document.createElement('canvas').getContext('2d')
     if (!ctx) throw new Error('This browser could not open a canvas to measure text with.')
@@ -229,7 +296,7 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
     }
   }, [controlsRef, fit, actual])
 
-  // 8. Keys, ignored while a form field has the focus.
+  // 5. Keys, ignored while a form field has the focus.
   useEffect(() => {
     // `f` and `1` must keep working after a toolbar button was clicked, so a focused BUTTON only
     // blocks Space (which a focused button would take as a click).
@@ -267,7 +334,7 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
     }
   }, [fit, actual])
 
-  // 10. The test hook, live only while the canvas is mounted.
+  // 6. The test hook, live only while the canvas is mounted.
   const renderAt = useCallback(
     (scale: number): string => {
       const stage = stageRef.current
@@ -316,16 +383,45 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
     // published again when that first measurement arrives.
   }, [image, renderAt, viewport, preview, previewError, entries])
 
-  // 6. Wheel zoom about the cursor.
+  const selected = useMemo(
+    () => entries.find((e) => e.label.object_id === selectedId) ?? null,
+    [entries, selectedId],
+  )
+
+  // The hit targets for hover: one transparent circle per object, rebuilt only when the objects,
+  // the marker sizes or the zoom (the 8 px floor is in screen pixels) change — not on every pan.
+  const hitCircles = useMemo(
+    () =>
+      objectOrder.map((id) => {
+        const obj = objects.get(id)
+        // `style` is non-null by the time anything renders (the guard below), but this memo is
+        // declared before it.
+        if (!obj || !style) return null
+        return (
+          <Circle
+            key={id}
+            x={obj.x}
+            y={obj.y}
+            radius={Math.max(markerRadius(obj, style), 8 / view.scale)}
+            fill="transparent"
+            onMouseEnter={() => hover(id)}
+            onMouseLeave={() => hover(null)}
+          />
+        )
+      }),
+    [objectOrder, objects, style, view.scale, hover],
+  )
+
+  // 7. Wheel zoom about the cursor.
   const onWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault()
     const stage = stageRef.current
     const pointer = stage?.getPointerPosition()
     if (!pointer) return
-    setView(zoomAt(useEditor.getState().view, pointer.x, pointer.y, Math.exp(-e.evt.deltaY * 0.0015)))
+    setView(zoomAt(view, pointer.x, pointer.y, Math.exp(-e.evt.deltaY * 0.0015)))
   }
 
-  // 7. Pan: empty canvas, the middle button, or space held down.
+  // 8. Pan: empty canvas, the middle button, or space held down.
   const onMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
     const stage = stageRef.current
     if (!stage) return
@@ -344,8 +440,9 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
     setView({ scale: view.scale, x: start.vx + (pointer.x - start.sx), y: start.vy + (pointer.y - start.sy) })
   }
 
+  // spaceRef is not cleared here: Space owns only whether the *next* mousedown pans, and the
+  // window `blur` listener above already resets it when the key-up would be missed.
   const stopPan = useCallback(() => {
-    spaceRef.current = false
     if (!panRef.current) return
     panRef.current = null
     setPanning(false)
@@ -362,19 +459,26 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
   if (!image || !style || !font) return null
 
   const hovered = hoveredId === null ? null : (objects.get(hoveredId) ?? null)
-  const selected = entries.find((e) => e.label.object_id === selectedId) ?? null
   const tip = hovered ? toScreen(view, hovered.x, hovered.y) : null
+
+  const notices: { text: string; error: boolean }[] = []
+  if (previewError) notices.push({ text: previewError, error: true })
+  if (sizeError) notices.push({ text: sizeError, error: true })
+  if (drawError) notices.push({ text: `Some labels could not be drawn: ${drawError}`, error: true })
+  if (orphans > 0) {
+    notices.push({
+      text: `${orphans} label(s) refer to objects this image no longer has; they are not shown.`,
+      error: false,
+    })
+  }
 
   return (
     <>
-      {previewError && <div className="notice error">{previewError}</div>}
-      {sizeError && <div className="notice error">{sizeError}</div>}
-      {drawError && <div className="notice error">Some labels could not be drawn: {drawError}</div>}
-      {orphans > 0 && (
-        <div className="notice">
-          {orphans} label(s) refer to objects this image no longer has; they are not shown.
+      {notices.map((n) => (
+        <div key={n.text} className={n.error ? 'notice error' : 'notice'}>
+          {n.text}
         </div>
-      )}
+      ))}
       <div ref={containerRef} className={`editor-canvas${panning ? ' panning' : ''}`}>
         {viewport.w > 0 && (
           <Stage
@@ -394,73 +498,15 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
             <Layer listening={false}>
               {preview && <KImage image={preview} width={image.width} height={image.height} />}
             </Layer>
-            <Layer>
-              {entries.map(({ label, obj, box, text, radius, seg, leader }) => (
-                <Group key={label.object_id}>
-                  {/* The one deliberate difference from the stored radius: Pillow's
-                      ImageDraw.ellipse(..., width=w) grows the outline INWARD from the bounding box
-                      (the ring occupies radii r−w…r) while Konva centres the stroke, so the circle
-                      is drawn at r − w/2. `markerRadius()` stays the geometric radius everywhere
-                      else (leader start, hover ring, hit circle). */}
-                  <Circle
-                    x={obj.x}
-                    y={obj.y}
-                    radius={radius - style.marker_width / 2}
-                    stroke={style.marker_color}
-                    strokeWidth={style.marker_width}
-                    listening={false}
-                  />
-                  {seg && leader && (
-                    <Line
-                      points={[seg.from[0], seg.from[1], seg.to[0], seg.to[1]]}
-                      stroke={style.leader_color}
-                      strokeWidth={style.marker_width}
-                      listening={false}
-                    />
-                  )}
-                  <LabelTextShape
-                    label={label}
-                    style={style}
-                    font={font}
-                    box={box}
-                    text={text}
-                    onDrawError={onDrawError}
-                  />
-                </Group>
-              ))}
-              {/* UI chrome, not part of the export: hidden by renderAt. */}
-              <Group ref={badgesRef}>
-                {entries
-                  .filter(({ label }) => label.collided)
-                  .map(({ label, box }) => (
-                    <Text
-                      key={label.object_id}
-                      text="⚠"
-                      x={label.x + box.width + box.primarySize * 0.2}
-                      y={label.y}
-                      fontSize={box.primarySize * 0.6}
-                      fill="#ffd54a"
-                      listening={false}
-                    />
-                  ))}
-              </Group>
-            </Layer>
+            <AnnotationLayer
+              entries={entries}
+              style={style}
+              font={font}
+              onDrawError={onDrawError}
+              badgesRef={badgesRef}
+            />
             <Layer ref={overlayRef}>
-              {objectOrder.map((id) => {
-                const obj = objects.get(id)
-                if (!obj) return null
-                return (
-                  <Circle
-                    key={id}
-                    x={obj.x}
-                    y={obj.y}
-                    radius={Math.max(markerRadius(obj, style), 8 / view.scale)}
-                    fill="transparent"
-                    onMouseEnter={() => hover(id)}
-                    onMouseLeave={() => hover(null)}
-                  />
-                )
-              })}
+              {hitCircles}
               {selected && (
                 <Rect
                   x={selected.label.x}

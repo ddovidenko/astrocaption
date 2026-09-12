@@ -11,6 +11,7 @@ import {
   leaderSegment,
   leaderVisible,
   markerRadius,
+  markerStrokeRadius,
   measureLabel,
   roundHalfEven,
   scaleUnit,
@@ -143,9 +144,21 @@ describe('render vectors', () => {
         line2Height: c.box.line2_height,
       })
       expect(markerRadius(c.object, c.style)).toBe(c.marker_radius)
+      // The canvas stroke sits half a marker width inside that radius (Pillow draws the ring inward).
+      expect(markerStrokeRadius(c.object, c.style)).toBe(
+        Math.max(0, c.marker_radius - c.style.marker_width / 2),
+      )
       expect(ascentFor(font!, c.box.primary_size)).toBe(c.ascents.primary)
       if (c.ascents.alias !== null) expect(ascentFor(font!, c.box.alias_size)).toBe(c.ascents.alias)
     }
+  })
+
+  it('clamps the marker stroke radius at 0 when the width swallows the radius', () => {
+    const c = vectors.labels[0]!
+    const style: StyleConfig = { ...c.style, marker_min_radius: 3, marker_width: 10 }
+    const obj: ObjectOut = { ...c.object, radius: 2 }
+    expect(markerRadius(obj, style)).toBe(3)
+    expect(markerStrokeRadius(obj, style)).toBe(0)
   })
 
   it('reproduces every leader segment and its visibility per mode', () => {
