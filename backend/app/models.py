@@ -12,6 +12,7 @@ from enum import StrEnum
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic_core import PydanticCustomError
 
 
 def utcnow_iso() -> str:
@@ -496,25 +497,66 @@ class ConfigUpdate(BaseModel):
     def _null_is_not_a_value(cls, value: object) -> object:
         # ``None`` here only means "absent"; an explicit null has no meaning for these two
         # fields (unlike ``nova_api_key``), so it is rejected instead of silently kept (#47).
-        # Fixed text: the 422 handler echoes this message.
+        # Worded by VALIDATION_MESSAGES under this type, not by the message given here.
         if value is None:
-            raise ValueError("cannot be null; leave the field out to keep the current value")
+            raise PydanticCustomError("null_not_allowed", "cannot be null")
         return value
 
 
+# 422 wording by pydantic error type (#45). Built from the type, never from ``msg``: a custom
+# validator's ``ValueError(f"bad {value}")`` would otherwise echo the submitted value.
+# ``{...}`` placeholders are filled from ``ctx``, which for these types holds the model's own
+# limits (``max_length``, ``le``, the literal choices), never the input.
+VALIDATION_MESSAGES: dict[str, str] = {
+    "missing": "is required",
+    "extra_forbidden": "is not a known field",
+    "json_invalid": "the body is not valid JSON",
+    "string_type": "must be text",
+    "string_too_short": "must be at least {min_length} characters long",
+    "string_too_long": "must be at most {max_length} characters long",
+    "string_pattern_mismatch": "is not in the expected format",
+    "int_type": "must be a whole number",
+    "int_parsing": "must be a whole number",
+    "int_from_float": "must be a whole number",
+    "float_type": "must be a number",
+    "float_parsing": "must be a number",
+    "bool_type": "must be true or false",
+    "bool_parsing": "must be true or false",
+    "greater_than": "must be greater than {gt}",
+    "greater_than_equal": "must be at least {ge}",
+    "less_than": "must be less than {lt}",
+    "less_than_equal": "must be at most {le}",
+    "literal_error": "must be one of {expected}",
+    "enum": "must be one of {expected}",
+    "list_type": "must be a list",
+    "dict_type": "must be an object",
+    "model_type": "must be an object",
+    "model_attributes_type": "must be an object",
+    "null_not_allowed": "cannot be null; leave the field out to keep the current value",
+}
+GENERIC_VALIDATION_MESSAGE = "is not valid"
+
+
 def validation_message(error: Mapping[str, Any]) -> str:
-    """Pydantic's reason for one rejected value, never the value itself (CLAUDE.md)."""
-    if error.get("type") == "json_invalid":
-        return "the body is not valid JSON"
-    return str(error.get("msg", "is not valid"))
+    """Pydantic's reason for one rejected value, never the value itself (CLAUDE.md, #45)."""
+    kind = str(error.get("type", ""))
+    ctx = error.get("ctx") or {}
+    if kind == "string_too_short" and ctx.get("min_length") == 1:
+        return "must not be blank"
+    template = VALIDATION_MESSAGES.get(kind, GENERIC_VALIDATION_MESSAGE)
+    try:
+        return template.format(**ctx)
+    except (KeyError, IndexError):  # a known type whose context is missing: still no crash
+        return GENERIC_VALIDATION_MESSAGE
 
 
 MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 1024
 
 
-# A custom ``@field_validator`` message is echoed verbatim by the 422 handler in main.py,
-# so it must describe the rule and never include the submitted value (a password, here).
+# The 422 handler words errors from their pydantic type (``VALIDATION_MESSAGES``), never from a
+# validator's message, so a custom validator that needs specific wording raises
+# ``PydanticCustomError`` with a type listed there (``ConfigUpdate`` does).
 class SetupRequest(BaseModel):
     password: str = Field(max_length=MAX_PASSWORD_LENGTH)
     nova_api_key: str | None = Field(default=None, max_length=200)

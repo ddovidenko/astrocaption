@@ -202,7 +202,7 @@ def test_put_rejects_blank_title_with_the_model_rule(
         assert resp.status_code == 422
         detail = resp.json()["detail"]
         assert isinstance(detail, str)
-        assert detail == "site_title: String should have at least 1 character"
+        assert detail == "site_title: must not be blank"
         assert client.put("/api/config", json={"site_title": "  Padded  "}).status_code == 200
         assert read_config(tmp_path)["site_title"] == "Padded"  # stripped by the model
 
