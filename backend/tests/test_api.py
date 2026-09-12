@@ -276,7 +276,9 @@ def test_solve_objects_annotations_and_export(
 
     ann = client.get(f"/api/images/{image_id}/annotations").json()
     assert ann["image_id"] == image_id and ann["version"] == 1
-    assert sum(lab["enabled"] for lab in ann["labels"]) == 17
+    # 8 bright stars + 9 objects with a known radius above 0.4 % of the width + IC 427 and
+    # IC 428, which nova reports with radius 0 ("no size known", #9)
+    assert sum(lab["enabled"] for lab in ann["labels"]) == 19
     assert ann["style"]["font_file"] == "Inter-Regular.ttf"
 
     original = settings.data_dir / "uploads" / image_id / "original.jpg"

@@ -56,3 +56,16 @@ def test_autoplace_falls_back_when_the_style_font_is_gone() -> None:
     placed_gone = autoplace(3000, 2000, gone_style, labels, objects, FONTS_DIR)
 
     assert [lab.model_dump() for lab in placed_gone] == [lab.model_dump() for lab in placed_inter]
+
+
+def test_objects_with_no_known_size_are_enabled_but_hd_stars_are_not() -> None:
+    """#9: nova reports radius 0 for NGC 206 (the catalogue has no size for it) and for every
+    hd star (a point). "No size known" enables; a known size below the threshold does not."""
+    ngc_206 = SolveObject(id=1, catalog_names=["NGC 206"], type="ngc", x=100, y=100, radius=0)
+    small = SolveObject(id=2, catalog_names=["NGC 1924"], type="ngc", x=100, y=100, radius=5)
+    hd = SolveObject(id=3, catalog_names=["HD 198639"], type="hd", x=100, y=100, radius=0)
+    bright = SolveObject(id=4, catalog_names=["Alnitak"], type="bright", x=100, y=100, radius=0)
+    assert default_enabled(ngc_206, 3000)
+    assert not default_enabled(small, 3000)  # 5 px is below 0.4 % of 3000
+    assert not default_enabled(hd, 3000)
+    assert default_enabled(bright, 3000)
