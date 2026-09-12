@@ -39,11 +39,11 @@ def resolve_font_file(fonts_dir: Path, file: str) -> str:
     """
     try:
         font_path(fonts_dir, file)
-    except LookupError:
+    except FontNotFoundError:
         log.warning("font %r is not bundled; using %s", file, DEFAULT_FONT_FILE)
         try:
             font_path(fonts_dir, DEFAULT_FONT_FILE)
-        except LookupError:
+        except FontNotFoundError:
             log.error("default font %s is missing from the fonts directory", DEFAULT_FONT_FILE)
         return DEFAULT_FONT_FILE
     return file

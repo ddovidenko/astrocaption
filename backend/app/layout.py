@@ -67,7 +67,10 @@ def default_style(
     merged: dict[str, object] = {**base.model_dump(), **overrides}
     font = merged.get("font_file")
     if isinstance(font, str):
-        merged["font_file"] = resolve_font_file(fonts_dir, font)
+        resolved = resolve_font_file(fonts_dir, font)
+        if resolved != font:
+            log.warning("ignoring default_style.font_file %r: not a bundled font", font)
+        merged["font_file"] = resolved
     try:
         return StyleConfig.model_validate(merged)
     except ValidationError as exc:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.layout import autoplace, default_enabled, default_style
 from app.models import Label, SolveObject, primary_name
 from app.objects import objects_from_nova
@@ -14,10 +16,16 @@ def test_default_style_clamps_to_model_bounds() -> None:
     assert style.marker_min_radius == 122
 
 
-def test_default_style_drops_unknown_font_but_keeps_other_overrides() -> None:
-    style = default_style(3000, 2000, FONTS_DIR, {"font_file": "Nope.ttf", "font_size": 40})
+def test_default_style_drops_unknown_font_but_keeps_other_overrides(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING"):
+        style = default_style(3000, 2000, FONTS_DIR, {"font_file": "Nope.ttf", "font_size": 40})
     assert style.font_file == "Inter-Regular.ttf"
     assert style.font_size == 40
+    assert any(
+        "default_style.font_file" in r.message and "Nope.ttf" in r.message for r in caplog.records
+    )
 
 
 def test_default_style_accepts_bundled_font() -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -10,11 +11,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
+from starlette.requests import Request
 
 from app.config import CONFIG_FIX_HINT, Settings
 from app.db import Database
+from app.fonts import FontNotFoundError
 from app.layout import SIZE_RELATIVE
-from app.main import create_app
+from app.main import create_app, font_not_found_error
 from app.models import StyleConfig
 from tests.conftest import (
     NOVA_NARROW_FIXTURES,
@@ -328,6 +331,27 @@ def test_export_and_annotations_survive_a_dropped_font(
 
     stored = db.get_annotations(image_id)
     assert stored is not None and stored.style.font_file == "Lato-Regular.ttf"
+
+
+def test_font_not_found_error_is_a_plain_500(caplog: pytest.LogCaptureFixture) -> None:
+    """If the fonts directory is missing even the built-in default, ``load_font`` raises
+    ``FontNotFoundError`` out of ``export_image`` (issue #59); the handler must turn that
+    into plain language rather than a bare 500, and never name a path -- only the file."""
+    request = Request({"type": "http"})
+    with caplog.at_level("ERROR"):
+        response = asyncio.run(
+            font_not_found_error(request, FontNotFoundError("Inter-Regular.ttf"))
+        )
+    assert response.status_code == 500
+    body = json.loads(bytes(response.body))
+    assert body == {
+        "detail": (
+            "The server's font bundle is incomplete: Inter-Regular.ttf is missing from the "
+            "fonts directory. Restore the bundled fonts and restart."
+        )
+    }
+    assert "/" not in body["detail"]
+    assert any("Inter-Regular.ttf" in r.message and r.levelname == "ERROR" for r in caplog.records)
 
 
 def test_export_and_resolve_conflict_while_solving(tmp_path: Path, sample_jpeg: Path) -> None:
