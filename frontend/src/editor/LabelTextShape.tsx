@@ -9,15 +9,15 @@ interface Props {
   font: FontOut
   box: LabelBox
   text: LabelLines
-  selected: boolean
-  /** Stage scale, so the selection outline stays one screen pixel wide at every zoom. */
-  scale: number
 }
 
 /** Text drawn the way Pillow draws it (design § 3): geometricPrecision, alphabetic baseline at
  *  y + ascent, the halo as a round-joined stroke of 2 × halo_width under the fill. The hit area
- *  is the measured text box so hover and (in PR 5) drag use the same rectangle the placer used. */
-export function LabelTextShape({ label, style, font, box, text, selected, scale }: Props) {
+ *  is the measured text box so hover and (in PR 5) drag use the same rectangle the placer used.
+ *
+ *  Nothing here is chrome: this shape draws exactly what the export draws, so the parity render
+ *  can keep it and hide the overlay layer (selection outline, hover ring) instead. */
+export function LabelTextShape({ label, style, font, box, text }: Props) {
   const color = label.color ?? style.text_color
   const family = fontFamilyFor(style.font_file)
   const draw = (ctx: Konva.Context) => {
@@ -38,11 +38,6 @@ export function LabelTextShape({ label, style, font, box, text, selected, scale 
       }
       c.fillStyle = color
       c.fillText(str, label.x, y)
-    }
-    if (selected) {
-      c.strokeStyle = '#8ab4ff'
-      c.lineWidth = 1 / scale // one screen pixel, whatever the zoom
-      c.strokeRect(label.x, label.y, box.width, box.height)
     }
   }
   return (

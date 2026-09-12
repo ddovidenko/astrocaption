@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
-import { Circle, Group, Image as KImage, Layer, Line, Stage, Text } from 'react-konva'
+import { Circle, Group, Image as KImage, Layer, Line, Rect, Stage, Text } from 'react-konva'
 import type Konva from 'konva'
 import { useShallow } from 'zustand/react/shallow'
 import type { Label, ObjectOut } from '../api'
@@ -176,11 +176,14 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
   useEffect(() => {
     const inField = () => {
       const el = document.activeElement
-      return !!el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)
+      return !!el && ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(el.tagName)
     }
     const down = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
-        if (!inField()) spaceRef.current = true
+        // A focused toolbar button would otherwise take Space as a click, and the page would scroll.
+        if (inField()) return
+        e.preventDefault()
+        spaceRef.current = true
         return
       }
       if (inField() || e.ctrlKey || e.metaKey || e.altKey) return
@@ -212,8 +215,8 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
       }
       const overlay = overlayRef.current
       const badges = badgesRef.current
-      const overlayShown = overlay?.visible() ?? false
-      const badgesShown = badges?.visible() ?? false
+      const overlayShown = overlay?.visible() ?? true
+      const badgesShown = badges?.visible() ?? true
       try {
         overlay?.visible(false)
         badges?.visible(false)
@@ -282,6 +285,7 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
   if (!image || !style || !font) return null
 
   const hovered = hoveredId === null ? null : (objects.get(hoveredId) ?? null)
+  const selected = entries.find((e) => e.label.object_id === selectedId) ?? null
   const tip = hovered ? toScreen(view, hovered.x, hovered.y) : null
 
   return (
@@ -323,15 +327,7 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
                     listening={false}
                   />
                 )}
-                <LabelTextShape
-                  label={label}
-                  style={style}
-                  font={font}
-                  box={box}
-                  text={text}
-                  selected={selectedId === label.object_id}
-                  scale={view.scale}
-                />
+                <LabelTextShape label={label} style={style} font={font} box={box} text={text} />
               </Group>
             ))}
             {/* UI chrome, not part of the export: hidden by renderAt. */}
@@ -367,6 +363,17 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
                 />
               )
             })}
+            {selected && (
+              <Rect
+                x={selected.label.x}
+                y={selected.label.y}
+                width={selected.box.width}
+                height={selected.box.height}
+                stroke={HOVER_COLOR}
+                strokeWidth={1 / view.scale}
+                listening={false}
+              />
+            )}
             {hovered && (
               <Circle
                 x={hovered.x}

@@ -13,8 +13,9 @@ export function loadBundledFont(file: string): Promise<string> {
     if (typeof FontFace === 'undefined') throw new Error(`Font ${file} could not be loaded.`)
     let face: FontFace
     try {
-      // Both arguments are parsed as CSS; quote them so an odd file name cannot throw here.
-      face = new FontFace(JSON.stringify(family), `url("/fonts/${encodeURIComponent(file)}")`)
+      // The family is taken verbatim (quoting it would register a name *containing* quotes, which
+      // no `font:` shorthand can then match); only `src` is parsed as CSS, so only the URL is quoted.
+      face = new FontFace(family, `url("/fonts/${encodeURIComponent(file)}")`)
     } catch {
       throw new Error(`Font ${file} could not be loaded.`)
     }
