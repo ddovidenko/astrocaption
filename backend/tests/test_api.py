@@ -303,6 +303,33 @@ def test_solve_objects_annotations_and_export(
     )
 
 
+def test_export_and_annotations_survive_a_dropped_font(
+    client: TestClient, settings: Settings, sample_jpeg: Path
+) -> None:
+    """A stored style can outlive the bundle (a family dropped in an upgrade, issue #59)."""
+    body = upload(client, sample_jpeg)
+    image_id = body["id"]
+    solved = wait_for_status(client, image_id, {"solved", "failed"})
+    assert solved["solve_status"] == "solved", solved["solve_error"]
+
+    db = Database(settings.db_path)
+    ann = db.get_annotations(image_id)
+    assert ann is not None
+    gone = ann.model_copy(
+        update={"style": ann.style.model_copy(update={"font_file": "Lato-Regular.ttf"})}
+    )
+    db.save_annotations(gone)
+
+    fetched = client.get(f"/api/images/{image_id}/annotations").json()
+    assert fetched["style"]["font_file"] == "Inter-Regular.ttf"
+
+    resp = client.post(f"/api/images/{image_id}/export", json={})
+    assert resp.status_code == 200, resp.text
+
+    stored = db.get_annotations(image_id)
+    assert stored is not None and stored.style.font_file == "Lato-Regular.ttf"
+
+
 def test_export_and_resolve_conflict_while_solving(tmp_path: Path, sample_jpeg: Path) -> None:
     settings = make_settings(tmp_path)
     stuck = FakeSolver(submission_polls=10**9)

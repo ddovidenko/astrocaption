@@ -16,7 +16,7 @@ from typing import Any
 
 from PIL import Image, ImageDraw, JpegImagePlugin
 
-from .fonts import load_font
+from .fonts import load_font, resolved_style
 from .models import Annotations, Label, SolveObject, StyleConfig
 from .placement import Box, scale_unit
 from .storage import is_jpeg, to_rgb, write_preview
@@ -143,7 +143,7 @@ def draw_annotations(
 ) -> None:
     """Draw markers, leaders and labels onto ``img`` in place (``img`` must be a copy)."""
     draw = ImageDraw.Draw(img)
-    style = ann.style
+    style = resolved_style(fonts_dir, ann.style)
     by_id = {o.id: o for o in objects}
     s = scale_unit(img.width, img.height)
     stroke = style.halo_width if style.halo else 0

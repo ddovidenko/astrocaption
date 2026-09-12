@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
+import pytest
 from PIL import Image, JpegImagePlugin
 
 from app.layout import build_default_annotations, default_style
@@ -150,3 +152,24 @@ def test_leader_is_drawn_when_forced_on(tmp_path: Path) -> None:
     with Image.open(out) as img:
         px = img.getpixel(mid)
         assert isinstance(px, tuple) and close(px, (255, 213, 74))
+
+
+def test_render_falls_back_when_the_stored_font_is_gone(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    original = write_test_image(tmp_path / "orig.jpg", 3000, 2000)
+    ann = build_default_annotations("x", 3000, 2000, OBJECTS, FONTS_DIR)
+    assert ann.style.font_file == "Inter-Regular.ttf"
+    gone = ann.model_copy(
+        update={"style": ann.style.model_copy(update={"font_file": "Gone-Regular.ttf"})}
+    )
+
+    caplog.set_level(logging.WARNING, logger="app.fonts")
+    out_gone = tmp_path / "gone.jpg"
+    render_annotated(original, OBJECTS, gone, FONTS_DIR, out_gone)
+    out_inter = tmp_path / "inter.jpg"
+    render_annotated(original, OBJECTS, ann, FONTS_DIR, out_inter)
+
+    assert out_gone.read_bytes() == out_inter.read_bytes()
+    assert "Gone-Regular.ttf" in caplog.text
+    assert "Inter-Regular.ttf" in caplog.text
