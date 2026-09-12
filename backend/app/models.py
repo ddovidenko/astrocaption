@@ -242,18 +242,26 @@ MIN_FONT_SIZE = 6
 MAX_FONT_SIZE = 200
 MAX_STROKE_WIDTH = 40
 MAX_MARKER_MIN_RADIUS = 400
+MAX_TEXT_OVERRIDE = 200
+MAX_LABELS = 5000
+
+HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
+HexColor = Annotated[str, StringConstraints(pattern=HEX_COLOR)]
 
 
 class StyleConfig(BaseModel):
-    """Global style for one image. All lengths are original-image pixels."""
+    """Global style for one image. All lengths are original-image pixels; colours are #RRGGBB.
+    Unknown fields are refused so a typo cannot be stored (rows are written by this model)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     font_file: str = "Inter-Regular.ttf"
     font_size: int = Field(default=24, ge=MIN_FONT_SIZE, le=MAX_FONT_SIZE)
-    text_color: str = "#FFFFFF"
-    marker_color: str = "#FFD54A"
-    leader_color: str = "#FFD54A"
+    text_color: HexColor = "#FFFFFF"
+    marker_color: HexColor = "#FFD54A"
+    leader_color: HexColor = "#FFD54A"
     halo: bool = True
-    halo_color: str = "#000000"
+    halo_color: HexColor = "#000000"
     halo_width: int = Field(default=2, ge=0, le=MAX_STROKE_WIDTH)
     marker_width: int = Field(default=2, ge=1, le=MAX_STROKE_WIDTH)
     marker_min_radius: int = Field(default=6, ge=1, le=MAX_MARKER_MIN_RADIUS)
@@ -262,15 +270,18 @@ class StyleConfig(BaseModel):
 
 
 class Label(BaseModel):
-    """Layout of one object's call-out. ``x, y`` is the top-left of the text box."""
+    """Layout of one object's call-out. ``x, y`` is the top-left of the text box.
+    Unknown fields are refused so a typo cannot be stored (rows are written by this model)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     object_id: int
     enabled: bool = True
-    x: float = 0.0
-    y: float = 0.0
+    x: float = Field(default=0.0, allow_inf_nan=False)
+    y: float = Field(default=0.0, allow_inf_nan=False)
     font_size: int | None = Field(default=None, ge=MIN_FONT_SIZE, le=MAX_FONT_SIZE)
-    text_override: str | None = None
-    color: str | None = None
+    text_override: str | None = Field(default=None, max_length=MAX_TEXT_OVERRIDE)
+    color: HexColor | None = None
     show_aliases: bool | None = None
     leader: LeaderMode = "auto"
     collided: bool = False
@@ -282,6 +293,24 @@ class Annotations(BaseModel):
     labels: list[Label]
     version: int = 1
     updated_at: str = Field(default_factory=utcnow_iso)
+
+
+class AnnotationsUpdate(BaseModel):
+    """What the editor sends to ``PUT /annotations`` and ``POST /autoarrange``: the document it
+    holds. ``image_id`` and ``updated_at`` are declared only so a GET body can be sent straight
+    back without stripping them first; they are the server's and are never read. ``version`` is
+    the one it loaded, for the conflict check. Every other unknown field is refused so a typo
+    cannot be stored."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    image_id: str | None = None  # the server's; accepted so a GET body can be sent back, never read
+    updated_at: str | None = (
+        None  # the server's; accepted so a GET body can be sent back, never read
+    )
+    style: StyleConfig
+    labels: list[Label] = Field(max_length=MAX_LABELS)
+    version: int = Field(ge=1)
 
 
 # ---------------------------------------------------------------------------
@@ -455,9 +484,6 @@ class ConfigOut(BaseModel):
     style_defaults: StyleDefaults  # built-ins for fields with no override
 
 
-HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
-
-
 class StyleOverrides(BaseModel):
     """The owner's ``default_style``: only the fields they chose; the rest stay size-relative.
 
@@ -469,11 +495,11 @@ class StyleOverrides(BaseModel):
 
     font_file: str | None = Field(default=None, max_length=100)
     font_size: int | None = Field(default=None, ge=MIN_FONT_SIZE, le=MAX_FONT_SIZE)
-    text_color: str | None = Field(default=None, pattern=HEX_COLOR)
-    marker_color: str | None = Field(default=None, pattern=HEX_COLOR)
-    leader_color: str | None = Field(default=None, pattern=HEX_COLOR)
+    text_color: HexColor | None = None
+    marker_color: HexColor | None = None
+    leader_color: HexColor | None = None
     halo: bool | None = None
-    halo_color: str | None = Field(default=None, pattern=HEX_COLOR)
+    halo_color: HexColor | None = None
     halo_width: int | None = Field(default=None, ge=0, le=MAX_STROKE_WIDTH)
     marker_width: int | None = Field(default=None, ge=1, le=MAX_STROKE_WIDTH)
     marker_min_radius: int | None = Field(default=None, ge=1, le=MAX_MARKER_MIN_RADIUS)
@@ -543,6 +569,8 @@ VALIDATION_MESSAGES: dict[str, str] = {
     "literal_error": "must be one of {expected}",
     "enum": "must be one of {expected}",
     "list_type": "must be a list",
+    "too_short": "must have at least {min_length} items",
+    "too_long": "must have at most {max_length} items",
     "dict_type": "must be an object",
     "model_type": "must be an object",
     "model_attributes_type": "must be an object",

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import uuid
+from collections import Counter
 from pathlib import Path
 from typing import Annotated, BinaryIO, Literal
 from urllib.parse import quote
@@ -15,9 +17,11 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ..config import Settings, SettingsSource
 from ..db import Database
-from ..fonts import resolved_style
+from ..fonts import list_fonts, resolved_style
+from ..layout import autoplace
 from ..models import (
     Annotations,
+    AnnotationsUpdate,
     ExportOut,
     ExportRequest,
     ImageOut,
@@ -50,6 +54,8 @@ from .deps import (
     unauthorized_response,
 )
 from .errors import DISK_FULL_ERRNOS
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/images", tags=["images"], dependencies=[Depends(require_owner)])
 
@@ -296,8 +302,109 @@ async def get_annotations(image_id: str, settings: SettingsDep, db: DbDep) -> An
     _get_or_404(db, image_id)
     ann = db.get_annotations(image_id)
     if ann is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Image has not been solved yet.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_SOLVED_MESSAGE)
     return ann.model_copy(update={"style": resolved_style(settings.fonts_dir, ann.style)})
+
+
+SOLVING_MESSAGE = "The image is still being solved; try again when it is done."
+CONFLICT_MESSAGE = "This image was changed elsewhere. Reload to continue editing."
+NOT_SOLVED_MESSAGE = "Image has not been solved yet."
+OBJECTS_DUPLICATE_MESSAGE = "labels: each of this image's objects may appear only once."
+OBJECTS_UNKNOWN_MESSAGE = "labels: every label must name one of this image's objects."
+OBJECTS_MISSING_MESSAGE = "labels: the document must list every one of this image's objects."
+FONT_MESSAGE = "style.font_file is not a bundled font."
+
+
+def _check_version(doc: AnnotationsUpdate, stored: Annotations, image_id: str) -> None:
+    """409 when the editor's document is not the stored version. Checked BEFORE
+    ``_validate_document``: a stale document may name objects that no longer exist after a
+    re-solve, and "reload" must win over a labels error (the compare-and-swap in the PUT
+    still guards the write under a race)."""
+    if doc.version != stored.version:
+        log.info(
+            "annotations for %s: stale version %d, stored %d", image_id, doc.version, stored.version
+        )
+        raise HTTPException(status.HTTP_409_CONFLICT, CONFLICT_MESSAGE)
+
+
+def _annotations_target(db: Database, image_id: str) -> tuple[ImageRecord, Annotations]:
+    """The image and its stored layout, or the 404/409 the editor shows."""
+    rec = _get_or_404(db, image_id)
+    if rec.solve_status in (SolveStatus.PENDING, SolveStatus.SOLVING):
+        raise HTTPException(status.HTTP_409_CONFLICT, SOLVING_MESSAGE)
+    ann = db.get_annotations(image_id)
+    if ann is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_SOLVED_MESSAGE)
+    return rec, ann
+
+
+def _validate_document(
+    doc: AnnotationsUpdate, objects: list[SolveObject], settings: Settings, image_id: str
+) -> None:
+    """Plain 422s for what the models cannot check: object ids and the font bundle. Messages
+    never repeat the submitted value (CLAUDE.md); the offending ids are logged server-side only.
+    The document must list every one of the image's objects exactly once (the server always
+    emits one label per object; a shorter list would silently delete labels on a full-replace
+    PUT), so duplicate, unknown and missing ids are each their own cause and their own sentence.
+    """
+    ids = [lab.object_id for lab in doc.labels]
+    known = {o.id for o in objects}
+    duplicates = sorted(i for i, n in Counter(ids).items() if n > 1)
+    if duplicates:
+        log.info("annotations for %s rejected: duplicate object ids %s", image_id, duplicates)
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, OBJECTS_DUPLICATE_MESSAGE)
+    unknown = sorted(set(ids) - known)
+    if unknown:
+        log.info("annotations for %s rejected: unknown object ids %s", image_id, unknown)
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, OBJECTS_UNKNOWN_MESSAGE)
+    missing = sorted(known - set(ids))
+    if missing:
+        log.info("annotations for %s rejected: missing object ids %s", image_id, missing)
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, OBJECTS_MISSING_MESSAGE)
+    if doc.style.font_file not in {f.file for f in list_fonts(settings.fonts_dir)}:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, FONT_MESSAGE)
+
+
+@router.put("/{image_id}/annotations")
+async def put_annotations(
+    image_id: str, doc: AnnotationsUpdate, settings: SettingsDep, db: DbDep
+) -> Annotations:
+    """The editor's autosave (design § 4): stored as version + 1 when ``doc.version`` is still
+    the stored one, else 409 and nothing written."""
+    _, stored = _annotations_target(db, image_id)
+    _check_version(doc, stored, image_id)
+    _validate_document(doc, db.get_objects(image_id), settings, image_id)
+    ann = Annotations(
+        image_id=image_id, style=doc.style, labels=doc.labels, version=doc.version + 1
+    )
+    if not db.update_annotations_if_version(ann, expected_version=doc.version):
+        if db.get_annotations(image_id) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Image not found.")
+        log.info("annotations for %s: compare-and-swap lost", image_id)
+        raise HTTPException(status.HTTP_409_CONFLICT, CONFLICT_MESSAGE)  # lost the race
+    return ann
+
+
+@router.post("/{image_id}/autoarrange")
+async def autoarrange(
+    image_id: str, doc: AnnotationsUpdate, settings: SettingsDep, db: DbDep
+) -> Annotations:
+    """Run the placer on every enabled label of the submitted document (no fixed labels) and
+    return the result without storing it; the editor applies it and autosaves (design § 4)."""
+    rec, stored = _annotations_target(db, image_id)
+    _check_version(doc, stored, image_id)
+    objects = db.get_objects(image_id)
+    _validate_document(doc, objects, settings, image_id)
+    labels = await asyncio.to_thread(
+        autoplace, rec.width, rec.height, doc.style, doc.labels, objects, settings.fonts_dir
+    )
+    return Annotations(
+        image_id=image_id,
+        style=doc.style,
+        labels=labels,
+        version=doc.version,
+        updated_at=stored.updated_at,
+    )
 
 
 def _render_export(

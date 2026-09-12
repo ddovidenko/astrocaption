@@ -124,11 +124,11 @@ MAX_LABEL_CHARS = 60
 MAX_REPORTED_ERRORS = 5  # a body with hundreds of bad keys must not flood the log or the page
 
 
-def _safe_label(parts: list[str]) -> str:
+def _safe_label(parts: list[str | int]) -> str:
     """A field path fit to echo: the client chooses these names, so it could send a control
     character to forge a log line, or a very long one to bury the message."""
     cleaned = (
-        "".join(c if c.isascii() and c.isprintable() else "?" for c in part) for part in parts
+        "".join(c if c.isascii() and c.isprintable() else "?" for c in str(part)) for part in parts
     )
     return ".".join(cleaned)[:MAX_LABEL_CHARS] or "request"
 
@@ -139,13 +139,17 @@ async def plain_validation_error(_: Request, exc: RequestValidationError) -> JSO
     labels: list[str] = []
     messages: list[str] = []
     for error in exc.errors():
-        # loc holds ints too (a byte offset for a bad body, an index in a list), and
-        # its first element is the source; neither names anything a user would type.
-        named = [
-            part
-            for part in error.get("loc", ())
-            if isinstance(part, str) and part not in {"body", "query", "path"}
-        ]
+        # loc holds ints too: a list index (user-meaningful, e.g. "labels.17.color") or the
+        # byte offset of a bad body (meaningless, and always leading). Keep an int only when
+        # the previous kept part was a string, so a leading offset is dropped but a list
+        # index that follows a field name survives; the source ("body"/"query"/"path") is
+        # never kept either way.
+        named: list[str | int] = []
+        for part in error.get("loc", ()):
+            is_named_field = isinstance(part, str) and part not in {"body", "query", "path"}
+            follows_a_field = isinstance(part, int) and named and isinstance(named[-1], str)
+            if is_named_field or follows_a_field:
+                named.append(part)
         label = _safe_label(named)
         labels.append(label)
         messages.append(f"{label}: {validation_message(error)}")
