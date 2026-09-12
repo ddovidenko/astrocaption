@@ -47,6 +47,15 @@ export function markerRadius(obj: ObjectOut, style: StyleConfig): number {
   return Math.max(obj.radius, style.marker_min_radius)
 }
 
+/** The radius to give a centred canvas stroke so the ring lands where Pillow puts it: Pillow's
+ *  `ImageDraw.ellipse(..., width=w)` grows the outline INWARD from the bounding box (the ring
+ *  occupies radii r−w…r) while Konva centres the stroke on the radius, so the stroke has to sit
+ *  half a width inside the geometric radius. The geometric radius (`markerRadius`) still drives
+ *  leader starts, the hover ring and hit-testing. */
+export function markerStrokeRadius(obj: ObjectOut, style: StyleConfig): number {
+  return Math.max(0, markerRadius(obj, style) - style.marker_width / 2)
+}
+
 /** Pillow's ascent at `size`: the baseline sits that far below the label's top edge (`y`). */
 export function ascentFor(font: FontOut, size: number): number {
   const ascent = font.ascents[size - MIN_FONT_SIZE]
@@ -74,6 +83,12 @@ export function fontFamilyFor(file: string): string {
   return file.replace(/\.ttf$/i, '')
 }
 
+/** The canvas `font` shorthand for `file` at `size`, shared by the measurer and the paint shape
+ *  so the two can never build different strings. */
+export function fontShorthand(size: number, file: string): string {
+  return `${size}px "${fontFamilyFor(file)}"`
+}
+
 /** Advance width of `text` set in `fontFile` at `size` px, in original-image pixels. */
 export type TextMeasurer = (text: string, fontFile: string, size: number) => number
 
@@ -89,7 +104,7 @@ export function canvasMeasurer(ctx: CanvasRenderingContext2D): TextMeasurer {
   }
   return (text, fontFile, size) => {
     ctx.textRendering = 'geometricPrecision' // per call: a ctx.restore() would otherwise reset it
-    ctx.font = `${size}px "${fontFamilyFor(fontFile)}"`
+    ctx.font = fontShorthand(size, fontFile)
     return ctx.measureText(text).width
   }
 }

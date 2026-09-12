@@ -49,7 +49,7 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
   rewrites `tests/fixtures/render/vectors.json` from `render.py`, `backend/tests/test_render_parity.py` fails
   while it is stale, `frontend/src/editor/metrics.ts` (pinned by `metrics.test.ts`) must be changed to match,
   and the pixel diff in `frontend/e2e/parity.spec.ts` (Konva stage exported as PNG at a fixed zoom against
-  the server's annotated preview, within the tolerance in SPEC § 9; arrives with the editor canvas)
+  the server's annotated preview, within the tolerance in SPEC § 9)
   must still pass. Konva needs a browser, so the pixel diff lives in the Playwright suite, not pytest.
 - Never call nova.astrometry.net during tests. Use the recorded fixtures in `backend/tests/fixtures/nova/`
   (3.9° Orion field) and `backend/tests/fixtures/nova-narrow/` (1° Pelican field with `hd` stars);

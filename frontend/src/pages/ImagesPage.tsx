@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router'
 import {
   api,
   formatBytes,
@@ -236,6 +237,9 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
               <button onClick={exportNow} disabled={working}>
                 {working ? 'Rendering…' : 'Export'}
               </button>
+              <Link className="button" to={`/images/${image.id}`}>
+                Edit
+              </Link>
             </>
           )}
           {!busy && (

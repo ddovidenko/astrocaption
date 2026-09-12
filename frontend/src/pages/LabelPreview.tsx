@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { StyleDefaults } from '../api'
+import { loadBundledFont } from '../editor/fonts'
 import { fontFamilyFor } from '../editor/metrics'
 import type { StyleForm } from './configForm'
 import { PREVIEW_SIZE, previewGeometry, previewLines } from './labelPreview'
@@ -12,51 +13,39 @@ const STARS = [
 
 const FALLBACK_FAMILY = 'Inter, system-ui, sans-serif'
 
-/** One load per file for the life of the page: the promise resolves to the family name, or null
- *  when the file is missing or its name cannot be a CSS family. */
-const fontLoads = new Map<string, Promise<string | null>>()
-
-function loadBundledFont(file: string): Promise<string | null> {
-  const pending = fontLoads.get(file)
-  if (pending) return pending
-  const family = fontFamilyFor(file)
-  let promise: Promise<string | null>
-  try {
-    // Both arguments are parsed as CSS; quote them so an odd file name cannot throw here.
-    const face = new FontFace(JSON.stringify(family), `url("/fonts/${encodeURIComponent(file)}")`)
-    promise = face
-      .load()
-      .then((loaded) => {
-        document.fonts.add(loaded)
-        return family
-      })
-      .catch(() => null)
-  } catch {
-    promise = Promise.resolve(null)
-  }
-  fontLoads.set(file, promise)
-  return promise
-}
-
-function useBundledFont(file: string): string {
-  const [ready, setReady] = useState<string | null>(null)
+function useBundledFont(file: string): { family: string; failed: boolean } {
+  // Keyed by the file, so switching fonts drops the previous result instead of keeping a stale
+  // family (or a stale failure note) until the new one resolves.
+  const [result, setResult] = useState<{ file: string; family: string | null } | null>(null)
+  const supported = typeof FontFace !== 'undefined'
+  const current = result && result.file === file ? result : null
   useEffect(() => {
-    if (typeof FontFace === 'undefined') return
+    if (!supported) return
     let cancelled = false
-    void loadBundledFont(file).then((family) => {
-      if (!cancelled) setReady(family)
-    })
+    void loadBundledFont(file).then(
+      (family) => {
+        if (!cancelled) setResult({ file, family })
+      },
+      () => {
+        // The preview still renders, in a fallback face — but it says so, so nobody reads it as
+        // what the export will look like.
+        if (!cancelled) setResult({ file, family: null })
+      },
+    )
     return () => {
       cancelled = true
     }
-  }, [file])
-  return ready === fontFamilyFor(file) ? `"${ready}"` : FALLBACK_FAMILY
+  }, [file, supported])
+  return {
+    family: current?.family === fontFamilyFor(file) ? `"${current.family}"` : FALLBACK_FAMILY,
+    failed: !supported || (current !== null && current.family === null),
+  }
 }
 
 /** The label as the export would draw it, at a fixed text size, updating with every edit. */
 export default function LabelPreview({ style, defaults }: { style: StyleForm; defaults: StyleDefaults }) {
   const fontFile = style.font_file || defaults.font_file
-  const family = useBundledFont(fontFile)
+  const { family, failed } = useBundledFont(fontFile)
   const text = style.text_color || defaults.text_color
   const marker = style.marker_color || defaults.marker_color
   const leader = style.leader_color || defaults.leader_color
@@ -68,7 +57,8 @@ export default function LabelPreview({ style, defaults }: { style: StyleForm; de
   const strokeProps = { stroke: haloColor, strokeWidth: g.haloWidth, paintOrder: 'stroke' as const, strokeLinejoin: 'round' as const }
 
   return (
-    <svg className="preview" viewBox="0 0 560 130" role="img" aria-label={description}>
+    <>
+      <svg className="preview" viewBox="0 0 560 130" role="img" aria-label={description}>
       <rect width="560" height="130" fill="#05070d" />
       {STARS.map(([x, y, r]) => (
         <circle key={`${x}-${y}`} cx={x} cy={y} r={r} fill="#d8e0ff" opacity="0.85" />
@@ -83,6 +73,8 @@ export default function LabelPreview({ style, defaults }: { style: StyleForm; de
           {lines.aliases}
         </text>
       )}
-    </svg>
+      </svg>
+      {failed && <p className="field-note">Preview shown in a fallback font: {fontFile} could not be loaded.</p>}
+    </>
   )
 }
