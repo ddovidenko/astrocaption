@@ -12,7 +12,14 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationInfo,
+    field_validator,
+)
 from pydantic_core import PydanticCustomError
 
 log = logging.getLogger(__name__)
@@ -497,13 +504,15 @@ class ConfigUpdate(BaseModel):
 
     @field_validator("site_title", "max_upload_mb", mode="before")
     @classmethod
-    def _null_or_blank_is_not_a_value(cls, value: object) -> object:
+    def _null_is_not_a_value(cls, value: object, info: ValidationInfo) -> object:
         # ``None`` here only means "absent"; an explicit null has no meaning for these two
         # fields (unlike ``nova_api_key``), so it is rejected instead of silently kept (#47).
         # Worded by VALIDATION_MESSAGES under these types, not by the message given here.
         if value is None:
             raise PydanticCustomError("null_not_allowed", "cannot be null")
-        if isinstance(value, str) and not value.strip():
+        # Blank-string rejection is a string-only rule: for max_upload_mb, a whitespace string
+        # should still fail as pydantic's own int_parsing, not this validator's "blank".
+        if info.field_name == "site_title" and isinstance(value, str) and not value.strip():
             raise PydanticCustomError("blank", "must not be blank")
         return value
 

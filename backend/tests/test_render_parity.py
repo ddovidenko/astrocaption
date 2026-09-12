@@ -25,19 +25,36 @@ from scripts.make_render_vectors import (
 )
 from tests.conftest import FONTS_DIR
 
+PROVENANCE_KEYS = frozenset({"pillow", "freetype", "layout_engine"})
+
 
 @pytest.fixture(scope="module")
 def built() -> dict[str, Any]:
     return build_vectors(FONTS_DIR)
 
 
-def test_render_vectors_are_current(built: dict[str, Any]) -> None:
-    stored = json.loads(OUT.read_text(encoding="utf-8"))
+def assert_contract_current(stored: dict[str, Any], built: dict[str, Any]) -> None:
     assert set(built) == set(stored)
     assert built["texts"] and built["labels"] and built["leaders"] and built["anchors"]
     assert len(built["fonts"]) == len(list(FONTS_DIR.glob("*.ttf")))
-    for key, value in built.items():
-        assert value == stored[key], f"vectors.json '{key}' is stale: run make render-vectors"
+    provenance = {k: (stored[k], built[k]) for k in PROVENANCE_KEYS}
+    for key in sorted(set(built) - PROVENANCE_KEYS):
+        assert built[key] == stored[key], (
+            f"vectors.json '{key}' is stale: run make render-vectors "
+            f"(stored vs current pillow/freetype/engine: {provenance})"
+        )
+
+
+def test_render_vectors_are_current(built: dict[str, Any]) -> None:
+    stored = json.loads(OUT.read_text(encoding="utf-8"))
+    assert_contract_current(stored, built)
+
+
+def test_provenance_stamps_are_context_not_contract(built: dict[str, Any]) -> None:
+    """A Pillow/FreeType version bump alone must not fail the contract check."""
+    stored = dict(built)
+    stored["pillow"] = "0.0.0"
+    assert_contract_current(stored, built)
 
 
 def test_pillow_uses_the_raqm_engine() -> None:

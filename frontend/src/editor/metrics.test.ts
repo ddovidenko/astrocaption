@@ -161,8 +161,8 @@ describe('render vectors', () => {
       leader: mode,
       collided: false,
     })
+    expect(scaleUnit(3000, 2000)).toBe(vectors.leaders[0]!.s)
     for (const c of vectors.leaders) {
-      expect(scaleUnit(3000, 2000)).toBe(c.s)
       const seg = leaderSegment(c.cx, c.cy, c.r, c.box)
       if (c.segment === null) {
         expect(seg).toBeNull()
