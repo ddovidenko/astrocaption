@@ -246,6 +246,7 @@ MAX_TEXT_OVERRIDE = 200
 MAX_LABELS = 5000
 
 HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
+HexColor = Annotated[str, StringConstraints(pattern=HEX_COLOR)]
 
 
 class StyleConfig(BaseModel):
@@ -256,11 +257,11 @@ class StyleConfig(BaseModel):
 
     font_file: str = "Inter-Regular.ttf"
     font_size: int = Field(default=24, ge=MIN_FONT_SIZE, le=MAX_FONT_SIZE)
-    text_color: str = Field(default="#FFFFFF", pattern=HEX_COLOR)
-    marker_color: str = Field(default="#FFD54A", pattern=HEX_COLOR)
-    leader_color: str = Field(default="#FFD54A", pattern=HEX_COLOR)
+    text_color: HexColor = "#FFFFFF"
+    marker_color: HexColor = "#FFD54A"
+    leader_color: HexColor = "#FFD54A"
     halo: bool = True
-    halo_color: str = Field(default="#000000", pattern=HEX_COLOR)
+    halo_color: HexColor = "#000000"
     halo_width: int = Field(default=2, ge=0, le=MAX_STROKE_WIDTH)
     marker_width: int = Field(default=2, ge=1, le=MAX_STROKE_WIDTH)
     marker_min_radius: int = Field(default=6, ge=1, le=MAX_MARKER_MIN_RADIUS)
@@ -280,7 +281,7 @@ class Label(BaseModel):
     y: float = Field(default=0.0, allow_inf_nan=False)
     font_size: int | None = Field(default=None, ge=MIN_FONT_SIZE, le=MAX_FONT_SIZE)
     text_override: str | None = Field(default=None, max_length=MAX_TEXT_OVERRIDE)
-    color: str | None = Field(default=None, pattern=HEX_COLOR)
+    color: HexColor | None = None
     show_aliases: bool | None = None
     leader: LeaderMode = "auto"
     collided: bool = False
@@ -494,11 +495,11 @@ class StyleOverrides(BaseModel):
 
     font_file: str | None = Field(default=None, max_length=100)
     font_size: int | None = Field(default=None, ge=MIN_FONT_SIZE, le=MAX_FONT_SIZE)
-    text_color: str | None = Field(default=None, pattern=HEX_COLOR)
-    marker_color: str | None = Field(default=None, pattern=HEX_COLOR)
-    leader_color: str | None = Field(default=None, pattern=HEX_COLOR)
+    text_color: HexColor | None = None
+    marker_color: HexColor | None = None
+    leader_color: HexColor | None = None
     halo: bool | None = None
-    halo_color: str | None = Field(default=None, pattern=HEX_COLOR)
+    halo_color: HexColor | None = None
     halo_width: int | None = Field(default=None, ge=0, le=MAX_STROKE_WIDTH)
     marker_width: int | None = Field(default=None, ge=1, le=MAX_STROKE_WIDTH)
     marker_min_radius: int | None = Field(default=None, ge=1, le=MAX_MARKER_MIN_RADIUS)

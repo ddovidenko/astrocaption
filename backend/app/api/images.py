@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import uuid
+from collections import Counter
 from pathlib import Path
 from typing import Annotated, BinaryIO, Literal
 from urllib.parse import quote
@@ -301,16 +302,29 @@ async def get_annotations(image_id: str, settings: SettingsDep, db: DbDep) -> An
     _get_or_404(db, image_id)
     ann = db.get_annotations(image_id)
     if ann is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Image has not been solved yet.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_SOLVED_MESSAGE)
     return ann.model_copy(update={"style": resolved_style(settings.fonts_dir, ann.style)})
 
 
 SOLVING_MESSAGE = "The image is still being solved; try again when it is done."
 CONFLICT_MESSAGE = "This image was changed elsewhere. Reload to continue editing."
+NOT_SOLVED_MESSAGE = "Image has not been solved yet."
 OBJECTS_DUPLICATE_MESSAGE = "labels: each of this image's objects may appear only once."
 OBJECTS_UNKNOWN_MESSAGE = "labels: every label must name one of this image's objects."
 OBJECTS_MISSING_MESSAGE = "labels: the document must list every one of this image's objects."
 FONT_MESSAGE = "style.font_file is not a bundled font."
+
+
+def _check_version(doc: AnnotationsUpdate, stored: Annotations, image_id: str) -> None:
+    """409 when the editor's document is not the stored version. Checked BEFORE
+    ``_validate_document``: a stale document may name objects that no longer exist after a
+    re-solve, and "reload" must win over a labels error (the compare-and-swap in the PUT
+    still guards the write under a race)."""
+    if doc.version != stored.version:
+        log.info(
+            "annotations for %s: stale version %d, stored %d", image_id, doc.version, stored.version
+        )
+        raise HTTPException(status.HTTP_409_CONFLICT, CONFLICT_MESSAGE)
 
 
 def _annotations_target(db: Database, image_id: str) -> tuple[ImageRecord, Annotations]:
@@ -320,7 +334,7 @@ def _annotations_target(db: Database, image_id: str) -> tuple[ImageRecord, Annot
         raise HTTPException(status.HTTP_409_CONFLICT, SOLVING_MESSAGE)
     ann = db.get_annotations(image_id)
     if ann is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Image has not been solved yet.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_SOLVED_MESSAGE)
     return rec, ann
 
 
@@ -335,7 +349,7 @@ def _validate_document(
     """
     ids = [lab.object_id for lab in doc.labels]
     known = {o.id for o in objects}
-    duplicates = sorted({i for i in ids if ids.count(i) > 1})
+    duplicates = sorted(i for i, n in Counter(ids).items() if n > 1)
     if duplicates:
         log.info("annotations for %s rejected: duplicate object ids %s", image_id, duplicates)
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, OBJECTS_DUPLICATE_MESSAGE)
@@ -358,14 +372,7 @@ async def put_annotations(
     """The editor's autosave (design § 4): stored as version + 1 when ``doc.version`` is still
     the stored one, else 409 and nothing written."""
     _, stored = _annotations_target(db, image_id)
-    if doc.version != stored.version:
-        log.info(
-            "annotations for %s: stale version %d, stored %d",
-            image_id,
-            doc.version,
-            stored.version,
-        )
-        raise HTTPException(status.HTTP_409_CONFLICT, CONFLICT_MESSAGE)
+    _check_version(doc, stored, image_id)
     _validate_document(doc, db.get_objects(image_id), settings, image_id)
     ann = Annotations(
         image_id=image_id, style=doc.style, labels=doc.labels, version=doc.version + 1
@@ -385,8 +392,7 @@ async def autoarrange(
     """Run the placer on every enabled label of the submitted document (no fixed labels) and
     return the result without storing it; the editor applies it and autosaves (design § 4)."""
     rec, stored = _annotations_target(db, image_id)
-    if doc.version != stored.version:
-        raise HTTPException(status.HTTP_409_CONFLICT, CONFLICT_MESSAGE)
+    _check_version(doc, stored, image_id)
     objects = db.get_objects(image_id)
     _validate_document(doc, objects, settings, image_id)
     labels = await asyncio.to_thread(
