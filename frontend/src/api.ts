@@ -272,9 +272,12 @@ export const api = {
     request<ImageOut>(`/api/images/${id}/solve`, json('POST', hints)),
   objects: (id: string) => request<ObjectOut[]>(`/api/images/${id}/objects`),
   annotations: (id: string) => request<Annotations>(`/api/images/${id}/annotations`),
-  /** 409 (ApiError.status) means the stored version moved: reload before editing further. */
+  /** A 409 (ApiError.status) means the save was refused; show err.message: either the stored
+   *  version moved (reload) or a solve is running. */
   saveAnnotations: (id: string, doc: AnnotationsUpdate) =>
     request<Annotations>(`/api/images/${id}/annotations`, json('PUT', doc)),
+  /** A 409 (ApiError.status) means the save was refused; show err.message: either the stored
+   *  version moved (reload) or a solve is running. */
   autoarrange: (id: string, doc: AnnotationsUpdate) =>
     request<Annotations>(`/api/images/${id}/autoarrange`, json('POST', doc)),
   /** `quality` null = match the original JPEG's tables and subsampling (the default). */
