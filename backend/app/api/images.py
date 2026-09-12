@@ -15,9 +15,10 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ..config import Settings, SettingsSource
 from ..db import Database
-from ..fonts import resolved_style
+from ..fonts import list_fonts, resolved_style
 from ..models import (
     Annotations,
+    AnnotationsUpdate,
     ExportOut,
     ExportRequest,
     ImageOut,
@@ -298,6 +299,54 @@ async def get_annotations(image_id: str, settings: SettingsDep, db: DbDep) -> An
     if ann is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Image has not been solved yet.")
     return ann.model_copy(update={"style": resolved_style(settings.fonts_dir, ann.style)})
+
+
+SOLVING_MESSAGE = "The image is still being solved; try again when it is done."
+CONFLICT_MESSAGE = "This image was changed elsewhere. Reload to continue editing."
+OBJECTS_MESSAGE = "labels: every label must name one of this image's objects, once."
+FONT_MESSAGE = "style.font_file is not a bundled font."
+
+
+def _annotations_target(db: Database, image_id: str) -> tuple[ImageRecord, Annotations]:
+    """The image and its stored layout, or the 404/409 the editor shows."""
+    rec = _get_or_404(db, image_id)
+    if rec.solve_status in (SolveStatus.PENDING, SolveStatus.SOLVING):
+        raise HTTPException(status.HTTP_409_CONFLICT, SOLVING_MESSAGE)
+    ann = db.get_annotations(image_id)
+    if ann is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Image has not been solved yet.")
+    return rec, ann
+
+
+def _validate_document(
+    doc: AnnotationsUpdate, objects: list[SolveObject], settings: Settings
+) -> None:
+    """Plain 422s for what the models cannot check: object ids and the font bundle. Messages
+    never repeat the submitted value (CLAUDE.md)."""
+    ids = [lab.object_id for lab in doc.labels]
+    known = {o.id for o in objects}
+    if len(set(ids)) != len(ids) or not set(ids) <= known:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, OBJECTS_MESSAGE)
+    if doc.style.font_file not in {f.file for f in list_fonts(settings.fonts_dir)}:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, FONT_MESSAGE)
+
+
+@router.put("/{image_id}/annotations")
+async def put_annotations(
+    image_id: str, doc: AnnotationsUpdate, settings: SettingsDep, db: DbDep
+) -> Annotations:
+    """The editor's autosave (design § 4): stored as version + 1 when ``doc.version`` is still
+    the stored one, else 409 and nothing written."""
+    _, stored = _annotations_target(db, image_id)
+    _validate_document(doc, db.get_objects(image_id), settings)
+    if doc.version != stored.version:
+        raise HTTPException(status.HTTP_409_CONFLICT, CONFLICT_MESSAGE)
+    ann = Annotations(
+        image_id=image_id, style=doc.style, labels=doc.labels, version=doc.version + 1
+    )
+    if not db.update_annotations_if_version(ann, expected_version=doc.version):
+        raise HTTPException(status.HTTP_409_CONFLICT, CONFLICT_MESSAGE)  # lost the race
+    return ann
 
 
 def _render_export(
