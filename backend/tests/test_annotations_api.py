@@ -12,6 +12,7 @@ from app.db import Database
 from tests.conftest import FakeSolver, login, make_client, make_settings, upload, wait_for_status
 
 CONFLICT = "This image was changed elsewhere. Reload to continue editing."
+OBJECTS_MESSAGE_TEXT = "labels: every label must name one of this image's objects, once."
 
 
 def solved_image(
@@ -142,3 +143,38 @@ def test_put_needs_a_solved_image(client: TestClient, sample_jpeg: Path, tmp_pat
         resp = failed_client.put(f"/api/images/{body['id']}/annotations", json=doc)
         assert resp.status_code == 404
         assert resp.json()["detail"] == "Image has not been solved yet."
+
+
+def test_autoarrange_places_enabled_labels_and_stores_nothing(
+    client: TestClient, sample_jpeg: Path
+) -> None:
+    image_id, ann, _ = solved_image(client, sample_jpeg)
+    moved = {
+        **ann,
+        "labels": [{**lab, "x": 0.0, "y": 0.0, "collided": True} for lab in ann["labels"]],
+    }
+    resp = client.post(f"/api/images/{image_id}/autoarrange", json=moved)
+    assert resp.status_code == 200, resp.text
+    placed = resp.json()
+    assert placed["version"] == ann["version"]
+    assert placed["image_id"] == image_id
+    enabled = [lab for lab in placed["labels"] if lab["enabled"]]
+    disabled = [lab for lab in placed["labels"] if not lab["enabled"]]
+    assert enabled and all((lab["x"], lab["y"]) != (0.0, 0.0) for lab in enabled)
+    assert all((lab["x"], lab["y"]) == (0.0, 0.0) for lab in disabled)  # untouched
+    assert not any(lab["collided"] for lab in enabled)
+    # the initial layout, reproduced: same positions as the solve produced
+    by_id = {lab["object_id"]: lab for lab in ann["labels"]}
+    for lab in enabled:
+        assert (lab["x"], lab["y"]) == (by_id[lab["object_id"]]["x"], by_id[lab["object_id"]]["y"])
+    assert client.get(f"/api/images/{image_id}/annotations").json() == ann  # not stored
+
+
+def test_autoarrange_validates_like_put(client: TestClient, sample_jpeg: Path) -> None:
+    image_id, ann, _ = solved_image(client, sample_jpeg)
+    url = f"/api/images/{image_id}/autoarrange"
+    resp = client.post(url, json={**ann, "labels": ann["labels"] + [{"object_id": 999_999}]})
+    assert resp.status_code == 422 and resp.json()["detail"] == OBJECTS_MESSAGE_TEXT
+    resp = client.post(url, json={**ann, "style": {**ann["style"], "font_file": "Nope.ttf"}})
+    assert resp.status_code == 422 and "Nope" not in resp.text
+    assert client.post("/api/images/nope/autoarrange", json=ann).status_code == 404

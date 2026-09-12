@@ -16,6 +16,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from ..config import Settings, SettingsSource
 from ..db import Database
 from ..fonts import list_fonts, resolved_style
+from ..layout import autoplace
 from ..models import (
     Annotations,
     AnnotationsUpdate,
@@ -347,6 +348,27 @@ async def put_annotations(
     if not db.update_annotations_if_version(ann, expected_version=doc.version):
         raise HTTPException(status.HTTP_409_CONFLICT, CONFLICT_MESSAGE)  # lost the race
     return ann
+
+
+@router.post("/{image_id}/autoarrange")
+async def autoarrange(
+    image_id: str, doc: AnnotationsUpdate, settings: SettingsDep, db: DbDep
+) -> Annotations:
+    """Run the placer on every enabled label of the submitted document (no fixed labels) and
+    return the result without storing it; the editor applies it and autosaves (design § 4)."""
+    rec, stored = _annotations_target(db, image_id)
+    objects = db.get_objects(image_id)
+    _validate_document(doc, objects, settings)
+    labels = await asyncio.to_thread(
+        autoplace, rec.width, rec.height, doc.style, doc.labels, objects, settings.fonts_dir
+    )
+    return Annotations(
+        image_id=image_id,
+        style=doc.style,
+        labels=labels,
+        version=doc.version,
+        updated_at=stored.updated_at,
+    )
 
 
 def _render_export(
