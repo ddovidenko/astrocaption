@@ -26,6 +26,8 @@ export interface EditorTestHook {
   stage: Konva.Stage
   /** The original image width, so a caller can pick the scale that matches a server render. */
   imageWidth: number
+  /** How many enabled labels the canvas actually drew (orphaned ones are not counted). */
+  labelCount: number
   renderAt(scale: number): string
 }
 
@@ -79,38 +81,83 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
   const fittedRef = useRef(false)
 
   const [viewport, setViewport] = useState({ w: 0, h: 0 })
-  const [preview, setPreview] = useState<HTMLImageElement | null>(null)
+  // Keyed by the URL it was loaded from, so a second image opened without unmounting can never
+  // show the first bitmap (or the first failure) — resetting the state in the effect below would
+  // paint the stale bitmap for one frame, and lint forbids the synchronous reset anyway.
+  const [loadedPreview, setLoadedPreview] = useState<{
+    src: string
+    el: HTMLImageElement | null
+    error: string | null
+  } | null>(null)
+  const [drawError, setDrawError] = useState<string | null>(null)
+  const [sizeError, setSizeError] = useState<string | null>(null)
   const [panning, setPanning] = useState(false)
 
   // 1. The viewport: one ResizeObserver, and the first non-zero size fits the image.
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
+    let measured = false
+    const apply = (w: number, h: number) => {
+      measured = true
+      setSizeError(null)
+      setViewport((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))
+      if (!fittedRef.current && image) {
+        fittedRef.current = true
+        setView(fitView(image.width, image.height, w, h))
+      }
+    }
     const ro = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect
       if (!rect) return
       const w = Math.floor(rect.width)
       const h = Math.floor(rect.height)
       if (w <= 0 || h <= 0) return
-      setViewport((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))
-      if (!fittedRef.current && image) {
-        fittedRef.current = true
-        setView(fitView(image.width, image.height, w, h))
-      }
+      apply(w, h)
     })
     ro.observe(el)
-    return () => ro.disconnect()
+    // If the first non-zero observation never arrives (a CSS regression, or an observer that
+    // never fires), measure once by hand so the failure is visible instead of a black rectangle.
+    const fallback = window.setTimeout(() => {
+      if (measured) return
+      const rect = el.getBoundingClientRect()
+      const w = Math.floor(rect.width)
+      const h = Math.floor(rect.height)
+      if (w > 0 && h > 0) apply(w, h)
+      else setSizeError('The editor could not size its canvas.')
+    }, 250)
+    return () => {
+      window.clearTimeout(fallback)
+      ro.disconnect()
+    }
   }, [image, setView])
+
+  const current = loadedPreview && image && loadedPreview.src === image.preview_url ? loadedPreview : null
+  const preview = current?.el ?? null
+  const previewError = current?.error ?? null
 
   // 2. The preview bitmap; until it has loaded the stage draws nothing but the background.
   useEffect(() => {
     if (!image) return
+    // A new image has to be fitted again; the view of the previous one means nothing here.
+    fittedRef.current = false
+    const src = image.preview_url
     let cancelled = false
     const el = new window.Image()
     el.onload = () => {
-      if (!cancelled) setPreview(el)
+      if (!cancelled) setLoadedPreview({ src, el, error: null })
     }
-    el.src = image.preview_url
+    el.onerror = () => {
+      if (!cancelled) {
+        setLoadedPreview({
+          src,
+          el: null,
+          error:
+            'The preview image for this photo could not be loaded. Reload the page; if it keeps failing, re-upload the image.',
+        })
+      }
+    }
+    el.src = src
     return () => {
       cancelled = true
     }
@@ -124,13 +171,18 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
   }, [])
 
   // 4. Every layout number for the enabled labels, recomputed only when the document changes.
-  const entries = useMemo<Entry[]>(() => {
-    if (!image || !style) return []
+  const { entries, orphans } = useMemo<{ entries: Entry[]; orphans: number }>(() => {
+    if (!image || !style) return { entries: [], orphans: 0 }
     const out: Entry[] = []
+    let orphans = 0
     const s = scaleUnit(image.width, image.height)
     for (const label of labels) {
       const obj = objects.get(label.object_id)
-      if (!obj) continue
+      // PR 5: these labels are hidden, not dropped — the save path must write them back.
+      if (!obj) {
+        orphans++
+        continue
+      }
       const box = measureLabel(measure, style, label, obj)
       const radius = markerRadius(obj, style)
       const seg = leaderSegment(obj.x, obj.y, radius, {
@@ -149,8 +201,13 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
         leader: seg !== null && leaderVisible(label, seg.gap, s),
       })
     }
-    return out
+    return { entries: out, orphans }
   }, [image, style, labels, objects, measure])
+
+  // The first draw failure of any label becomes one notice; the shape itself stops drawing.
+  const onDrawError = useCallback((message: string) => {
+    setDrawError((prev) => prev ?? message)
+  }, [])
 
   const fit = useCallback(() => {
     const { image: img, setView: apply } = useEditor.getState()
@@ -174,14 +231,17 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
 
   // 8. Keys, ignored while a form field has the focus.
   useEffect(() => {
-    const inField = () => {
+    // `f` and `1` must keep working after a toolbar button was clicked, so a focused BUTTON only
+    // blocks Space (which a focused button would take as a click).
+    const inField = (withButton = false) => {
       const el = document.activeElement
-      return !!el && ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(el.tagName)
+      const tags = withButton ? ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'] : ['INPUT', 'TEXTAREA', 'SELECT']
+      return !!el && tags.includes(el.tagName)
     }
     const down = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
         // A focused toolbar button would otherwise take Space as a click, and the page would scroll.
-        if (inField()) return
+        if (inField(true)) return
         e.preventDefault()
         spaceRef.current = true
         return
@@ -193,11 +253,17 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
     const up = (e: KeyboardEvent) => {
       if (e.code === 'Space') spaceRef.current = false
     }
+    // A Space released outside the window would otherwise leave every mousedown panning.
+    const blur = () => {
+      spaceRef.current = false
+    }
     window.addEventListener('keydown', down)
     window.addEventListener('keyup', up)
+    window.addEventListener('blur', blur)
     return () => {
       window.removeEventListener('keydown', down)
       window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', blur)
     }
   }, [fit, actual])
 
@@ -239,14 +305,16 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
 
   useEffect(() => {
     const stage = stageRef.current
-    if (!stage || !image) return
-    window.__astrocaptionEditor = { stage, imageWidth: image.width, renderAt }
+    // Published only once there is something to diff: no preview bitmap (or a failed one) means
+    // the stage would render the annotations over an empty background.
+    if (!stage || !image || !preview || previewError) return
+    window.__astrocaptionEditor = { stage, imageWidth: image.width, labelCount: entries.length, renderAt }
     return () => {
       delete window.__astrocaptionEditor
     }
     // `viewport`: the Stage is only mounted once the container has a size, so the hook has to be
     // published again when that first measurement arrives.
-  }, [image, renderAt, viewport])
+  }, [image, renderAt, viewport, preview, previewError, entries])
 
   // 6. Wheel zoom about the cursor.
   const onWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
@@ -276,11 +344,20 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
     setView({ scale: view.scale, x: start.vx + (pointer.x - start.sx), y: start.vy + (pointer.y - start.sy) })
   }
 
-  const stopPan = () => {
+  const stopPan = useCallback(() => {
+    spaceRef.current = false
     if (!panRef.current) return
     panRef.current = null
     setPanning(false)
-  }
+  }, [])
+
+  // A mouseup outside the stage (or outside the window) has to end the pan too; onMouseLeave
+  // alone would leave the canvas panning after the button came up elsewhere.
+  useEffect(() => {
+    if (!panning) return
+    window.addEventListener('mouseup', stopPan)
+    return () => window.removeEventListener('mouseup', stopPan)
+  }, [panning, stopPan])
 
   if (!image || !style || !font) return null
 
@@ -289,109 +366,131 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
   const tip = hovered ? toScreen(view, hovered.x, hovered.y) : null
 
   return (
-    <div ref={containerRef} className={`editor-canvas${panning ? ' panning' : ''}`}>
-      {viewport.w > 0 && (
-        <Stage
-          ref={stageRef}
-          width={viewport.w}
-          height={viewport.h}
-          scaleX={view.scale}
-          scaleY={view.scale}
-          x={view.x}
-          y={view.y}
-          onWheel={onWheel}
-          onMouseDown={onMouseDown}
-          onMouseMove={onMouseMove}
-          onMouseUp={stopPan}
-          onMouseLeave={stopPan}
-        >
-          <Layer listening={false}>
-            {preview && <KImage image={preview} width={image.width} height={image.height} />}
-          </Layer>
-          <Layer>
-            {entries.map(({ label, obj, box, text, radius, seg, leader }) => (
-              <Group key={label.object_id}>
-                <Circle
-                  x={obj.x}
-                  y={obj.y}
-                  radius={radius}
-                  stroke={style.marker_color}
-                  strokeWidth={style.marker_width}
-                  listening={false}
-                />
-                {seg && leader && (
-                  <Line
-                    points={[seg.from[0], seg.from[1], seg.to[0], seg.to[1]]}
-                    stroke={style.leader_color}
+    <>
+      {previewError && <div className="notice error">{previewError}</div>}
+      {sizeError && <div className="notice error">{sizeError}</div>}
+      {drawError && <div className="notice error">Some labels could not be drawn: {drawError}</div>}
+      {orphans > 0 && (
+        <div className="notice">
+          {orphans} label(s) refer to objects this image no longer has; they are not shown.
+        </div>
+      )}
+      <div ref={containerRef} className={`editor-canvas${panning ? ' panning' : ''}`}>
+        {viewport.w > 0 && (
+          <Stage
+            ref={stageRef}
+            width={viewport.w}
+            height={viewport.h}
+            scaleX={view.scale}
+            scaleY={view.scale}
+            x={view.x}
+            y={view.y}
+            onWheel={onWheel}
+            onMouseDown={onMouseDown}
+            onMouseMove={onMouseMove}
+            onMouseUp={stopPan}
+            onMouseLeave={stopPan}
+          >
+            <Layer listening={false}>
+              {preview && <KImage image={preview} width={image.width} height={image.height} />}
+            </Layer>
+            <Layer>
+              {entries.map(({ label, obj, box, text, radius, seg, leader }) => (
+                <Group key={label.object_id}>
+                  {/* The one deliberate difference from the stored radius: Pillow's
+                      ImageDraw.ellipse(..., width=w) grows the outline INWARD from the bounding box
+                      (the ring occupies radii r−w…r) while Konva centres the stroke, so the circle
+                      is drawn at r − w/2. `markerRadius()` stays the geometric radius everywhere
+                      else (leader start, hover ring, hit circle). */}
+                  <Circle
+                    x={obj.x}
+                    y={obj.y}
+                    radius={radius - style.marker_width / 2}
+                    stroke={style.marker_color}
                     strokeWidth={style.marker_width}
                     listening={false}
                   />
-                )}
-                <LabelTextShape label={label} style={style} font={font} box={box} text={text} />
-              </Group>
-            ))}
-            {/* UI chrome, not part of the export: hidden by renderAt. */}
-            <Group ref={badgesRef}>
-              {entries
-                .filter(({ label }) => label.collided)
-                .map(({ label, box }) => (
-                  <Text
-                    key={label.object_id}
-                    text="⚠"
-                    x={label.x + box.width + box.primarySize * 0.2}
-                    y={label.y}
-                    fontSize={box.primarySize * 0.6}
-                    fill="#ffd54a"
-                    listening={false}
+                  {seg && leader && (
+                    <Line
+                      points={[seg.from[0], seg.from[1], seg.to[0], seg.to[1]]}
+                      stroke={style.leader_color}
+                      strokeWidth={style.marker_width}
+                      listening={false}
+                    />
+                  )}
+                  <LabelTextShape
+                    label={label}
+                    style={style}
+                    font={font}
+                    box={box}
+                    text={text}
+                    onDrawError={onDrawError}
                   />
-                ))}
-            </Group>
-          </Layer>
-          <Layer ref={overlayRef}>
-            {objectOrder.map((id) => {
-              const obj = objects.get(id)
-              if (!obj) return null
-              return (
-                <Circle
-                  key={id}
-                  x={obj.x}
-                  y={obj.y}
-                  radius={Math.max(markerRadius(obj, style), 8 / view.scale)}
-                  fill="transparent"
-                  onMouseEnter={() => hover(id)}
-                  onMouseLeave={() => hover(null)}
+                </Group>
+              ))}
+              {/* UI chrome, not part of the export: hidden by renderAt. */}
+              <Group ref={badgesRef}>
+                {entries
+                  .filter(({ label }) => label.collided)
+                  .map(({ label, box }) => (
+                    <Text
+                      key={label.object_id}
+                      text="⚠"
+                      x={label.x + box.width + box.primarySize * 0.2}
+                      y={label.y}
+                      fontSize={box.primarySize * 0.6}
+                      fill="#ffd54a"
+                      listening={false}
+                    />
+                  ))}
+              </Group>
+            </Layer>
+            <Layer ref={overlayRef}>
+              {objectOrder.map((id) => {
+                const obj = objects.get(id)
+                if (!obj) return null
+                return (
+                  <Circle
+                    key={id}
+                    x={obj.x}
+                    y={obj.y}
+                    radius={Math.max(markerRadius(obj, style), 8 / view.scale)}
+                    fill="transparent"
+                    onMouseEnter={() => hover(id)}
+                    onMouseLeave={() => hover(null)}
+                  />
+                )
+              })}
+              {selected && (
+                <Rect
+                  x={selected.label.x}
+                  y={selected.label.y}
+                  width={selected.box.width}
+                  height={selected.box.height}
+                  stroke={HOVER_COLOR}
+                  strokeWidth={1 / view.scale}
+                  listening={false}
                 />
-              )
-            })}
-            {selected && (
-              <Rect
-                x={selected.label.x}
-                y={selected.label.y}
-                width={selected.box.width}
-                height={selected.box.height}
-                stroke={HOVER_COLOR}
-                strokeWidth={1 / view.scale}
-                listening={false}
-              />
-            )}
-            {hovered && (
-              <Circle
-                x={hovered.x}
-                y={hovered.y}
-                radius={markerRadius(hovered, style) + 4 / view.scale}
-                stroke={HOVER_COLOR}
-                strokeWidth={2 / view.scale}
-                listening={false}
-              />
-            )}
-          </Layer>
-        </Stage>
-      )}
-      {hovered && tip && (
-        <div className="editor-tooltip" style={{ left: tip.x + 12, top: tip.y + 12 }}>
-          {hovered.primary_name}
-        </div>
-      )}
-    </div>
+              )}
+              {hovered && (
+                <Circle
+                  x={hovered.x}
+                  y={hovered.y}
+                  radius={markerRadius(hovered, style) + 4 / view.scale}
+                  stroke={HOVER_COLOR}
+                  strokeWidth={2 / view.scale}
+                  listening={false}
+                />
+              )}
+            </Layer>
+          </Stage>
+        )}
+        {hovered && tip && (
+          <div className="editor-tooltip" style={{ left: tip.x + 12, top: tip.y + 12 }}>
+            {hovered.primary_name}
+          </div>
+        )}
+      </div>
+    </>
   )
 }

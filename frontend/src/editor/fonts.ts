@@ -10,19 +10,27 @@ export function loadBundledFont(file: string): Promise<string> {
   if (pending) return pending
   const family = fontFamilyFor(file)
   const promise = (async () => {
-    if (typeof FontFace === 'undefined') throw new Error(`Font ${file} could not be loaded.`)
+    if (typeof FontFace === 'undefined') {
+      throw new Error(
+        'This browser cannot load the bundled fonts (no FontFace support); the editor needs a current browser.',
+      )
+    }
+    const msg = `Font ${file} could not be loaded.`
     let face: FontFace
     try {
       // The family is taken verbatim (quoting it would register a name *containing* quotes, which
       // no `font:` shorthand can then match); only `src` is parsed as CSS, so only the URL is quoted.
       face = new FontFace(family, `url("/fonts/${encodeURIComponent(file)}")`)
-    } catch {
-      throw new Error(`Font ${file} could not be loaded.`)
+    } catch (err) {
+      // The user sees plain language; the cause stays available to whoever is debugging.
+      console.error('font load failed', file, err)
+      throw new Error(msg, { cause: err })
     }
     try {
       document.fonts.add(await face.load())
-    } catch {
-      throw new Error(`Font ${file} could not be loaded.`)
+    } catch (err) {
+      console.error('font load failed', file, err)
+      throw new Error(msg, { cause: err })
     }
     return family
   })()

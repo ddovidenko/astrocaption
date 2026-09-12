@@ -12,7 +12,10 @@ export async function loadEditor(id: string): Promise<LoadedDocument> {
     api.fonts(),
   ])
   if (!fonts.some((f) => f.file === annotations.style.font_file)) {
-    throw new Error(`Font ${annotations.style.font_file} is not listed by the server.`) // #63
+    throw new Error(
+      `Font ${annotations.style.font_file} is not listed by the server.` +
+        ' Open Config and save the label style to pick a bundled font.',
+    ) // #63
   }
   await loadFonts([annotations.style.font_file])
   return { image, objects, annotations, fonts }

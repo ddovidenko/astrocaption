@@ -75,7 +75,8 @@ and `frontend/e2e/parity.spec.ts` measures the same strings on a real
 canvas and pixel-diffs the Konva stage against the server's annotated preview within a tolerance
 (SPEC § 9). The pixel diff runs under Playwright because Konva needs a browser. `GET /api/fonts`
 carries Pillow's ascent per size, because the browser draws on the alphabetic baseline and Pillow on
-the ascender line.
+the ascender line. Marker rings: Pillow's outline grows inward, so the canvas draws the circle at
+`r − width/2`.
 
 ## Editor
 
@@ -85,6 +86,7 @@ loader), `view.ts` (zoom/pan view-transform math), `metrics.ts` (the TypeScript 
 contract above), `LabelTextShape.tsx` (the Konva text node for a label) and `EditorCanvas.tsx`
 (the Konva stage: preview image, markers, leaders, labels, hover ring and tooltip, wheel zoom
 about the cursor, drag/middle-mouse/space pan, `F` fit and `1` 100 %), mounted by `EditorPage.tsx`
-at `/images/:id`. The canvas exposes `window.__astrocaptionEditor = { stage, imageWidth,
-renderAt(scale) }` so `frontend/e2e/parity.spec.ts` can read Konva text widths and force a
-render at a fixed scale for the pixel diff.
+at `/images/:id`. The canvas exposes `window.__astrocaptionEditor = { stage, imageWidth, labelCount,
+renderAt(scale) }` — published only once the preview bitmap has loaded — so
+`frontend/e2e/parity.spec.ts` can force a render at a fixed scale for the pixel diff and read how
+many labels were drawn (the width test measures on its own canvas).

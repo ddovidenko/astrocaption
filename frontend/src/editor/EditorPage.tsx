@@ -7,8 +7,12 @@ import { useEditor } from './store'
 
 export default function EditorPage() {
   const { id } = useParams()
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  // Keyed by the id it belongs to: opening another image goes back to "loading" and drops the
+  // previous error without a synchronous reset inside the effect.
+  const [result, setResult] = useState<{ id: string; error: string | null } | null>(null)
+  const settled = result && result.id === id ? result : null
+  const loading = Boolean(id) && settled === null
+  const error = id ? (settled?.error ?? null) : 'That image could not be found.'
   const image = useEditor((s) => s.image)
   const scale = useEditor((s) => s.view.scale)
   const controlsRef = useRef<CanvasControls | null>(null)
@@ -20,12 +24,11 @@ export default function EditorPage() {
       .then((doc) => {
         if (cancelled) return
         useEditor.getState().load(doc)
-        setLoading(false)
+        setResult({ id, error: null })
       })
       .catch((err: unknown) => {
         if (cancelled) return
-        setError(pageError(err))
-        setLoading(false)
+        setResult({ id, error: pageError(err) })
       })
     return () => {
       cancelled = true
@@ -41,7 +44,8 @@ export default function EditorPage() {
       </p>
     )
   }
-  if (!image) return null // the session was lost; the shell is already redirecting
+  // The session was lost and the shell is already redirecting; say so rather than showing nothing.
+  if (!image) return <p className="meta">Signing you back in…</p>
 
   return (
     <>
@@ -49,10 +53,21 @@ export default function EditorPage() {
         <Link to="/">← Images</Link>
         <strong>{image.title}</strong>
         <span className="meta">{Math.round(scale * 100)} %</span>
-        <button className="secondary" onClick={() => controlsRef.current?.fit()}>
+        {/* These act on click and never need the focus; keeping it off them leaves the canvas
+            shortcuts alive and stops Space from re-clicking the button. Keyboard focus (Tab)
+            still works. */}
+        <button
+          className="secondary"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => controlsRef.current?.fit()}
+        >
           Fit
         </button>
-        <button className="secondary" onClick={() => controlsRef.current?.actual()}>
+        <button
+          className="secondary"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => controlsRef.current?.actual()}
+        >
           100 %
         </button>
       </div>
