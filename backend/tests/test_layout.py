@@ -47,6 +47,4 @@ def test_autoplace_falls_back_when_the_style_font_is_gone() -> None:
     gone_style = style.model_copy(update={"font_file": "Gone-Regular.ttf"})
     placed_gone = autoplace(3000, 2000, gone_style, labels, objects, FONTS_DIR)
 
-    assert [(lab.object_id, lab.x, lab.y) for lab in placed_gone] == [
-        (lab.object_id, lab.x, lab.y) for lab in placed_inter
-    ]
+    assert [lab.model_dump() for lab in placed_gone] == [lab.model_dump() for lab in placed_inter]

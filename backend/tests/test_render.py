@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from PIL import Image, JpegImagePlugin
 
+from app.fonts import resolve_font_file
 from app.layout import build_default_annotations, default_style
 from app.models import Annotations, Label, SolveObject
 from app.placement import Box
@@ -164,6 +165,7 @@ def test_render_falls_back_when_the_stored_font_is_gone(
         update={"style": ann.style.model_copy(update={"font_file": "Gone-Regular.ttf"})}
     )
 
+    resolve_font_file.cache_clear()  # the warning is now cached per (fonts_dir, file)
     caplog.set_level(logging.WARNING, logger="app.fonts")
     out_gone = tmp_path / "gone.jpg"
     render_annotated(original, OBJECTS, gone, FONTS_DIR, out_gone)

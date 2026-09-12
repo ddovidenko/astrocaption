@@ -9,9 +9,11 @@ bundled files that are already on disk.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from app.fonts import list_fonts
+from app.fonts import DEFAULT_FONT_FILE, list_fonts, resolve_font_file
 from scripts.fetch_fonts import FAMILIES, WEIGHTS, file_name, licence_file_name, missing_glyphs
 
 from .conftest import FONTS_DIR
@@ -28,3 +30,18 @@ def test_bundle_matches_the_family_list() -> None:
     assert fonts == {file_name(family, weight) for family in FAMILIES for weight in WEIGHTS}
     licences = {p.name for p in (FONTS_DIR / "LICENSES").glob("*.txt")}
     assert licences == {licence_file_name(family) for family in FAMILIES}
+
+
+def test_resolve_font_file_logs_when_the_default_itself_is_missing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An empty fonts dir is missing both the requested font and the default; both are logged.
+
+    No cache_clear() needed: tmp_path is a fresh directory per test, so it is a fresh
+    lru_cache key regardless of what other tests have already resolved.
+    """
+    with caplog.at_level("WARNING"):
+        resolved = resolve_font_file(tmp_path, "Gone-Regular.ttf")
+    assert resolved == DEFAULT_FONT_FILE
+    assert any("Gone-Regular.ttf" in r.message and r.levelname == "WARNING" for r in caplog.records)
+    assert any(DEFAULT_FONT_FILE in r.message and r.levelname == "ERROR" for r in caplog.records)
