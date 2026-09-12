@@ -262,6 +262,7 @@ export const api = {
   fonts: () => request<FontOut[]>('/api/fonts'),
   updateConfig: (body: ConfigUpdate) => request<ConfigOut>('/api/config', json('PUT', body)),
   listImages: () => request<ImageOut[]>('/api/images'),
+  image: (id: string) => request<ImageOut>(`/api/images/${id}`),
   upload(file: File, title: string): Promise<ImageOut> {
     const form = new FormData()
     form.append('file', file)
