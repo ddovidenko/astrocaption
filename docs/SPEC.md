@@ -278,7 +278,14 @@ Roboto Condensed, Play, Source Serif 4. Regular + Bold weights; all OFL except U
 Licence). Every family must cover Greek (Bayer letters), the middle dot and the apostrophe; a test
 renders those glyphs in every file. `make fonts` refreshes the bundle from Google Fonts. Frontend loads
 them via `@font-face` from `/fonts/`; server loads the same files with `ImageFont.truetype`. The
-render-parity tests (milestone 3) measure real label strings in every font. A stored per-image
+render contract is pinned by `tests/fixtures/render/vectors.json` (`make render-vectors`): text boxes,
+line heights, alias sizes, ascents, leader segments and anchor boxes that `render.py` computes for real
+label strings from the nova fixtures, in every bundled font. `backend/tests/test_render_parity.py` and
+`frontend/src/editor/metrics.test.ts` replay it exactly. The browser measures text with
+`textRendering: geometricPrecision` and must return every vector string's width within 0.5 px of
+Pillow's; the editor's rendering of the e2e field may differ from the server's annotated preview in at
+most 1 % of pixels by more than 48 (of 255) in any channel (`frontend/e2e/parity.spec.ts`, milestone 3).
+A stored per-image
 style whose `font_file` is no longer bundled renders, places and is served by `GET /annotations`
 with the built-in default and a server-log warning naming the file; the stored row is left alone
 until the editor next saves it.
