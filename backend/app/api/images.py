@@ -338,9 +338,9 @@ async def put_annotations(
     """The editor's autosave (design § 4): stored as version + 1 when ``doc.version`` is still
     the stored one, else 409 and nothing written."""
     _, stored = _annotations_target(db, image_id)
-    _validate_document(doc, db.get_objects(image_id), settings)
     if doc.version != stored.version:
         raise HTTPException(status.HTTP_409_CONFLICT, CONFLICT_MESSAGE)
+    _validate_document(doc, db.get_objects(image_id), settings)
     ann = Annotations(
         image_id=image_id, style=doc.style, labels=doc.labels, version=doc.version + 1
     )

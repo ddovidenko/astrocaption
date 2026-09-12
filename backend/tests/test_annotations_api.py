@@ -5,8 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
+from app.db import Database
 from tests.conftest import FakeSolver, login, make_client, make_settings, upload, wait_for_status
 
 CONFLICT = "This image was changed elsewhere. Reload to continue editing."
@@ -49,6 +51,32 @@ def test_put_with_a_stale_version_is_a_409_and_writes_nothing(
     assert resp.status_code == 409
     assert resp.json() == {"detail": CONFLICT}
     assert client.get(f"/api/images/{image_id}/annotations").json() == first
+
+
+def test_put_with_a_stale_version_is_a_409_even_with_a_now_invalid_document(
+    client: TestClient, sample_jpeg: Path
+) -> None:
+    """A stale document (e.g. from before a re-solve) may name objects that no longer exist.
+    The version conflict must still win: 409 to reload, not a 422 about the labels."""
+    image_id, ann, _ = solved_image(client, sample_jpeg)
+    first = client.put(f"/api/images/{image_id}/annotations", json=ann).json()
+    stale = {**ann, "labels": ann["labels"] + [{"object_id": 999_999}]}
+    resp = client.put(f"/api/images/{image_id}/annotations", json=stale)
+    assert resp.status_code == 409
+    assert resp.json() == {"detail": CONFLICT}
+    assert client.get(f"/api/images/{image_id}/annotations").json() == first
+
+
+def test_put_loses_the_compare_and_swap_race_is_a_409(
+    client: TestClient, sample_jpeg: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    image_id, ann, _ = solved_image(client, sample_jpeg)
+    monkeypatch.setattr(
+        Database, "update_annotations_if_version", lambda self, ann, expected_version: False
+    )
+    resp = client.put(f"/api/images/{image_id}/annotations", json=ann)
+    assert resp.status_code == 409
+    assert resp.json() == {"detail": CONFLICT}
 
 
 def test_put_validates_objects_font_and_colours_without_echoing(
