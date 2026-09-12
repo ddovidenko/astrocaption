@@ -8,11 +8,12 @@ from pathlib import Path
 
 from PIL import ImageFont
 
-from .models import FontOut, StyleConfig
+from .models import MAX_FONT_SIZE, MIN_FONT_SIZE, FontOut, StyleConfig
 
 log = logging.getLogger(__name__)
 
 DEFAULT_FONT_FILE = StyleConfig().font_file
+FONT_SIZES = range(MIN_FONT_SIZE, MAX_FONT_SIZE + 1)
 
 
 class FontNotFoundError(LookupError):
@@ -62,14 +63,29 @@ def load_font(fonts_dir: Path, file: str, size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(str(font_path(fonts_dir, file)), size)
 
 
+def ascent_table(path: Path) -> list[int]:
+    """``getmetrics()[0]`` at every allowed size (0.13 s for the whole bundle; cached by
+    ``list_fonts``). Loads the face directly rather than through ``load_font`` so 4680 sizes
+    do not churn the renderer's cache."""
+    return [ImageFont.truetype(str(path), size).getmetrics()[0] for size in FONT_SIZES]
+
+
 @lru_cache(maxsize=8)
 def list_fonts(fonts_dir: Path) -> list[FontOut]:
     fonts: list[FontOut] = []
     for path in sorted(fonts_dir.glob("*.ttf")):
         try:
             family, style = ImageFont.truetype(str(path), 24).getname()
+            ascents = ascent_table(path)
         except OSError:  # a truncated or non-TTF file must not cost the page its font list
             log.warning("skipping unreadable font %s", path.name)
             continue
-        fonts.append(FontOut(file=path.name, family=family or path.stem, weight=style or "Regular"))
+        fonts.append(
+            FontOut(
+                file=path.name,
+                family=family or path.stem,
+                weight=style or "Regular",
+                ascents=ascents,
+            )
+        )
     return fonts

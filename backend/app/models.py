@@ -396,6 +396,11 @@ class FontOut(BaseModel):
     family: str
     weight: str
     sample: str = "NGC 1976"
+    # Pillow's ascent for every size the style model allows, index ``size - MIN_FONT_SIZE``.
+    # ``draw.text((x, y))`` puts ``y`` on the ascender line; the canvas draws on the alphabetic
+    # baseline and needs ``y + ascent``. Measured on the server: FreeType's fixed-point rounding
+    # makes ``ceil(ascender × size / upem)`` off by one at some sizes (design § 1, § 2).
+    ascents: list[int]
 
 
 class HealthOut(BaseModel):

@@ -15,11 +15,12 @@ from starlette.requests import Request
 
 from app.config import CONFIG_FIX_HINT, Settings
 from app.db import Database
-from app.fonts import FontNotFoundError
+from app.fonts import FontNotFoundError, load_font
 from app.layout import SIZE_RELATIVE
 from app.main import create_app, font_not_found_error
-from app.models import StyleConfig
+from app.models import MAX_FONT_SIZE, MIN_FONT_SIZE, StyleConfig
 from tests.conftest import (
+    FONTS_DIR,
     NOVA_NARROW_FIXTURES,
     TEST_PASSWORD_HASH,
     FakeSolver,
@@ -64,6 +65,9 @@ def test_health_and_fonts(client: TestClient) -> None:
     assert len(fonts) == 24
     inter = next(f for f in fonts if f["file"] == "Inter-Regular.ttf")
     assert (inter["family"], inter["weight"], inter["sample"]) == ("Inter", "Regular", "NGC 1976")
+    assert len(inter["ascents"]) == MAX_FONT_SIZE - MIN_FONT_SIZE + 1
+    at_24 = load_font(FONTS_DIR, "Inter-Regular.ttf", 24).getmetrics()[0]
+    assert inter["ascents"][24 - MIN_FONT_SIZE] == at_24
     font = client.get("/fonts/Inter-Regular.ttf")
     assert font.status_code == 200 and font.headers["content-type"] == "font/ttf"
 

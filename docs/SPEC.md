@@ -256,7 +256,9 @@ Owner (cookie session):
 - `POST /images/{id}/export` {quality: int|null, scale} → {export_url, annotated_preview_url, width, height, bytes, exported_at, encoding};
   `quality: null` (the default) reuses the source JPEG's quantisation tables (§ 5.4). `GET /images/{id}/export` → file
 - `GET /images/{id}/files/{original|preview|thumb|annotated-preview}` → the file itself
-- `GET /fonts` → list of bundled fonts {file, family, weight, sample}; the files are served at `/fonts/<file>`
+- `GET /fonts` → list of bundled fonts {file, family, weight, sample, ascents}; `ascents` is Pillow's ascent at
+  every allowed size (index `size − 6`, sizes 6–200), which the editor adds to a label's `y` to draw on the
+  canvas baseline where the export draws (§ 9). The files are served at `/fonts/<file>`
 - `GET /health` (public, used by the Docker healthcheck) → {status, version, site_title, setup_required,
   authenticated, config_error, locked}; `config_error` is a fixed plain sentence about an unreadable
   `config.json` (details in the server log) and `locked` lists the field names pinned by environment
