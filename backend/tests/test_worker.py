@@ -15,7 +15,7 @@ from app.storage import image_dir
 from app.worker import NO_KEY_MESSAGE, UNEXPECTED_MESSAGE, SolveWorker
 from tests.conftest import FakeSolver, load_fixture, make_worker, nova_result, seed_image
 
-ENABLED_BY_DEFAULT = {  # 3000 px test image: radius ≥ 12 px in the solve copy, plus bright stars
+ENABLED_BY_DEFAULT = {  # 3000 px test image: radius ≥ 12 px in the solve copy or no size known (#9), plus bright stars
     "M 42",
     "M 43",
     "NGC 1977",
@@ -25,6 +25,8 @@ ENABLED_BY_DEFAULT = {  # 3000 px test image: radius ≥ 12 px in the solve copy
     "IC 420",
     "NGC 1973",
     "NGC 1999",
+    "IC 427",
+    "IC 428",
     "Hatysa",
     "Thabit",
     "Mizan Batil I",

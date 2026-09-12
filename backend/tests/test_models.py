@@ -72,4 +72,14 @@ def test_config_update_strips_and_bounds_the_title() -> None:
     assert ConfigUpdate.model_validate({"site_title": "  Sky  "}).site_title == "Sky"
     with pytest.raises(ValidationError) as caught:
         ConfigUpdate.model_validate({"site_title": "   "})
-    assert "at least 1 character" in "; ".join(str(e["msg"]) for e in caught.value.errors())
+    assert "must not be blank" in "; ".join(str(e["msg"]) for e in caught.value.errors())
+
+
+def test_blank_check_does_not_apply_to_max_upload_mb() -> None:
+    with pytest.raises(ValidationError) as caught:
+        ConfigUpdate.model_validate({"max_upload_mb": "  "})
+    assert caught.value.errors()[0]["type"] == "int_parsing"
+
+    with pytest.raises(ValidationError) as caught:
+        ConfigUpdate.model_validate({"site_title": "   "})
+    assert caught.value.errors()[0]["type"] == "blank"

@@ -17,7 +17,7 @@ from typing import Any
 from PIL import Image, ImageDraw, JpegImagePlugin
 
 from .fonts import load_font, resolved_style
-from .models import Annotations, Label, SolveObject, StyleConfig
+from .models import MIN_FONT_SIZE, Annotations, Label, SolveObject, StyleConfig
 from .placement import Box, scale_unit
 from .storage import is_jpeg, to_rgb, write_preview
 
@@ -25,7 +25,6 @@ ALIAS_SCALE = 0.7
 LINE_HEIGHT = 1.2
 ALIAS_SEP = " · "
 LEADER_GAP_FACTOR = 12.0  # auto leader when the box is farther than 12·s from the marker edge
-MIN_FONT_SIZE = 6
 DEFAULT_QUALITY = 95  # used when the source is not a JPEG and no quality was requested
 SUBSAMPLING_NAMES = {0: "4:4:4", 1: "4:2:2", 2: "4:2:0"}
 

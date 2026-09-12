@@ -21,7 +21,7 @@ from .api import auth, config, docs, fonts, health, images
 from .auth import LoginLimiter, set_owner_password, validate_new_password
 from .config import Settings, SettingsSource
 from .db import Database
-from .fonts import FontNotFoundError
+from .fonts import FontNotFoundError, layout_engine_available
 from .models import validation_message
 from .solver import Solver
 from .solver.nova import NovaSolver
@@ -72,6 +72,11 @@ def create_app(
             timeout=httpx.Timeout(30.0, read=300.0, write=300.0), follow_redirects=True
         )
         await worker.start()
+        if not layout_engine_available():
+            log.error(
+                "Pillow's raqm layout engine is unavailable (libfribidi missing): "
+                "exports will not match the editor preview"
+            )
         log.info("astrocaption %s ready; data dir %s", __version__, cfg.data_dir)
         try:
             yield

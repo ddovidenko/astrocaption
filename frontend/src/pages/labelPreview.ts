@@ -1,11 +1,9 @@
 import type { NamePreference, StyleDefaults } from '../api'
+import { ALIAS_SCALE, LINE_HEIGHT } from '../editor/metrics'
 import type { StyleForm } from './configForm'
 
 /** The preview draws at a fixed text size; every other length keeps its ratio to the font size. */
 export const PREVIEW_SIZE = 22
-/** Mirrors the export renderer (backend/app/render.py): alias line at 0.7 × size, lines 1.2 × size apart. */
-export const ALIAS_SCALE = 0.7
-export const LINE_HEIGHT = 1.2
 /** StyleConfig.font_size: what an unset size means for the ratios below. */
 export const ASSUMED_FONT_SIZE = 24
 
@@ -17,11 +15,6 @@ const LINES: Record<NamePreference, { primary: string; aliases: string }> = {
 
 export function previewLines(preference: '' | NamePreference, fallback: NamePreference) {
   return LINES[preference || fallback]
-}
-
-/** The CSS family name for a bundled font file: its stem, so browser and export name the same file. */
-export function fontFamilyFor(file: string): string {
-  return file.replace(/\.ttf$/i, '')
 }
 
 export interface PreviewGeometry {

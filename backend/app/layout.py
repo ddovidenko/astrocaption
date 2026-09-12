@@ -25,6 +25,9 @@ log = logging.getLogger(__name__)
 
 MIN_ENABLED_RADIUS_FRACTION = 0.004  # SPEC § 5.2 step 5
 ALWAYS_ENABLED_TYPES = frozenset({"bright"})
+NEVER_ENABLED_TYPES = frozenset(
+    {"hd"}
+)  # nova's per-star rows: radius 0 means a point, not "unknown"
 
 
 def _clamp(v: int, lo: int, hi: int) -> int:
@@ -79,9 +82,15 @@ def default_style(
 
 
 def default_enabled(obj: SolveObject, width: int) -> bool:
+    """SPEC § 5.2 step 5. Bright stars always, ``hd`` stars never (hundreds per narrow field,
+    hidden behind the object list's type filter). Any other object when its radius clears the
+    threshold, or when nova gives no size at all: radius 0 there means "unknown", not "tiny"
+    (NGC 206 in M 31, #9)."""
+    if obj.type in NEVER_ENABLED_TYPES:
+        return False
     if obj.type in ALWAYS_ENABLED_TYPES:
         return True
-    return obj.radius >= MIN_ENABLED_RADIUS_FRACTION * width
+    return obj.radius == 0 or obj.radius >= MIN_ENABLED_RADIUS_FRACTION * width
 
 
 def autoplace(

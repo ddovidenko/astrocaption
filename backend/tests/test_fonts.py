@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from app.fonts import DEFAULT_FONT_FILE, list_fonts, resolve_font_file
+from app.fonts import DEFAULT_FONT_FILE, FONT_SIZES, list_fonts, load_font, resolve_font_file
 from scripts.fetch_fonts import FAMILIES, WEIGHTS, file_name, licence_file_name, missing_glyphs
 
 from .conftest import FONTS_DIR
@@ -45,3 +45,15 @@ def test_resolve_font_file_logs_when_the_default_itself_is_missing(
     assert resolved == DEFAULT_FONT_FILE
     assert any("Gone-Regular.ttf" in r.message and r.levelname == "WARNING" for r in caplog.records)
     assert any(DEFAULT_FONT_FILE in r.message and r.levelname == "ERROR" for r in caplog.records)
+
+
+def test_ascent_table_is_the_renderers_metric_at_every_size() -> None:
+    """Design § 2: the canvas draws on the alphabetic baseline at ``y + ascent`` and takes the
+    ascent from ``GET /api/fonts``; it must be exactly what ``draw.text`` uses for the export.
+    FreeType rounds in 26.6 fixed point, so the table is measured, never derived from a ratio."""
+    fonts = list_fonts(FONTS_DIR)
+    assert fonts, "no bundled fonts found"
+    for font in fonts:
+        assert len(font.ascents) == len(FONT_SIZES)
+        expected = [load_font(FONTS_DIR, font.file, size).getmetrics()[0] for size in FONT_SIZES]
+        assert font.ascents == expected, font.file

@@ -50,21 +50,59 @@ export interface HealthOut {
 
 export type NamePreference = 'popular' | 'ngc_ic'
 
-/** The owner's default_style: only the fields they chose to override. Mirrors StyleOverrides. */
-export interface StyleOverrides {
-  font_file?: string
-  font_size?: number
-  text_color?: string
-  marker_color?: string
-  leader_color?: string
-  halo?: boolean
-  halo_color?: string
-  halo_width?: number
-  marker_width?: number
-  marker_min_radius?: number
-  show_aliases?: boolean
-  name_preference?: NamePreference
+export type LeaderMode = 'auto' | 'on' | 'off'
+
+/** Global style of one image, in original-image pixels. Mirrors StyleConfig. */
+export interface StyleConfig {
+  font_file: string
+  font_size: number
+  text_color: string
+  marker_color: string
+  leader_color: string
+  halo: boolean
+  halo_color: string
+  halo_width: number
+  marker_width: number
+  marker_min_radius: number
+  show_aliases: boolean
+  name_preference: NamePreference
 }
+
+/** One object's call-out; `x, y` is the top-left of the text box in original pixels. Mirrors Label. */
+export interface Label {
+  object_id: number
+  enabled: boolean
+  x: number
+  y: number
+  font_size: number | null
+  text_override: string | null
+  color: string | null
+  show_aliases: boolean | null
+  leader: LeaderMode
+  collided: boolean
+}
+
+export interface Annotations {
+  image_id: string
+  style: StyleConfig
+  labels: Label[]
+  version: number
+  updated_at: string
+}
+
+/** A catalogued object; `primary_name` already follows the image's name preference. Mirrors ObjectOut. */
+export interface ObjectOut {
+  id: number
+  catalog_names: string[]
+  primary_name: string
+  type: string
+  x: number
+  y: number
+  radius: number
+}
+
+/** The owner's default_style: only the fields they chose to override. Mirrors StyleOverrides. */
+export type StyleOverrides = Partial<StyleConfig>
 
 /** Built-in values for fields with no override (sizes are per image, so not listed). */
 export interface StyleDefaults {
@@ -102,6 +140,8 @@ export interface FontOut {
   family: string
   weight: string
   sample: string
+  /** Pillow's ascent at every allowed size, index `size - MIN_FONT_SIZE` (6..200); see editor/metrics.ts. */
+  ascents: number[]
 }
 
 export interface SetupRequest {

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { StyleDefaults } from '../api'
+import { fontFamilyFor } from '../editor/metrics'
 import { styleFormFromOverrides } from './configForm'
-import { fontFamilyFor, previewGeometry, previewLines } from './labelPreview'
+import { previewGeometry, previewLines } from './labelPreview'
 
 const defaults: StyleDefaults = {
   font_file: 'Inter-Regular.ttf',

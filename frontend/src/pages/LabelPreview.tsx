@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { StyleDefaults } from '../api'
+import { fontFamilyFor } from '../editor/metrics'
 import type { StyleForm } from './configForm'
-import { PREVIEW_SIZE, fontFamilyFor, previewGeometry, previewLines } from './labelPreview'
+import { PREVIEW_SIZE, previewGeometry, previewLines } from './labelPreview'
 
 /** Fixed stars so the preview is the same every time. */
 const STARS = [

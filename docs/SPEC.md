@@ -256,7 +256,9 @@ Owner (cookie session):
 - `POST /images/{id}/export` {quality: int|null, scale} → {export_url, annotated_preview_url, width, height, bytes, exported_at, encoding};
   `quality: null` (the default) reuses the source JPEG's quantisation tables (§ 5.4). `GET /images/{id}/export` → file
 - `GET /images/{id}/files/{original|preview|thumb|annotated-preview}` → the file itself
-- `GET /fonts` → list of bundled fonts {file, family, weight, sample}; the files are served at `/fonts/<file>`
+- `GET /fonts` → list of bundled fonts {file, family, weight, sample, ascents}; `ascents` is Pillow's ascent at
+  every allowed size (index `size − 6`, sizes 6–200), which the editor adds to a label's `y` to draw on the
+  canvas baseline where the export draws (§ 9). The files are served at `/fonts/<file>`
 - `GET /health` (public, used by the Docker healthcheck) → {status, version, site_title, setup_required,
   authenticated, config_error, locked}; `config_error` is a fixed plain sentence about an unreadable
   `config.json` (details in the server log) and `locked` lists the field names pinned by environment
@@ -275,8 +277,19 @@ Inter, Roboto, Open Sans, Source Sans 3, Fira Sans, IBM Plex Sans, JetBrains Mon
 Roboto Condensed, Play, Source Serif 4. Regular + Bold weights; all OFL except Ubuntu (Ubuntu Font
 Licence). Every family must cover Greek (Bayer letters), the middle dot and the apostrophe; a test
 renders those glyphs in every file. `make fonts` refreshes the bundle from Google Fonts. Frontend loads
-them via `@font-face` from `/fonts/`; server loads the same files with `ImageFont.truetype`. The
-render-parity tests (milestone 3) measure real label strings in every font. A stored per-image
+them via `@font-face` from `/fonts/`; server loads the same files with `ImageFont.truetype`.
+Pillow lays text out with its raqm engine (kerning); the Docker image installs libfribidi for
+it, and the parity test asserts the engine is present. The
+render contract is pinned by `tests/fixtures/render/vectors.json` (`make render-vectors`): text boxes,
+line heights, alias sizes, ascents, leader segments and anchor boxes that `render.py` computes for real
+label strings from the nova fixtures, in every bundled font. `backend/tests/test_render_parity.py` and
+`frontend/src/editor/metrics.test.ts` replay it exactly. The browser measures text with
+`textRendering: geometricPrecision` and must return every vector string's width within 0.5 px of
+Pillow's; the editor's rendering of the e2e field may differ from the server's annotated preview in at
+most 1 % of pixels by more than 48 (of 255) in any channel (`frontend/e2e/parity.spec.ts`, milestone 3).
+Box widths are rounded up to whole pixels, so a difference under 0.5 px can still move a box edge, and
+with it a leader endpoint, by one pixel; the pixel budget allows for it.
+A stored per-image
 style whose `font_file` is no longer bundled renders, places and is served by `GET /annotations`
 with the built-in default and a server-log warning naming the file; the stored row is left alone
 until the editor next saves it.

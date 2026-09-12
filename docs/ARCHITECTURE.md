@@ -66,7 +66,13 @@ applies it once, at ingest. A label's `(x, y)` is the top-left corner of its tex
 style.marker_min_radius)`, leader from the marker edge to the closest point of the text box,
 drawn automatically when that gap exceeds `12·s` (`s = max(W, H) / 1000`).
 
-Two tests hold the contract (CLAUDE.md): `backend/tests/test_render_parity.py` checks the metrics
-(text boxes, anchors, leader geometry) from shared vectors, and `frontend/e2e/parity.spec.ts` pixel-diffs
-the Konva stage, exported as PNG at a fixed zoom, against the server's annotated preview within a
-tolerance. The pixel diff runs under Playwright because Konva needs a browser. Both arrive with milestone 3.
+`backend/scripts/make_render_vectors.py` (`make render-vectors`) writes those numbers, for the real
+label strings of both nova fixtures in every bundled font, to `tests/fixtures/render/vectors.json`.
+Three tests hold the contract (CLAUDE.md): `backend/tests/test_render_parity.py` rebuilds the file
+from `render.py` and fails when it is stale; `frontend/src/editor/metrics.test.ts` replays it against
+the TypeScript port `frontend/src/editor/metrics.ts` with Pillow's widths standing in for the canvas;
+and `frontend/e2e/parity.spec.ts` (arriving with the editor canvas) measures the same strings on a real
+canvas and pixel-diffs the Konva stage against the server's annotated preview within a tolerance
+(SPEC § 9). The pixel diff runs under Playwright because Konva needs a browser. `GET /api/fonts`
+carries Pillow's ascent per size, because the browser draws on the alphabetic baseline and Pillow on
+the ascender line.

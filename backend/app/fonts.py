@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import io
 import logging
 from functools import lru_cache
 from pathlib import Path
 
-from PIL import ImageFont
+from PIL import ImageFont, features
 
-from .models import FontOut, StyleConfig
+from .models import MAX_FONT_SIZE, MIN_FONT_SIZE, FontOut, StyleConfig
 
 log = logging.getLogger(__name__)
 
 DEFAULT_FONT_FILE = StyleConfig().font_file
+FONT_SIZES = range(MIN_FONT_SIZE, MAX_FONT_SIZE + 1)
+
+
+def layout_engine_available() -> bool:
+    """True when Pillow can use raqm. The render contract and the editor's canvas assume it;
+    without libfribidi Pillow's basic engine drops kerning and every text width changes."""
+    return bool(features.check("raqm"))
 
 
 class FontNotFoundError(LookupError):
@@ -62,14 +70,36 @@ def load_font(fonts_dir: Path, file: str, size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(str(font_path(fonts_dir, file)), size)
 
 
+def ascent_table(path: Path) -> list[int]:
+    """``getmetrics()[0]`` at every allowed size (0.13 s for the whole bundle; cached by
+    ``list_fonts``). Loads the face directly rather than through ``load_font`` so 4680 sizes
+    do not churn the renderer's cache. The bytes are read once and reused for every size."""
+    data = path.read_bytes()
+    return [ImageFont.truetype(io.BytesIO(data), size).getmetrics()[0] for size in FONT_SIZES]
+
+
 @lru_cache(maxsize=8)
 def list_fonts(fonts_dir: Path) -> list[FontOut]:
+    """Every usable ``*.ttf`` in ``fonts_dir``, sorted by file name.
+
+    The list is computed once per fonts directory and kept for the life of the process
+    (lru_cache): a font skipped here stays skipped until restart.
+    """
     fonts: list[FontOut] = []
     for path in sorted(fonts_dir.glob("*.ttf")):
         try:
             family, style = ImageFont.truetype(str(path), 24).getname()
-        except OSError:  # a truncated or non-TTF file must not cost the page its font list
-            log.warning("skipping unreadable font %s", path.name)
+            ascents = ascent_table(path)
+        except OSError as exc:  # a truncated or non-TTF file must not cost the page its font list
+            level = logging.ERROR if path.name == DEFAULT_FONT_FILE else logging.WARNING
+            log.log(level, "skipping unreadable font %s: %s", path.name, exc)
             continue
-        fonts.append(FontOut(file=path.name, family=family or path.stem, weight=style or "Regular"))
+        fonts.append(
+            FontOut(
+                file=path.name,
+                family=family or path.stem,
+                weight=style or "Regular",
+                ascents=ascents,
+            )
+        )
     return fonts
