@@ -78,13 +78,19 @@ def ascent_table(path: Path) -> list[int]:
 
 @lru_cache(maxsize=8)
 def list_fonts(fonts_dir: Path) -> list[FontOut]:
+    """Every usable ``*.ttf`` in ``fonts_dir``, sorted by file name.
+
+    The list is computed once per fonts directory and kept for the life of the process
+    (lru_cache): a font skipped here stays skipped until restart.
+    """
     fonts: list[FontOut] = []
     for path in sorted(fonts_dir.glob("*.ttf")):
         try:
             family, style = ImageFont.truetype(str(path), 24).getname()
             ascents = ascent_table(path)
-        except OSError:  # a truncated or non-TTF file must not cost the page its font list
-            log.warning("skipping unreadable font %s", path.name)
+        except OSError as exc:  # a truncated or non-TTF file must not cost the page its font list
+            level = logging.ERROR if path.name == DEFAULT_FONT_FILE else logging.WARNING
+            log.log(level, "skipping unreadable font %s: %s", path.name, exc)
             continue
         fonts.append(
             FontOut(

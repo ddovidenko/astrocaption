@@ -8,7 +8,6 @@
 // server resolves a font that is no longer bundled to the default, and the browser must draw
 // with the same one. A /fonts/<file> 404 would fall back to a system font silently.
 import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
-import { fontFamilyFor } from '../pages/labelPreview'
 
 export const MIN_FONT_SIZE = 6
 export const MAX_FONT_SIZE = 200
@@ -70,15 +69,26 @@ export function labelText(obj: ObjectOut, label: Label, style: StyleConfig): Lab
   return { primary, alias: show && aliases.length > 0 ? aliases.join(ALIAS_SEP) : null }
 }
 
+/** The CSS family name for a bundled font file: its stem, so browser and export name the same file. */
+export function fontFamilyFor(file: string): string {
+  return file.replace(/\.ttf$/i, '')
+}
+
 /** Advance width of `text` set in `fontFile` at `size` px, in original-image pixels. */
 export type TextMeasurer = (text: string, fontFile: string, size: number) => number
 
 /** The canvas measurer. `geometricPrecision` turns hinting off so widths agree with Pillow's
  *  getlength within 0.5 px at every size (design § 1); default canvas text rounds to whole
- *  pixels and drifts up to 27 % at small sizes. The font must be loaded (FontFace) first. */
+ *  pixels and drifts up to 27 % at small sizes. The font must be loaded (FontFace) first.
+ *  The font's FontFace must already be loaded: `measureText` on an unloaded family silently uses
+ *  a fallback font, and `document.fonts.check()` cannot detect that (it returns true for an
+ *  unregistered family), so the editor awaits `document.fonts.load()` before its first draw. */
 export function canvasMeasurer(ctx: CanvasRenderingContext2D): TextMeasurer {
-  ctx.textRendering = 'geometricPrecision'
+  if (!('textRendering' in CanvasRenderingContext2D.prototype)) {
+    throw new Error('this browser cannot measure text the way the export does (no canvas textRendering)')
+  }
   return (text, fontFile, size) => {
+    ctx.textRendering = 'geometricPrecision' // per call: a ctx.restore() would otherwise reset it
     ctx.font = `${size}px "${fontFamilyFor(fontFile)}"`
     return ctx.measureText(text).width
   }

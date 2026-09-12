@@ -13,6 +13,7 @@ import {
   markerRadius,
   measureLabel,
   roundHalfEven,
+  scaleUnit,
   type Anchor,
   type Box,
   type TextMeasurer,
@@ -69,7 +70,7 @@ const EPS = 1e-6 // the generator rounds to six decimals
 
 /** Pillow's widths stand in for the canvas; the arithmetic on top of them is what this file pins. */
 function pillowMeasurer(): TextMeasurer {
-  const key = (file: string, size: number, text: string) => `${file} ${size} ${text}`
+  const key = (file: string, size: number, text: string) => JSON.stringify([file, size, text])
   const widths = new Map<string, number>()
   for (const [file, size, text, width] of vectors.texts) widths.set(key(file, size, text), width)
   for (const c of vectors.labels) {
@@ -161,6 +162,7 @@ describe('render vectors', () => {
       collided: false,
     })
     for (const c of vectors.leaders) {
+      expect(scaleUnit(3000, 2000)).toBe(c.s)
       const seg = leaderSegment(c.cx, c.cy, c.r, c.box)
       if (c.segment === null) {
         expect(seg).toBeNull()

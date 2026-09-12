@@ -3,9 +3,9 @@ tests/fixtures/render/vectors.json.
 
 The TypeScript port (frontend/src/editor/metrics.ts) is pinned to the same file by
 frontend/src/editor/metrics.test.ts, and the browser's canvas measurement is checked against
-the ``texts`` entries by frontend/e2e/parity.spec.ts. A failure here means render.py, the font
-bundle or Pillow changed: read the diff, then ``make render-vectors`` and commit the file with
-the change that caused it.
+the ``texts`` entries by frontend/e2e/parity.spec.ts, which arrives with the editor canvas
+(milestone-3 PR 4). A failure here means render.py, the font bundle or Pillow changed: read the
+diff, then ``make render-vectors`` and commit the file with the change that caused it.
 """
 
 from __future__ import annotations
@@ -27,6 +27,8 @@ def test_render_vectors_are_current() -> None:
     stored = json.loads(OUT.read_text(encoding="utf-8"))
     built = build_vectors(FONTS_DIR)
     assert set(built) == set(stored)
+    assert built["texts"] and built["labels"] and built["leaders"] and built["anchors"]
+    assert len(built["fonts"]) == len(list(FONTS_DIR.glob("*.ttf")))
     for key, value in built.items():
         assert value == stored[key], f"vectors.json '{key}' is stale: run make render-vectors"
 

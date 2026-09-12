@@ -5,6 +5,7 @@ Geometry is always in original-image pixels (see CLAUDE.md).
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -13,6 +14,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 from pydantic_core import PydanticCustomError
+
+log = logging.getLogger(__name__)
 
 
 def utcnow_iso() -> str:
@@ -514,7 +517,7 @@ VALIDATION_MESSAGES: dict[str, str] = {
     "string_type": "must be text",
     "string_too_short": "must be at least {min_length} characters long",
     "string_too_long": "must be at most {max_length} characters long",
-    "string_pattern_mismatch": "is not in the expected format",
+    "string_pattern_mismatch": "must match {pattern}",
     "int_type": "must be a whole number",
     "int_parsing": "must be a whole number",
     "int_from_float": "must be a whole number",
@@ -539,14 +542,18 @@ GENERIC_VALIDATION_MESSAGE = "is not valid"
 
 def validation_message(error: Mapping[str, Any]) -> str:
     """Pydantic's reason for one rejected value, never the value itself (CLAUDE.md, #45)."""
-    kind = str(error.get("type", ""))
+    kind = str(error.get("type", ""))[:60]  # custom types are dev-chosen strings; keep logs short
     ctx = error.get("ctx") or {}
     if kind == "string_too_short" and ctx.get("min_length") == 1:
         return "must not be blank"
-    template = VALIDATION_MESSAGES.get(kind, GENERIC_VALIDATION_MESSAGE)
+    template = VALIDATION_MESSAGES.get(kind)
+    if template is None:
+        log.info("no wording for pydantic error type %r; using the generic sentence", kind)
+        return GENERIC_VALIDATION_MESSAGE
     try:
         return template.format(**ctx)
-    except (KeyError, IndexError):  # a known type whose context is missing: still no crash
+    except (KeyError, IndexError, ValueError, TypeError):
+        log.warning("VALIDATION_MESSAGES[%r] needs context pydantic did not supply", kind)
         return GENERIC_VALIDATION_MESSAGE
 
 

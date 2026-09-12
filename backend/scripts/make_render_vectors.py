@@ -17,6 +17,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+import PIL
+from PIL import features
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.fonts import DEFAULT_FONT_FILE, layout_engine_available, list_fonts, load_font
@@ -240,11 +243,19 @@ def build_vectors(fonts_dir: Path) -> dict[str, Any]:
         raise SystemExit(
             "refusing to write the contract without Pillow's raqm engine (libfribidi missing)"
         )
+    fonts = list_fonts(fonts_dir)
+    on_disk = {p.name for p in fonts_dir.glob("*.ttf")}
+    skipped = on_disk - {f.file for f in fonts}
+    if skipped or not fonts:
+        raise SystemExit(f"refusing to write a partial contract: unusable fonts {sorted(skipped)}")
     objects = fixture_objects()
     return {
+        "pillow": PIL.__version__,
+        "freetype": features.version("freetype2"),
+        "layout_engine": "raqm",
         "min_font_size": MIN_FONT_SIZE,
         "max_font_size": MAX_FONT_SIZE,
-        "fonts": [font.model_dump() for font in list_fonts(fonts_dir)],
+        "fonts": [font.model_dump() for font in fonts],
         "texts": text_vectors(fonts_dir, label_strings(objects)),
         "labels": label_vectors(fonts_dir, objects),
         "leaders": leader_vectors(),

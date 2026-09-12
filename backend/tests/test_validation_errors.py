@@ -75,6 +75,10 @@ def test_built_in_rules_are_worded_from_the_type_and_the_model_limits() -> None:
             "must be one of 'popular' or 'ngc_ic'",
         ),
         (
+            {"type": "string_pattern_mismatch", "ctx": {"pattern": "^#[0-9A-Fa-f]{6}$"}},
+            "must match ^#[0-9A-Fa-f]{6}$",
+        ),
+        (
             {"type": "null_not_allowed"},
             "cannot be null; leave the field out to keep the current value",
         ),
@@ -89,3 +93,16 @@ def test_built_in_rules_are_worded_from_the_type_and_the_model_limits() -> None:
 )
 def test_validation_message_never_uses_msg(error: dict[str, Any], message: str) -> None:
     assert validation_message(error) == message
+
+
+def test_unknown_type_logs_at_info_and_missing_context_logs_at_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("INFO", logger="app.models"):
+        assert validation_message({"type": "made_up_type"}) == "is not valid"
+    assert [r.levelname for r in caplog.records] == ["INFO"]
+
+    caplog.clear()
+    with caplog.at_level("INFO", logger="app.models"):
+        assert validation_message({"type": "greater_than_equal"}) == "is not valid"
+    assert [r.levelname for r in caplog.records] == ["WARNING"]

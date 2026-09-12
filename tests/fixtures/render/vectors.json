@@ -1,4 +1,7 @@
 {
+ "pillow": "12.3.0",
+ "freetype": "2.14.3",
+ "layout_engine": "raqm",
  "min_font_size": 6,
  "max_font_size": 200,
  "fonts": [
