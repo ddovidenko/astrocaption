@@ -12,8 +12,14 @@ export const FIXTURE = resolve(fileURLToPath(new URL('.', import.meta.url)), 'fi
 
 declare global {
   interface Window {
-    /** Published by `EditorCanvas` while the stage is mounted (src/editor/EditorCanvas.tsx). */
-    __astrocaptionEditor?: { stage: unknown; imageWidth: number; renderAt(scale: number): string }
+    /** Published by `EditorCanvas` once the preview bitmap has loaded (src/editor/EditorCanvas.tsx,
+     *  `EditorTestHook` — the source of truth for this shape; keep the two in step). */
+    __astrocaptionEditor?: {
+      stage: unknown
+      imageWidth: number
+      labelCount: number
+      renderAt(scale: number): string
+    }
   }
 }
 
@@ -57,10 +63,15 @@ export async function ensureSetUpAndSignedIn(page: Page): Promise<void> {
 }
 
 /** Returns the card for `title`, uploading and solving the fixture first if it is not there.
- *  Assumes the signed-in image list is already open. */
+ *  Assumes the signed-in image list is already open. Asks the API whether the image exists: a
+ *  card count of 0 is also what a list that has not rendered yet looks like, and that would
+ *  upload a second copy. */
 export async function ensureSolvedImage(page: Page, title = 'Orion'): Promise<Locator> {
+  const res = await page.request.get('/api/images')
+  expect(res.status()).toBe(200)
+  const images = (await res.json()) as { title: string }[]
   const card = page.locator('article.card', { hasText: title })
-  if ((await card.count()) === 0) {
+  if (!images.some((i) => i.title === title)) {
     await page.locator('input[type=file]').setInputFiles(FIXTURE)
     await page.getByPlaceholder('Title (optional)').fill(title)
     await page.getByRole('button', { name: 'Upload & solve' }).click()

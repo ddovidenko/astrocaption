@@ -34,11 +34,13 @@ test('the canvas measures every vector string within 0.5 px of Pillow', async ({
       ctx.textRendering = 'geometricPrecision'
       // A wrongly registered family falls back silently and `document.fonts.check()` cannot see
       // it (it returns true for a name nothing registered), so compare against the fallback.
-      ctx.font = '24px serif'
-      const serif = ctx.measureText(probe).width
+      // A family nothing ever registered: whatever the browser falls back to for it is what an
+      // unregistered bundled family would measure as too.
+      ctx.font = '24px "__astrocaption_missing__"'
+      const fallback = ctx.measureText(probe).width
       const unloaded = files.filter((file) => {
         ctx.font = `24px "${family(file)}"`
-        return ctx.measureText(probe).width === serif
+        return ctx.measureText(probe).width === fallback
       })
       const widths = texts.map(([file, size, text]) => {
         ctx.font = `${size}px "${family(file)}"`
@@ -50,7 +52,7 @@ test('the canvas measures every vector string within 0.5 px of Pillow', async ({
   )
   expect(
     unloaded,
-    `these fonts measured exactly like the serif fallback, so the family never registered: ${unloaded.join(', ')}`,
+    `these fonts measured exactly like the fallback font, so the family never registered: ${unloaded.join(', ')}`,
   ).toEqual([])
 
   const deltas = texts.map(([file, size, text, pillow], i) => ({
@@ -76,7 +78,23 @@ test('the editor stage matches the annotated preview within the pixel budget', a
   const previewUrl = await ensureExported(page, card)
   await card.getByRole('link', { name: 'Edit' }).click()
   await expect(page.locator('canvas').first()).toBeVisible()
-  await page.waitForFunction(() => Boolean(window.__astrocaptionEditor))
+  // The hook appears only once the preview bitmap has loaded, so this also waits for the drawn
+  // stage rather than for an empty one.
+  await page.waitForFunction(() => window.__astrocaptionEditor?.labelCount !== undefined)
+
+  // Every enabled label must be on the stage: an empty or half-drawn canvas would otherwise
+  // diff clean against a preview whose annotations happen to be faint.
+  const imageId = /\/images\/([^/?#]+)/.exec(page.url())?.[1]
+  expect(imageId, `no image id in ${page.url()}`).toBeTruthy()
+  const annotations = await page.request.get(`/api/images/${imageId}/annotations`)
+  expect(annotations.status()).toBe(200)
+  const { labels } = (await annotations.json()) as { labels: { enabled: boolean }[] }
+  const expected = labels.filter((l) => l.enabled).length
+  const labelCount = await page.evaluate(() => window.__astrocaptionEditor!.labelCount)
+  console.log(`[parity] labels: the canvas drew ${labelCount} of ${labels.length} stored labels`)
+  expect(expected).toBeGreaterThan(0)
+  expect(labelCount).toBe(expected)
+
   const result = await page.evaluate(
     async ({ previewUrl, threshold }) => {
       const hook = window.__astrocaptionEditor!
