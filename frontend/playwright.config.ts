@@ -37,6 +37,10 @@ if (startApp && !existsSync(join(backend, 'static', 'index.html'))) {
 
 export default defineConfig({
   testDir: 'e2e',
+  // The run is one stateful story on one data dir: two workers would both attempt first-run
+  // setup, and a parallel file would upload a second copy of the fixture image.
+  fullyParallel: false,
+  workers: 1,
   // A full solve plus a full-resolution Pillow render on a shared runner: bigger than the
   // two 60s step budgets the spec waits on, so it never clips a step that is merely slow.
   timeout: 240_000,
