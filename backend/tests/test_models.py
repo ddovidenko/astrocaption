@@ -4,7 +4,14 @@ import pytest
 from pydantic import ValidationError
 
 from app.layout import SIZE_RELATIVE
-from app.models import ConfigUpdate, StyleConfig, StyleDefaults, StyleOverrides
+from app.models import (
+    AnnotationsUpdate,
+    ConfigUpdate,
+    Label,
+    StyleConfig,
+    StyleDefaults,
+    StyleOverrides,
+)
 
 
 def test_style_overrides_keeps_only_set_fields() -> None:
@@ -83,3 +90,32 @@ def test_blank_check_does_not_apply_to_max_upload_mb() -> None:
     with pytest.raises(ValidationError) as caught:
         ConfigUpdate.model_validate({"site_title": "   "})
     assert caught.value.errors()[0]["type"] == "blank"
+
+
+def test_style_and_label_colours_must_be_hex() -> None:
+    for field in ("text_color", "marker_color", "leader_color", "halo_color"):
+        with pytest.raises(ValidationError) as exc:
+            StyleConfig.model_validate({field: "red"})
+        assert exc.value.errors()[0]["type"] == "string_pattern_mismatch"
+    with pytest.raises(ValidationError):
+        Label(object_id=1, color="red")
+    assert Label(object_id=1, color="#ABCdef").color == "#ABCdef"
+    assert StyleConfig().text_color == "#FFFFFF"  # the defaults still validate
+
+
+def test_annotations_update_ignores_server_fields_and_bounds_the_rest() -> None:
+    doc = AnnotationsUpdate.model_validate(
+        {
+            "image_id": "ignored",
+            "updated_at": "ignored",
+            "style": StyleConfig().model_dump(),
+            "labels": [{"object_id": 1, "x": 10, "y": 20}],
+            "version": 3,
+        }
+    )
+    assert doc.version == 3 and doc.labels[0].x == 10 and not hasattr(doc, "image_id")
+    with pytest.raises(ValidationError):
+        AnnotationsUpdate.model_validate({"style": {}, "labels": [], "version": 0})
+    with pytest.raises(ValidationError) as exc:
+        Label(object_id=1, text_override="x" * 201)
+    assert exc.value.errors()[0]["type"] == "string_too_long"

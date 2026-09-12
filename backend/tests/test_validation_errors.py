@@ -89,6 +89,20 @@ def test_built_in_rules_are_worded_from_the_type_and_the_model_limits() -> None:
         ({"type": "greater_than_equal"}, "is not valid"),  # a known type without its context
         ({"type": "made_up_type", "msg": "hunter2"}, "is not valid"),
         ({}, "is not valid"),
+        (
+            {
+                "type": "too_short",
+                "ctx": {"field_type": "List", "min_length": 1, "actual_length": 0},
+            },
+            "must have at least 1 items",
+        ),
+        (
+            {
+                "type": "too_long",
+                "ctx": {"field_type": "List", "max_length": 5000, "actual_length": 5001},
+            },
+            "must have at most 5000 items",
+        ),
     ],
 )
 def test_validation_message_never_uses_msg(error: dict[str, Any], message: str) -> None:

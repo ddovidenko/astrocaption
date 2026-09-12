@@ -279,6 +279,25 @@ class Database:
                 ),
             )
 
+    def update_annotations_if_version(self, ann: Annotations, expected_version: int) -> bool:
+        """Store ``ann`` only if the row still holds ``expected_version`` (optimistic
+        concurrency for the editor's autosave). False when another writer got there first,
+        or when the image has no annotations row."""
+        with self.connect() as conn:
+            cur = conn.execute(
+                "UPDATE annotations SET style_json = ?, labels_json = ?, version = ?,"
+                " updated_at = ? WHERE image_id = ? AND version = ?",
+                (
+                    ann.style.model_dump_json(),
+                    json.dumps([lab.model_dump() for lab in ann.labels]),
+                    ann.version,
+                    ann.updated_at,
+                    ann.image_id,
+                    expected_version,
+                ),
+            )
+            return cur.rowcount == 1
+
     def get_annotations(self, image_id: str) -> Annotations | None:
         with self.connect() as conn:
             row = conn.execute(

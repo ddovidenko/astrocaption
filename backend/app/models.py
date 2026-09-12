@@ -242,18 +242,22 @@ MIN_FONT_SIZE = 6
 MAX_FONT_SIZE = 200
 MAX_STROKE_WIDTH = 40
 MAX_MARKER_MIN_RADIUS = 400
+MAX_TEXT_OVERRIDE = 200
+MAX_LABELS = 5000
+
+HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
 
 
 class StyleConfig(BaseModel):
-    """Global style for one image. All lengths are original-image pixels."""
+    """Global style for one image. All lengths are original-image pixels; colours are #RRGGBB."""
 
     font_file: str = "Inter-Regular.ttf"
     font_size: int = Field(default=24, ge=MIN_FONT_SIZE, le=MAX_FONT_SIZE)
-    text_color: str = "#FFFFFF"
-    marker_color: str = "#FFD54A"
-    leader_color: str = "#FFD54A"
+    text_color: str = Field(default="#FFFFFF", pattern=HEX_COLOR)
+    marker_color: str = Field(default="#FFD54A", pattern=HEX_COLOR)
+    leader_color: str = Field(default="#FFD54A", pattern=HEX_COLOR)
     halo: bool = True
-    halo_color: str = "#000000"
+    halo_color: str = Field(default="#000000", pattern=HEX_COLOR)
     halo_width: int = Field(default=2, ge=0, le=MAX_STROKE_WIDTH)
     marker_width: int = Field(default=2, ge=1, le=MAX_STROKE_WIDTH)
     marker_min_radius: int = Field(default=6, ge=1, le=MAX_MARKER_MIN_RADIUS)
@@ -269,8 +273,8 @@ class Label(BaseModel):
     x: float = 0.0
     y: float = 0.0
     font_size: int | None = Field(default=None, ge=MIN_FONT_SIZE, le=MAX_FONT_SIZE)
-    text_override: str | None = None
-    color: str | None = None
+    text_override: str | None = Field(default=None, max_length=MAX_TEXT_OVERRIDE)
+    color: str | None = Field(default=None, pattern=HEX_COLOR)
     show_aliases: bool | None = None
     leader: LeaderMode = "auto"
     collided: bool = False
@@ -282,6 +286,16 @@ class Annotations(BaseModel):
     labels: list[Label]
     version: int = 1
     updated_at: str = Field(default_factory=utcnow_iso)
+
+
+class AnnotationsUpdate(BaseModel):
+    """What the editor sends to ``PUT /annotations`` and ``POST /autoarrange``: the document it
+    holds. ``image_id`` and ``updated_at`` are the server's and are ignored if present; ``version``
+    is the one it loaded, for the conflict check."""
+
+    style: StyleConfig
+    labels: list[Label] = Field(max_length=MAX_LABELS)
+    version: int = Field(ge=1)
 
 
 # ---------------------------------------------------------------------------
@@ -455,9 +469,6 @@ class ConfigOut(BaseModel):
     style_defaults: StyleDefaults  # built-ins for fields with no override
 
 
-HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
-
-
 class StyleOverrides(BaseModel):
     """The owner's ``default_style``: only the fields they chose; the rest stay size-relative.
 
@@ -543,6 +554,8 @@ VALIDATION_MESSAGES: dict[str, str] = {
     "literal_error": "must be one of {expected}",
     "enum": "must be one of {expected}",
     "list_type": "must be a list",
+    "too_short": "must have at least {min_length} items",
+    "too_long": "must have at most {max_length} items",
     "dict_type": "must be an object",
     "model_type": "must be an object",
     "model_attributes_type": "must be an object",
