@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, Navigate, NavLink, Route, Routes, useNavigate } from 'react-router'
+import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router'
 import { api, describeError, setUnauthorizedHandler, type HealthOut } from './api'
+import EditorPage from './editor/EditorPage'
 import ConfigPage from './pages/ConfigPage'
 import ImagesPage from './pages/ImagesPage'
 import LoginPage from './pages/LoginPage'
@@ -10,6 +11,7 @@ export default function App() {
   const [health, setHealth] = useState<HealthOut | null>(null)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
+  const { pathname } = useLocation()
 
   /** Re-read health and hand it back, so a caller can act on what the server actually says
    *  instead of on the state it hoped for. Null means the call failed (the banner says why). */
@@ -93,7 +95,7 @@ export default function App() {
           </nav>
         )}
       </header>
-      <main>
+      <main className={pathname.startsWith('/images/') ? 'editor-main' : undefined}>
         {error && (
           <p className="error">
             {error}{' '}
@@ -121,6 +123,14 @@ export default function App() {
               element={
                 <Guard health={health}>
                   <ConfigPage refreshHealth={refreshHealth} />
+                </Guard>
+              }
+            />
+            <Route
+              path="/images/:id"
+              element={
+                <Guard health={health}>
+                  <EditorPage />
                 </Guard>
               }
             />
