@@ -1,8 +1,6 @@
 import type { NamePreference, StyleDefaults } from '../api'
-import { ALIAS_SCALE, LINE_HEIGHT, fontFamilyFor } from '../editor/metrics'
+import { ALIAS_SCALE, LINE_HEIGHT } from '../editor/metrics'
 import type { StyleForm } from './configForm'
-
-export { ALIAS_SCALE, LINE_HEIGHT, fontFamilyFor }
 
 /** The preview draws at a fixed text size; every other length keeps its ratio to the font size. */
 export const PREVIEW_SIZE = 22

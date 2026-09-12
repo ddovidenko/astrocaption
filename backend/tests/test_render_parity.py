@@ -11,6 +11,9 @@ diff, then ``make render-vectors`` and commit the file with the change that caus
 from __future__ import annotations
 
 import json
+from typing import Any
+
+import pytest
 
 from app.fonts import layout_engine_available
 from scripts.make_render_vectors import (
@@ -23,9 +26,13 @@ from scripts.make_render_vectors import (
 from tests.conftest import FONTS_DIR
 
 
-def test_render_vectors_are_current() -> None:
+@pytest.fixture(scope="module")
+def built() -> dict[str, Any]:
+    return build_vectors(FONTS_DIR)
+
+
+def test_render_vectors_are_current(built: dict[str, Any]) -> None:
     stored = json.loads(OUT.read_text(encoding="utf-8"))
-    built = build_vectors(FONTS_DIR)
     assert set(built) == set(stored)
     assert built["texts"] and built["labels"] and built["leaders"] and built["anchors"]
     assert len(built["fonts"]) == len(list(FONTS_DIR.glob("*.ttf")))
@@ -44,7 +51,7 @@ def test_glyph_strings_are_real_fixture_labels() -> None:
     assert set(GLYPH_STRINGS) <= set(label_strings(fixture_objects()))
 
 
-def test_vectors_cover_the_rounding_trap() -> None:
+def test_vectors_cover_the_rounding_trap(built: dict[str, Any]) -> None:
     """Sizes 15 and 35 put ``size × 0.7`` on .5, where Python and JavaScript round differently."""
-    sizes = {case["box"]["primary_size"] for case in build_vectors(FONTS_DIR)["labels"]}
+    sizes = {case["box"]["primary_size"] for case in built["labels"]}
     assert {15, 35} <= sizes

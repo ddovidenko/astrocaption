@@ -14,7 +14,6 @@ from pathlib import Path
 import pytest
 
 from app.fonts import DEFAULT_FONT_FILE, FONT_SIZES, list_fonts, load_font, resolve_font_file
-from app.models import MAX_FONT_SIZE, MIN_FONT_SIZE
 from scripts.fetch_fonts import FAMILIES, WEIGHTS, file_name, licence_file_name, missing_glyphs
 
 from .conftest import FONTS_DIR
@@ -55,6 +54,6 @@ def test_ascent_table_is_the_renderers_metric_at_every_size() -> None:
     fonts = list_fonts(FONTS_DIR)
     assert fonts, "no bundled fonts found"
     for font in fonts:
-        assert len(font.ascents) == MAX_FONT_SIZE - MIN_FONT_SIZE + 1
+        assert len(font.ascents) == len(FONT_SIZES)
         expected = [load_font(FONTS_DIR, font.file, size).getmetrics()[0] for size in FONT_SIZES]
         assert font.ascents == expected, font.file

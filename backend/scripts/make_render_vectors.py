@@ -22,6 +22,7 @@ from PIL import features
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app.config import REPO_ROOT
 from app.fonts import DEFAULT_FONT_FILE, layout_engine_available, list_fonts, load_font
 from app.layout import default_style
 from app.models import MAX_FONT_SIZE, MIN_FONT_SIZE, Label, LeaderMode, SolveObject, StyleConfig
@@ -29,11 +30,12 @@ from app.objects import objects_from_nova
 from app.placement import ANCHORS, Box, anchor_box, scale_unit
 from app.render import label_text, leader_segment, leader_visible, marker_radius, measure_label
 
-BACKEND = Path(__file__).resolve().parent.parent
-REPO_ROOT = BACKEND.parent
 OUT = REPO_ROOT / "tests" / "fixtures" / "render" / "vectors.json"
 FONTS_DIR = REPO_ROOT / "fonts"
-FIXTURES = (BACKEND / "tests" / "fixtures" / "nova", BACKEND / "tests" / "fixtures" / "nova-narrow")
+FIXTURES = (
+    REPO_ROOT / "backend" / "tests" / "fixtures" / "nova",
+    REPO_ROOT / "backend" / "tests" / "fixtures" / "nova-narrow",
+)
 
 # Every bundled font at three sizes for the strings that exercise the glyphs labels need
 # (Greek Bayer letters, the middle dot, the apostrophe, digits, a long alias line) ...

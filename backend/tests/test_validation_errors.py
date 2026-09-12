@@ -65,7 +65,7 @@ def test_built_in_rules_are_worded_from_the_type_and_the_model_limits() -> None:
     ("error", "message"),
     [
         ({"type": "missing"}, "is required"),
-        ({"type": "string_too_short", "ctx": {"min_length": 1}}, "must not be blank"),
+        ({"type": "blank"}, "must not be blank"),
         (
             {"type": "string_too_short", "ctx": {"min_length": 8}},
             "must be at least 8 characters long",

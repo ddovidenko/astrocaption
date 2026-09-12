@@ -497,12 +497,14 @@ class ConfigUpdate(BaseModel):
 
     @field_validator("site_title", "max_upload_mb", mode="before")
     @classmethod
-    def _null_is_not_a_value(cls, value: object) -> object:
+    def _null_or_blank_is_not_a_value(cls, value: object) -> object:
         # ``None`` here only means "absent"; an explicit null has no meaning for these two
         # fields (unlike ``nova_api_key``), so it is rejected instead of silently kept (#47).
-        # Worded by VALIDATION_MESSAGES under this type, not by the message given here.
+        # Worded by VALIDATION_MESSAGES under these types, not by the message given here.
         if value is None:
             raise PydanticCustomError("null_not_allowed", "cannot be null")
+        if isinstance(value, str) and not value.strip():
+            raise PydanticCustomError("blank", "must not be blank")
         return value
 
 
@@ -536,6 +538,7 @@ VALIDATION_MESSAGES: dict[str, str] = {
     "model_type": "must be an object",
     "model_attributes_type": "must be an object",
     "null_not_allowed": "cannot be null; leave the field out to keep the current value",
+    "blank": "must not be blank",
 }
 GENERIC_VALIDATION_MESSAGE = "is not valid"
 
@@ -544,8 +547,6 @@ def validation_message(error: Mapping[str, Any]) -> str:
     """Pydantic's reason for one rejected value, never the value itself (CLAUDE.md, #45)."""
     kind = str(error.get("type", ""))[:60]  # custom types are dev-chosen strings; keep logs short
     ctx = error.get("ctx") or {}
-    if kind == "string_too_short" and ctx.get("min_length") == 1:
-        return "must not be blank"
     template = VALIDATION_MESSAGES.get(kind)
     if template is None:
         log.info("no wording for pydantic error type %r; using the generic sentence", kind)

@@ -102,20 +102,7 @@ export interface ObjectOut {
 }
 
 /** The owner's default_style: only the fields they chose to override. Mirrors StyleOverrides. */
-export interface StyleOverrides {
-  font_file?: string
-  font_size?: number
-  text_color?: string
-  marker_color?: string
-  leader_color?: string
-  halo?: boolean
-  halo_color?: string
-  halo_width?: number
-  marker_width?: number
-  marker_min_radius?: number
-  show_aliases?: boolean
-  name_preference?: NamePreference
-}
+export type StyleOverrides = Partial<StyleConfig>
 
 /** Built-in values for fields with no override (sizes are per image, so not listed). */
 export interface StyleDefaults {
