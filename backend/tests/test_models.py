@@ -113,7 +113,9 @@ def test_annotations_update_ignores_server_fields_and_bounds_the_rest() -> None:
             "version": 3,
         }
     )
-    assert doc.version == 3 and doc.labels[0].x == 10 and not hasattr(doc, "image_id")
+    # image_id/updated_at are declared only so a GET body can be sent straight back; they are
+    # accepted (not rejected by extra="forbid") but never read by any caller.
+    assert doc.version == 3 and doc.labels[0].x == 10 and doc.image_id == "ignored"
     with pytest.raises(ValidationError):
         AnnotationsUpdate.model_validate({"style": {}, "labels": [], "version": 0})
     with pytest.raises(ValidationError) as exc:

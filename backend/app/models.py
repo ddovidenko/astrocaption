@@ -249,7 +249,10 @@ HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
 
 
 class StyleConfig(BaseModel):
-    """Global style for one image. All lengths are original-image pixels; colours are #RRGGBB."""
+    """Global style for one image. All lengths are original-image pixels; colours are #RRGGBB.
+    Unknown fields are refused so a typo cannot be stored (rows are written by this model)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     font_file: str = "Inter-Regular.ttf"
     font_size: int = Field(default=24, ge=MIN_FONT_SIZE, le=MAX_FONT_SIZE)
@@ -266,12 +269,15 @@ class StyleConfig(BaseModel):
 
 
 class Label(BaseModel):
-    """Layout of one object's call-out. ``x, y`` is the top-left of the text box."""
+    """Layout of one object's call-out. ``x, y`` is the top-left of the text box.
+    Unknown fields are refused so a typo cannot be stored (rows are written by this model)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     object_id: int
     enabled: bool = True
-    x: float = 0.0
-    y: float = 0.0
+    x: float = Field(default=0.0, allow_inf_nan=False)
+    y: float = Field(default=0.0, allow_inf_nan=False)
     font_size: int | None = Field(default=None, ge=MIN_FONT_SIZE, le=MAX_FONT_SIZE)
     text_override: str | None = Field(default=None, max_length=MAX_TEXT_OVERRIDE)
     color: str | None = Field(default=None, pattern=HEX_COLOR)
@@ -290,9 +296,17 @@ class Annotations(BaseModel):
 
 class AnnotationsUpdate(BaseModel):
     """What the editor sends to ``PUT /annotations`` and ``POST /autoarrange``: the document it
-    holds. ``image_id`` and ``updated_at`` are the server's and are ignored if present; ``version``
-    is the one it loaded, for the conflict check."""
+    holds. ``image_id`` and ``updated_at`` are declared only so a GET body can be sent straight
+    back without stripping them first; they are the server's and are never read. ``version`` is
+    the one it loaded, for the conflict check. Every other unknown field is refused so a typo
+    cannot be stored."""
 
+    model_config = ConfigDict(extra="forbid")
+
+    image_id: str | None = None  # the server's; accepted so a GET body can be sent back, never read
+    updated_at: str | None = (
+        None  # the server's; accepted so a GET body can be sent back, never read
+    )
     style: StyleConfig
     labels: list[Label] = Field(max_length=MAX_LABELS)
     version: int = Field(ge=1)

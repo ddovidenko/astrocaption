@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import uuid
@@ -52,6 +53,8 @@ from .deps import (
     unauthorized_response,
 )
 from .errors import DISK_FULL_ERRNOS
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/images", tags=["images"], dependencies=[Depends(require_owner)])
 
@@ -304,7 +307,9 @@ async def get_annotations(image_id: str, settings: SettingsDep, db: DbDep) -> An
 
 SOLVING_MESSAGE = "The image is still being solved; try again when it is done."
 CONFLICT_MESSAGE = "This image was changed elsewhere. Reload to continue editing."
-OBJECTS_MESSAGE = "labels: every label must name one of this image's objects, once."
+OBJECTS_DUPLICATE_MESSAGE = "labels: each of this image's objects may appear only once."
+OBJECTS_UNKNOWN_MESSAGE = "labels: every label must name one of this image's objects."
+OBJECTS_MISSING_MESSAGE = "labels: the document must list every one of this image's objects."
 FONT_MESSAGE = "style.font_file is not a bundled font."
 
 
@@ -320,14 +325,28 @@ def _annotations_target(db: Database, image_id: str) -> tuple[ImageRecord, Annot
 
 
 def _validate_document(
-    doc: AnnotationsUpdate, objects: list[SolveObject], settings: Settings
+    doc: AnnotationsUpdate, objects: list[SolveObject], settings: Settings, image_id: str
 ) -> None:
     """Plain 422s for what the models cannot check: object ids and the font bundle. Messages
-    never repeat the submitted value (CLAUDE.md)."""
+    never repeat the submitted value (CLAUDE.md); the offending ids are logged server-side only.
+    The document must list every one of the image's objects exactly once (the server always
+    emits one label per object; a shorter list would silently delete labels on a full-replace
+    PUT), so duplicate, unknown and missing ids are each their own cause and their own sentence.
+    """
     ids = [lab.object_id for lab in doc.labels]
     known = {o.id for o in objects}
-    if len(set(ids)) != len(ids) or not set(ids) <= known:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, OBJECTS_MESSAGE)
+    duplicates = sorted({i for i in ids if ids.count(i) > 1})
+    if duplicates:
+        log.info("annotations for %s rejected: duplicate object ids %s", image_id, duplicates)
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, OBJECTS_DUPLICATE_MESSAGE)
+    unknown = sorted(set(ids) - known)
+    if unknown:
+        log.info("annotations for %s rejected: unknown object ids %s", image_id, unknown)
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, OBJECTS_UNKNOWN_MESSAGE)
+    missing = sorted(known - set(ids))
+    if missing:
+        log.info("annotations for %s rejected: missing object ids %s", image_id, missing)
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, OBJECTS_MISSING_MESSAGE)
     if doc.style.font_file not in {f.file for f in list_fonts(settings.fonts_dir)}:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, FONT_MESSAGE)
 
@@ -340,12 +359,21 @@ async def put_annotations(
     the stored one, else 409 and nothing written."""
     _, stored = _annotations_target(db, image_id)
     if doc.version != stored.version:
+        log.info(
+            "annotations for %s: stale version %d, stored %d",
+            image_id,
+            doc.version,
+            stored.version,
+        )
         raise HTTPException(status.HTTP_409_CONFLICT, CONFLICT_MESSAGE)
-    _validate_document(doc, db.get_objects(image_id), settings)
+    _validate_document(doc, db.get_objects(image_id), settings, image_id)
     ann = Annotations(
         image_id=image_id, style=doc.style, labels=doc.labels, version=doc.version + 1
     )
     if not db.update_annotations_if_version(ann, expected_version=doc.version):
+        if db.get_annotations(image_id) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Image not found.")
+        log.info("annotations for %s: compare-and-swap lost", image_id)
         raise HTTPException(status.HTTP_409_CONFLICT, CONFLICT_MESSAGE)  # lost the race
     return ann
 
@@ -357,8 +385,10 @@ async def autoarrange(
     """Run the placer on every enabled label of the submitted document (no fixed labels) and
     return the result without storing it; the editor applies it and autosaves (design § 4)."""
     rec, stored = _annotations_target(db, image_id)
+    if doc.version != stored.version:
+        raise HTTPException(status.HTTP_409_CONFLICT, CONFLICT_MESSAGE)
     objects = db.get_objects(image_id)
-    _validate_document(doc, objects, settings)
+    _validate_document(doc, objects, settings, image_id)
     labels = await asyncio.to_thread(
         autoplace, rec.width, rec.height, doc.style, doc.labels, objects, settings.fonts_dir
     )

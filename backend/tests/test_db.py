@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -100,3 +101,27 @@ def test_update_annotations_if_version_is_a_compare_and_swap(settings: Settings)
     assert db.get_annotations(rec.id) == stored
     missing = newer.model_copy(update={"image_id": "missing"})
     assert not db.update_annotations_if_version(missing, expected_version=1)  # no such row
+
+
+def test_get_annotations_drops_a_legacy_colour_instead_of_500ing(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A row written before hex validation existed (an early config.json could carry
+    ``"text_color": "white"``) must still load, with the bad field falling back to its
+    default rather than taking down every GET/export/re-solve for that image."""
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    style = {"text_color": "white", "marker_color": "#112233"}
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO annotations (image_id, style_json, labels_json, version, updated_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (rec.id, json.dumps(style), "[]", 1, "2026-01-01T00:00:00+00:00"),
+        )
+    with caplog.at_level("WARNING", logger="app.db"):
+        ann = db.get_annotations(rec.id)
+    assert ann is not None
+    assert ann.style.text_color == "#FFFFFF"  # the model default, not the bad value
+    assert ann.style.marker_color == "#112233"  # the other field survived
+    assert "text_color" in caplog.text
+    assert "white" not in caplog.text

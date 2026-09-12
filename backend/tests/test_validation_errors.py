@@ -30,6 +30,10 @@ class Leaky(BaseModel):
         return value
 
 
+class Batch(BaseModel):
+    items: list[Leaky]
+
+
 def _client() -> TestClient:
     app = FastAPI()
     app.add_exception_handler(RequestValidationError, plain_validation_error)  # type: ignore[arg-type]
@@ -37,6 +41,10 @@ def _client() -> TestClient:
     @app.post("/leaky")
     async def leaky(body: Leaky) -> dict[str, str]:
         return {"ok": body.secret}
+
+    @app.post("/batch")
+    async def batch(body: Batch) -> dict[str, int]:
+        return {"ok": len(body.items)}
 
     return TestClient(app)
 
@@ -107,6 +115,14 @@ def test_built_in_rules_are_worded_from_the_type_and_the_model_limits() -> None:
 )
 def test_validation_message_never_uses_msg(error: dict[str, Any], message: str) -> None:
     assert validation_message(error) == message
+
+
+def test_a_bad_list_item_keeps_its_index_after_the_field_name() -> None:
+    """``labels.17.color``-shaped paths: a list index is user-meaningful once it follows a
+    field name, unlike the leading byte offset of a malformed body."""
+    resp = _client().post("/batch", json={"items": [{"secret": "ok"}, {"secret": "x" * 21}]})
+    assert resp.status_code == 422
+    assert resp.json()["detail"].startswith("items.1.secret:")
 
 
 def test_unknown_type_logs_at_info_and_missing_context_logs_at_warning(

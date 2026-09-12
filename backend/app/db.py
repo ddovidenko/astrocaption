@@ -13,7 +13,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .models import (
     Annotations,
@@ -122,6 +122,28 @@ def _encode(fields: Mapping[str, object]) -> dict[str, object]:
         else:
             values[key] = value
     return values
+
+
+def _load_style(raw_json: str, image_id: str) -> StyleConfig:
+    """Tolerant load of a stored style: a row written before hex validation existed (an early
+    ``config.json`` could carry ``"text_color": "white"``) must not 500 every GET/export/
+    re-solve for that image. Drop only the fields that fail and let the model's defaults fill
+    them back in; never log the value, only the field name."""
+    raw = json.loads(raw_json)
+    try:
+        return StyleConfig.model_validate(raw)
+    except ValidationError as exc:
+        bad = sorted({str(error["loc"][0]) for error in exc.errors() if error["loc"]})
+        log.warning("image %s: dropping unreadable style fields %s", image_id, bad)
+        for field in bad:
+            raw.pop(field, None)
+        return StyleConfig.model_validate(raw)
+
+
+def _annotation_row(ann: Annotations) -> tuple[str, str]:
+    """``(style_json, labels_json)`` for the ``annotations`` table's write path, shared by
+    ``save_annotations`` and ``update_annotations_if_version``."""
+    return ann.style.model_dump_json(), json.dumps([lab.model_dump() for lab in ann.labels])
 
 
 def _row_to_object(row: sqlite3.Row) -> SolveObject:
@@ -263,6 +285,7 @@ class Database:
     # -- annotations --------------------------------------------------------------
 
     def save_annotations(self, ann: Annotations) -> None:
+        style_json, labels_json = _annotation_row(ann)
         with self.connect() as conn:
             conn.execute(
                 "INSERT INTO annotations (image_id, style_json, labels_json, version, updated_at)"
@@ -270,26 +293,21 @@ class Database:
                 " ON CONFLICT (image_id) DO UPDATE SET style_json = excluded.style_json,"
                 " labels_json = excluded.labels_json, version = excluded.version,"
                 " updated_at = excluded.updated_at",
-                (
-                    ann.image_id,
-                    ann.style.model_dump_json(),
-                    json.dumps([lab.model_dump() for lab in ann.labels]),
-                    ann.version,
-                    ann.updated_at,
-                ),
+                (ann.image_id, style_json, labels_json, ann.version, ann.updated_at),
             )
 
     def update_annotations_if_version(self, ann: Annotations, expected_version: int) -> bool:
         """Store ``ann`` only if the row still holds ``expected_version`` (optimistic
         concurrency for the editor's autosave). False when another writer got there first,
         or when the image has no annotations row."""
+        style_json, labels_json = _annotation_row(ann)
         with self.connect() as conn:
             cur = conn.execute(
                 "UPDATE annotations SET style_json = ?, labels_json = ?, version = ?,"
                 " updated_at = ? WHERE image_id = ? AND version = ?",
                 (
-                    ann.style.model_dump_json(),
-                    json.dumps([lab.model_dump() for lab in ann.labels]),
+                    style_json,
+                    labels_json,
                     ann.version,
                     ann.updated_at,
                     ann.image_id,
@@ -307,7 +325,7 @@ class Database:
             return None
         return Annotations(
             image_id=row["image_id"],
-            style=StyleConfig.model_validate_json(row["style_json"]),
+            style=_load_style(row["style_json"], image_id),
             labels=[Label.model_validate(lab) for lab in json.loads(row["labels_json"])],
             version=row["version"],
             updated_at=row["updated_at"],
