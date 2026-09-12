@@ -45,9 +45,10 @@ export default defineConfig({
   // two 60s step budgets the spec waits on, so it never clips a step that is merely slow.
   timeout: 240_000,
   expect: { timeout: 15_000 },
-  // The run is stateful (first-run setup happens once per data dir), so a retry cannot
-  // recreate it: attempt 2 would deterministically fail at the /setup redirect and bury
-  // whatever actually broke in attempt 1.
+  // The run is stateful (first-run setup happens once per data dir): a retry finds that setup
+  // already done and the helpers are idempotent about it, so attempt 2 would not fail at the
+  // /setup redirect — it would just silently rerun against the state attempt 1 left behind and
+  // could hide a real flake. Retries stay 0 so a failure is reported, not buried.
   retries: 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: { baseURL, trace: 'retain-on-failure' },

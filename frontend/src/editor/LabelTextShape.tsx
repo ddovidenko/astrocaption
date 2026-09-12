@@ -2,7 +2,7 @@ import { useRef } from 'react'
 import { Shape } from 'react-konva'
 import type Konva from 'konva'
 import { describeError, type FontOut, type Label, type StyleConfig } from '../api'
-import { ascentFor, fontFamilyFor, type LabelBox, type LabelLines } from './metrics'
+import { ascentFor, fontShorthand, type LabelBox, type LabelLines } from './metrics'
 
 interface Props {
   label: Label
@@ -23,7 +23,6 @@ interface Props {
  *  can keep it and hide the overlay layer (selection outline, hover ring) instead. */
 export function LabelTextShape({ label, style, font, box, text, onDrawError }: Props) {
   const color = label.color ?? style.text_color
-  const family = fontFamilyFor(style.font_file)
   const failedRef = useRef(false)
   const draw = (ctx: Konva.Context) => {
     if (failedRef.current) return
@@ -41,7 +40,7 @@ export function LabelTextShape({ label, style, font, box, text, onDrawError }: P
       const lines: [string, number, number][] = [[text.primary, box.primarySize, 0]]
       if (text.alias !== null) lines.push([text.alias, box.aliasSize, box.line1Height])
       for (const [str, size, dy] of lines) {
-        c.font = `${size}px "${family}"`
+        c.font = fontShorthand(size, style.font_file)
         const y = label.y + dy + ascentFor(font, size)
         if (style.halo && style.halo_width > 0) {
           c.lineWidth = 2 * style.halo_width

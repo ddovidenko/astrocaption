@@ -18,6 +18,9 @@ interface Vectors {
 }
 
 test('the canvas measures every vector string within 0.5 px of Pillow', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (e) => errors.push(e.message))
+
   await ensureSetUpAndSignedIn(page)
   const { texts } = JSON.parse(readFileSync(VECTORS, 'utf8')) as Vectors
   const files = [...new Set(texts.map(([file]) => file))]
@@ -72,12 +75,16 @@ test('the canvas measures every vector string within 0.5 px of Pillow', async ({
   )
   const bad = deltas.filter((t) => t.delta > WIDTH_TOLERANCE_PX)
   expect(bad, JSON.stringify(bad.slice(0, 10), null, 1)).toEqual([])
+  expect(errors).toEqual([])
 })
 
 test('the editor stage matches the annotated preview within the pixel budget', async ({ page }, testInfo) => {
+  const errors: string[] = []
+  page.on('pageerror', (e) => errors.push(e.message))
+
   await ensureSetUpAndSignedIn(page)
   const card = await ensureSolvedImage(page)
-  const previewUrl = await ensureExported(page, card)
+  const previewUrl = await ensureExported(card)
   await card.getByRole('link', { name: 'Edit' }).click()
   await expect(page.locator('canvas').first()).toBeVisible()
   // The hook appears only once the preview bitmap has loaded, so this also waits for the drawn
@@ -98,7 +105,7 @@ test('the editor stage matches the annotated preview within the pixel budget', a
   expect(labelCount).toBe(expected)
 
   const result = await page.evaluate(
-    async ({ previewUrl, threshold }) => {
+    async ({ previewUrl, threshold, budget }) => {
       const hook = window.__astrocaptionEditor!
       const load = (src: string, what: string) =>
         new Promise<HTMLImageElement>((ok, err) => {
@@ -123,28 +130,34 @@ test('the editor stage matches the annotated preview within the pixel budget', a
       }
       const a = draw(server)
       const b = draw(mine)
-      const diff = document.createElement('canvas')
-      diff.width = w
-      diff.height = h
-      const g = diff.getContext('2d')!
-      const out = g.createImageData(w, h)
+      const pixelDelta = (i: number) =>
+        Math.max(Math.abs(a[i]! - b[i]!), Math.abs(a[i + 1]! - b[i + 1]!), Math.abs(a[i + 2]! - b[i + 2]!))
+      // Count first: the diff and stage PNGs are only worth building (and shipping back across
+      // the evaluate boundary) when the budget is actually blown.
       let differing = 0
       for (let i = 0; i < a.length; i += 4) {
-        const d = Math.max(
-          Math.abs(a[i]! - b[i]!),
-          Math.abs(a[i + 1]! - b[i + 1]!),
-          Math.abs(a[i + 2]! - b[i + 2]!),
-        )
-        if (d > threshold) {
-          differing++
-          out.data[i] = 255
-          out.data[i + 3] = 255
-        } else {
-          out.data[i + 3] = 255
-          out.data[i] = out.data[i + 1] = out.data[i + 2] = a[i]! >> 2
-        }
+        if (pixelDelta(i) > threshold) differing++
       }
-      g.putImageData(out, 0, 0)
+      const fraction = differing / (w * h)
+      let diffPng: string | null = null
+      if (fraction > budget) {
+        const diff = document.createElement('canvas')
+        diff.width = w
+        diff.height = h
+        const g = diff.getContext('2d')!
+        const out = g.createImageData(w, h)
+        for (let i = 0; i < a.length; i += 4) {
+          if (pixelDelta(i) > threshold) {
+            out.data[i] = 255
+            out.data[i + 3] = 255
+          } else {
+            out.data[i + 3] = 255
+            out.data[i] = out.data[i + 1] = out.data[i + 2] = a[i]! >> 2
+          }
+        }
+        g.putImageData(out, 0, 0)
+        diffPng = diff.toDataURL('image/png')
+      }
       return {
         w,
         h,
@@ -152,12 +165,12 @@ test('the editor stage matches the annotated preview within the pixel budget', a
         stageWidth: mine.naturalWidth,
         stageHeight: mine.naturalHeight,
         differing,
-        fraction: differing / (w * h),
-        diffPng: diff.toDataURL('image/png'),
-        stagePng,
+        fraction,
+        diffPng,
+        stagePng: fraction > budget ? stagePng : null,
       }
     },
-    { previewUrl, threshold: PIXEL_THRESHOLD },
+    { previewUrl, threshold: PIXEL_THRESHOLD, budget: PIXEL_FRACTION },
   )
   console.log(
     `[parity] pixels: preview ${result.w}x${result.h}, stage ${result.stageWidth}x${result.stageHeight} ` +
@@ -166,8 +179,8 @@ test('the editor stage matches the annotated preview within the pixel budget', a
   )
   if (result.fraction > PIXEL_FRACTION) {
     for (const [name, url] of [
-      ['diff.png', result.diffPng],
-      ['stage.png', result.stagePng],
+      ['diff.png', result.diffPng!],
+      ['stage.png', result.stagePng!],
     ] as const) {
       const path = testInfo.outputPath(name)
       writeFileSync(path, Buffer.from(url.split(',')[1]!, 'base64'))
@@ -178,4 +191,5 @@ test('the editor stage matches the annotated preview within the pixel budget', a
     result.fraction,
     `${result.differing} of ${result.w * result.h} pixels differ by more than ${PIXEL_THRESHOLD}`,
   ).toBeLessThanOrEqual(PIXEL_FRACTION)
+  expect(errors).toEqual([])
 })

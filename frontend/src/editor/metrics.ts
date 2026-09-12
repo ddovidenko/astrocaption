@@ -83,6 +83,12 @@ export function fontFamilyFor(file: string): string {
   return file.replace(/\.ttf$/i, '')
 }
 
+/** The canvas `font` shorthand for `file` at `size`, shared by the measurer and the paint shape
+ *  so the two can never build different strings. */
+export function fontShorthand(size: number, file: string): string {
+  return `${size}px "${fontFamilyFor(file)}"`
+}
+
 /** Advance width of `text` set in `fontFile` at `size` px, in original-image pixels. */
 export type TextMeasurer = (text: string, fontFile: string, size: number) => number
 
@@ -98,7 +104,7 @@ export function canvasMeasurer(ctx: CanvasRenderingContext2D): TextMeasurer {
   }
   return (text, fontFile, size) => {
     ctx.textRendering = 'geometricPrecision' // per call: a ctx.restore() would otherwise reset it
-    ctx.font = `${size}px "${fontFamilyFor(fontFile)}"`
+    ctx.font = fontShorthand(size, fontFile)
     return ctx.measureText(text).width
   }
 }

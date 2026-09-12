@@ -12,10 +12,12 @@ test('first run: setup, sign in, solve, export, edit, config, sign out', async (
   page.on('pageerror', (e) => errors.push(e.message))
 
   await ensureSetUpAndSignedIn(page)
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('E2E sky')
+  // A second pass on the same data dir finds the title already renamed by the first pass's
+  // Config step below.
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(/^(E2E sky|Renamed sky)$/)
 
   const card = await ensureSolvedImage(page, 'Orion')
-  await ensureExported(page, card)
+  await ensureExported(card, 'Orion')
 
   const downloadLink = card.getByRole('link', { name: 'Download full-resolution export' })
   await expect(downloadLink).toBeVisible()

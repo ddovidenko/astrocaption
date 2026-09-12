@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { HealthOut, ImageOut } from '../src/api'
 import type { EditorTestHook } from '../src/editor/EditorCanvas'
 
 // Shared steps for the e2e specs. The whole run shares one data dir (`make e2e` mints a scratch
@@ -18,18 +19,13 @@ declare global {
   }
 }
 
-interface Health {
-  setup_required: boolean
-  authenticated: boolean
-}
-
 /** Leaves the browser signed in on `/`. Asks the API what state the install is in rather than
  *  guessing from the URL: the SPA redirects only after its first health fetch, so reading
  *  `page.url()` straight after a goto would race that redirect. */
 export async function ensureSetUpAndSignedIn(page: Page): Promise<void> {
   const res = await page.request.get('/api/health')
   expect(res.status()).toBe(200)
-  const health = (await res.json()) as Health
+  const health = (await res.json()) as HealthOut
 
   if (health.setup_required) {
     // The redirect itself is the assertion: the blank-page regression (#11) broke exactly this.
@@ -64,7 +60,7 @@ export async function ensureSetUpAndSignedIn(page: Page): Promise<void> {
 export async function ensureSolvedImage(page: Page, title = 'Orion'): Promise<Locator> {
   const res = await page.request.get('/api/images')
   expect(res.status()).toBe(200)
-  const images = (await res.json()) as { title: string }[]
+  const images = (await res.json()) as ImageOut[]
   const card = page.locator('article.card', { hasText: title })
   if (!images.some((i) => i.title === title)) {
     await page.locator('input[type=file]').setInputFiles(FIXTURE)
@@ -77,9 +73,10 @@ export async function ensureSolvedImage(page: Page, title = 'Orion'): Promise<Lo
 }
 
 /** Exports `card` unless it has an annotated preview already, and returns that preview's URL.
- *  `_page` is unused — it keeps the call shape of the other two helpers. */
-export async function ensureExported(_page: Page, card: Locator): Promise<string> {
-  const img = card.locator('img[alt$=" annotated"]')
+ *  `title` must be the same one passed to `ensureSolvedImage` for this card, so the selector
+ *  matches this card's own annotated image and not another card's. */
+export async function ensureExported(card: Locator, title = 'Orion'): Promise<string> {
+  const img = card.locator(`img[alt="${title} annotated"]`)
   if ((await img.count()) === 0) {
     await card.getByRole('button', { name: 'Export' }).click()
   }

@@ -7,6 +7,7 @@ import {
   MIN_FONT_SIZE,
   anchorBox,
   ascentFor,
+  fontShorthand,
   labelText,
   leaderSegment,
   leaderVisible,
@@ -93,6 +94,12 @@ function expectBox(got: Box, want: Box): void {
   expect(Math.abs(got.right - want.right)).toBeLessThanOrEqual(EPS)
   expect(Math.abs(got.bottom - want.bottom)).toBeLessThanOrEqual(EPS)
 }
+
+describe('fontShorthand', () => {
+  it('builds the canvas font string from the file stem, quoted', () => {
+    expect(fontShorthand(24, 'Inter-Regular.ttf')).toBe('24px "Inter-Regular"')
+  })
+})
 
 describe('render vectors', () => {
   it('loaded the contract the Python side generated', () => {
