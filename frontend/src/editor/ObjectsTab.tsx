@@ -18,6 +18,7 @@ export default function ObjectsTab() {
 
   const [query, setQuery] = useState('')
   const [chips, setChips] = useState<ReadonlySet<Chip>>(DEFAULT_CHIPS)
+  const [error, setError] = useState<string | null>(null)
 
   const rows = useMemo(() => {
     const all: ObjectOut[] = []
@@ -37,10 +38,20 @@ export default function ObjectsTab() {
 
   // Only the rows that would change are touched, so "Enable shown" never disables anything and
   // a second click is a no-op. Each toggle reads the store afresh, so the placer sees the labels
-  // enabled by the previous iteration and fits the next one around them.
+  // enabled by the previous iteration and fits the next one around them. A throw part-way through
+  // (the measurer, or a stale font) leaves the rows before it changed: say how far it got instead
+  // of leaving the list half-changed with no explanation.
   const bulk = (enable: boolean) => {
-    for (const obj of rows) {
-      if ((labels.get(obj.id)?.enabled ?? enable) !== enable) toggleWithPlacement(obj.id)
+    setError(null)
+    const targets = rows.filter((obj) => (labels.get(obj.id)?.enabled ?? enable) !== enable)
+    let done = 0
+    try {
+      for (const obj of targets) {
+        toggleWithPlacement(obj.id)
+        done++
+      }
+    } catch {
+      setError(`Only ${done} of ${targets.length} labels could be changed.`)
     }
   }
 
@@ -75,6 +86,7 @@ export default function ObjectsTab() {
           Disable shown
         </button>
       </div>
+      {error && <p className="error">{error}</p>}
       <p className="meta">
         {rows.length} of {objectOrder.length} objects
       </p>
