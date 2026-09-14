@@ -8,6 +8,19 @@ import { loadEditor } from './load'
 import SidePanel from './SidePanel'
 import { useEditor } from './store'
 
+/** A save that needs the owner: the message and its one way out. `onMouseDown` keeps the canvas
+ *  shortcuts working after the click (a focused button would take Space as a click). */
+function SaveProblem({ message, action, onAction }: { message: string; action: string; onAction: () => void }) {
+  return (
+    <span className="save-status error">
+      {message}{' '}
+      <button className="secondary" onMouseDown={(e) => e.preventDefault()} onClick={onAction}>
+        {action}
+      </button>
+    </span>
+  )
+}
+
 /** The toolbar's save state (design § 5). Editing stays local after a conflict; only saving
  *  stops, so the sentence offers a reload rather than a retry. */
 function SaveStatus() {
@@ -22,25 +35,15 @@ function SaveStatus() {
       return <span className="save-status">Unsaved changes</span>
     case 'error':
       return (
-        <span className="save-status error">
-          {save.message ?? 'The last change could not be saved.'}{' '}
-          <button className="secondary" onMouseDown={(e) => e.preventDefault()} onClick={retrySave}>
-            Retry
-          </button>
-        </span>
+        <SaveProblem message={save.message ?? 'The last change could not be saved.'} action="Retry" onAction={retrySave} />
       )
     case 'conflict':
       return (
-        <span className="save-status error">
-          {save.message ?? 'This image was changed elsewhere. Reload to continue editing.'}{' '}
-          <button
-            className="secondary"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => window.location.reload()}
-          >
-            Reload
-          </button>
-        </span>
+        <SaveProblem
+          message={save.message ?? 'This image was changed elsewhere. Reload to continue editing.'}
+          action="Reload"
+          onAction={() => window.location.reload()}
+        />
       )
     default:
       return <span className="save-status">Saved</span>
@@ -64,10 +67,13 @@ export default function EditorPage() {
     let cancelled = false
     // Started only once the document is in the store, so the controller never sees the empty one.
     let stop: (() => void) | null = null
+    // The document this mount loaded: a newer load() of the same image installs a different one.
+    let loaded: unknown = null
     loadEditor(id)
       .then((doc) => {
         if (cancelled) return
         useEditor.getState().load(doc)
+        loaded = useEditor.getState().image
         stop = startAutosave(id)
         setResult({ id, error: null })
       })
@@ -86,8 +92,9 @@ export default function EditorPage() {
         // A no-op when a newer startAutosave has already retired this controller.
         stop?.()
         const s = useEditor.getState()
-        // Only if this image is still the one in the store: a later load() already owns it.
-        if (s.image?.id === id) s.reset()
+        // Only if the store still holds the document this mount loaded: a later load() — of any
+        // image, this one included — already owns it.
+        if (s.image !== null && s.image === loaded) s.reset()
       })
     }
   }, [id])
