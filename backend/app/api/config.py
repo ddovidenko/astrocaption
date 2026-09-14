@@ -4,26 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping
-from pathlib import Path
+from functools import partial
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from ..config import ConfigError, Settings, SettingsSource, update_config
+from ..config import Settings, SettingsSource, update_config, write_and_reload
 from ..fonts import list_fonts
 from ..models import ConfigOut, ConfigUpdate, StyleConfig, StyleDefaults
 from .deps import SettingsDep, require_owner
-from .errors import config_write_error, write_failure_message
+from .errors import CONFIG_SAVED_BUT_UNREADABLE, config_write_guard, write_failure_message
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["config"], dependencies=[Depends(require_owner)])
 
 DATA_DIR_FULL = write_failure_message("Settings", disk_full=True)
 DATA_DIR_NOT_WRITABLE = write_failure_message("Settings", disk_full=False)
-CONFIG_SAVED_BUT_UNREADABLE = (
-    "The settings were written, but config.json could not be read back. "
-    "Reload the page; if the settings look wrong, check the server log."
-)
 
 # Fixed built-ins the page shows for unset fields; sizes are derived per image instead.
 # ``StyleDefaults`` lists exactly the non-size fields, so validating the model's defaults
@@ -87,14 +82,6 @@ def _updates_for(body: ConfigUpdate, settings: Settings) -> dict[str, object | N
     return updates
 
 
-def _write_and_reload(
-    source: SettingsSource, path: Path, updates: Mapping[str, object | None]
-) -> Settings:
-    """One thread hop for the whole write: both halves block on the filesystem."""
-    update_config(path, updates)
-    return source.reload()
-
-
 @router.put("/config")
 async def put_config(body: ConfigUpdate, request: Request, settings: SettingsDep) -> ConfigOut:
     updates = _updates_for(body, settings)
@@ -103,14 +90,12 @@ async def put_config(body: ConfigUpdate, request: Request, settings: SettingsDep
     source: SettingsSource = request.app.state.settings_source
     lock: asyncio.Lock = request.app.state.config_write_lock
     async with lock:  # two saves (or a save and setup) must not read-modify-write over each other
-        try:
-            fresh = await asyncio.to_thread(
-                _write_and_reload, source, settings.config_path, updates
+        with config_write_guard("Settings", "config.json could not be written"):
+            _, fresh = await asyncio.to_thread(
+                write_and_reload,
+                source,
+                partial(update_config, settings.config_path, updates),
             )
-        except (ConfigError, OSError) as exc:
-            if isinstance(exc, OSError):
-                log.exception("config.json could not be written")
-            raise config_write_error(exc, "Settings") from exc
     log.info("config updated: %s", ", ".join(sorted(updates)))  # names only, never values
     if fresh.config_error is not None:  # the write landed, the file no longer parses
         log.error("config.json unusable immediately after a write: %s", fresh.config_error)

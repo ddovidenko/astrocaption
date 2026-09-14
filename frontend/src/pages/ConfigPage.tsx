@@ -3,7 +3,6 @@ import { api, pageError, type ConfigOut, type FontOut, type HealthOut } from '..
 import ColorField from './ColorField'
 import { buildUpdate, styleFormFromOverrides, type StyleForm, type Tri } from './configForm'
 import LabelPreview from './LabelPreview'
-import PasswordPanel from './PasswordPanel'
 
 type ColorKey = 'text_color' | 'marker_color' | 'leader_color' | 'halo_color'
 type SizeKey = 'font_size' | 'halo_width' | 'marker_width' | 'marker_min_radius'
@@ -128,121 +127,118 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
   )
 
   return (
-    <>
-      <form className="config" onSubmit={save}>
-        <section className="panel">
-          <h2>Site</h2>
-          <div className="row2">
+    <form className="config" onSubmit={save}>
+      <section className="panel">
+        <h2>Site</h2>
+        <div className="row2">
+          <label className="field">
+            <span className="field-label">Site title</span>
+            <input
+              type="text"
+              value={siteTitle}
+              required
+              maxLength={200}
+              disabled={locked('site_title')}
+              onChange={(e) => edit(setSiteTitle, e.target.value)}
+            />
+            {locked('site_title') && <span className="field-note">{lockedNote('site_title')}</span>}
+          </label>
+          <label className="field">
+            <span className="field-label">Upload limit (MB)</span>
+            <input
+              type="number"
+              required
+              min={1}
+              max={1024}
+              value={uploadMb}
+              disabled={locked('max_upload_mb')}
+              onChange={(e) => edit(setUploadMb, e.target.value)}
+            />
+            {locked('max_upload_mb') && <span className="field-note">{lockedNote('max_upload_mb')}</span>}
+          </label>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>Solver</h2>
+        <p className="status-line">
+          <span className={`dot ${config.nova_api_key_set ? 'ok' : ''}`} aria-hidden="true" />
+          nova.astrometry.net key {config.nova_api_key_set ? 'set' : 'not set'}
+          {locked('nova_api_key') && <span className="field-note"> · {lockedNote('nova_api_key')}</span>}
+        </p>
+        {!locked('nova_api_key') && (
+          <div className="row2 row2-action">
             <label className="field">
-              <span className="field-label">Site title</span>
+              <span className="field-label">{config.nova_api_key_set ? 'Replace key' : 'Key'}</span>
               <input
                 type="text"
-                value={siteTitle}
-                required
-                maxLength={200}
-                disabled={locked('site_title')}
-                onChange={(e) => edit(setSiteTitle, e.target.value)}
+                value={novaKey}
+                autoComplete="off"
+                placeholder="Paste the key from your nova profile"
+                onChange={(e) => edit(setNovaKey, e.target.value)}
               />
-              {locked('site_title') && <span className="field-note">{lockedNote('site_title')}</span>}
             </label>
-            <label className="field">
-              <span className="field-label">Upload limit (MB)</span>
-              <input
-                type="number"
-                required
-                min={1}
-                max={1024}
-                value={uploadMb}
-                disabled={locked('max_upload_mb')}
-                onChange={(e) => edit(setUploadMb, e.target.value)}
-              />
-              {locked('max_upload_mb') && <span className="field-note">{lockedNote('max_upload_mb')}</span>}
-            </label>
+            {config.nova_api_key_set && (
+              <button type="button" className="secondary" disabled={busy} onClick={() => void removeKey()}>
+                Remove key
+              </button>
+            )}
           </div>
-        </section>
+        )}
+      </section>
 
-        <section className="panel">
-          <h2>Solver</h2>
-          <p className="status-line">
-            <span className={`dot ${config.nova_api_key_set ? 'ok' : ''}`} aria-hidden="true" />
-            nova.astrometry.net key {config.nova_api_key_set ? 'set' : 'not set'}
-            {locked('nova_api_key') && <span className="field-note"> · {lockedNote('nova_api_key')}</span>}
-          </p>
-          {!locked('nova_api_key') && (
-            <div className="row2 row2-action">
-              <label className="field">
-                <span className="field-label">{config.nova_api_key_set ? 'Replace key' : 'Key'}</span>
-                <input
-                  type="text"
-                  value={novaKey}
-                  autoComplete="off"
-                  placeholder="Paste the key from your nova profile"
-                  onChange={(e) => edit(setNovaKey, e.target.value)}
-                />
-              </label>
-              {config.nova_api_key_set && (
-                <button type="button" className="secondary" disabled={busy} onClick={() => void removeKey()}>
-                  Remove key
-                </button>
+      <section className="panel">
+        <h2>Default label style</h2>
+        <LabelPreview style={style} defaults={d} />
+        <p className="field-note">
+          Applies to newly solved images. Blank fields keep the built-in defaults; the four sizes then scale with each image.
+          The preview is drawn at one fixed text size, so widths show their proportion to the font.
+        </p>
+        <div className="grid3">
+          <label className="field span2">
+            <span className="field-label">Font</span>
+            <select value={style.font_file} disabled={!fontsLoaded} onChange={(e) => setField('font_file', e.target.value)}>
+              <option value="">Default ({d.font_file})</option>
+              {/* The saved font always has an option of its own, so the select is never blank. */}
+              {style.font_file && !fontList.some((f) => f.file === style.font_file) && (
+                <option value={style.font_file}>{fontsLoaded ? `${style.font_file} (not installed)` : style.font_file}</option>
               )}
-            </div>
-          )}
-        </section>
-
-        <section className="panel">
-          <h2>Default label style</h2>
-          <LabelPreview style={style} defaults={d} />
-          <p className="field-note">
-            Applies to newly solved images. Blank fields keep the built-in defaults; the four sizes then scale with each image.
-            The preview is drawn at one fixed text size, so widths show their proportion to the font.
-          </p>
-          <div className="grid3">
-            <label className="field span2">
-              <span className="field-label">Font</span>
-              <select value={style.font_file} disabled={!fontsLoaded} onChange={(e) => setField('font_file', e.target.value)}>
-                <option value="">Default ({d.font_file})</option>
-                {/* The saved font always has an option of its own, so the select is never blank. */}
-                {style.font_file && !fontList.some((f) => f.file === style.font_file) && (
-                  <option value={style.font_file}>{fontsLoaded ? `${style.font_file} (not installed)` : style.font_file}</option>
-                )}
-                {fontList.map((f) => (
-                  <option key={f.file} value={f.file}>
-                    {f.family} {f.weight}
-                  </option>
-                ))}
-              </select>
-              {!fontsLoaded && <span className="field-note">{FONTS_UNAVAILABLE}</span>}
-            </label>
-            {sizeField('Font size (px)', 'font_size', 6, 200)}
-            <label className="field span2">
-              <span className="field-label">Primary name</span>
-              <select value={style.name_preference} onChange={(e) => setField('name_preference', e.target.value as StyleForm['name_preference'])}>
-                <option value="">Default ({d.name_preference === 'popular' ? 'Messier and Caldwell first' : 'NGC and IC first'})</option>
-                <option value="popular">Messier, Caldwell, Sharpless, Barnard first</option>
-                <option value="ngc_ic">NGC and IC first</option>
-              </select>
-            </label>
-            {triField('Alias line', 'show_aliases')}
-            {colorField('Text colour', 'text_color')}
-            {colorField('Marker colour', 'marker_color')}
-            {colorField('Leader colour', 'leader_color')}
-            {sizeField('Marker line width (px)', 'marker_width', 1, 40)}
-            {sizeField('Marker min radius (px)', 'marker_min_radius', 1, 400)}
-            {triField('Halo', 'halo')}
-            {colorField('Halo colour', 'halo_color')}
-            {sizeField('Halo width (px)', 'halo_width', 0, 40)}
-          </div>
-        </section>
-
-        <div className="actions">
-          <button type="submit" disabled={busy}>
-            {busy ? 'Saving…' : 'Save changes'}
-          </button>
-          {saved && <span className="meta">{saved}</span>}
-          {error && <span className="error">{error}</span>}
+              {fontList.map((f) => (
+                <option key={f.file} value={f.file}>
+                  {f.family} {f.weight}
+                </option>
+              ))}
+            </select>
+            {!fontsLoaded && <span className="field-note">{FONTS_UNAVAILABLE}</span>}
+          </label>
+          {sizeField('Font size (px)', 'font_size', 6, 200)}
+          <label className="field span2">
+            <span className="field-label">Primary name</span>
+            <select value={style.name_preference} onChange={(e) => setField('name_preference', e.target.value as StyleForm['name_preference'])}>
+              <option value="">Default ({d.name_preference === 'popular' ? 'Messier and Caldwell first' : 'NGC and IC first'})</option>
+              <option value="popular">Messier, Caldwell, Sharpless, Barnard first</option>
+              <option value="ngc_ic">NGC and IC first</option>
+            </select>
+          </label>
+          {triField('Alias line', 'show_aliases')}
+          {colorField('Text colour', 'text_color')}
+          {colorField('Marker colour', 'marker_color')}
+          {colorField('Leader colour', 'leader_color')}
+          {sizeField('Marker line width (px)', 'marker_width', 1, 40)}
+          {sizeField('Marker min radius (px)', 'marker_min_radius', 1, 400)}
+          {triField('Halo', 'halo')}
+          {colorField('Halo colour', 'halo_color')}
+          {sizeField('Halo width (px)', 'halo_width', 0, 40)}
         </div>
-      </form>
-      <PasswordPanel />
-    </>
+      </section>
+
+      <div className="actions">
+        <button type="submit" disabled={busy}>
+          {busy ? 'Saving…' : 'Save changes'}
+        </button>
+        {saved && <span className="meta">{saved}</span>}
+        {error && <span className="error">{error}</span>}
+      </div>
+    </form>
   )
 }

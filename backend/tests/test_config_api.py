@@ -11,11 +11,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.config import (
-    CONFIG_SAVED_BUT_UNREADABLE,
-    DATA_DIR_FULL,
-    DATA_DIR_NOT_WRITABLE,
-)
+from app.api.config import DATA_DIR_FULL, DATA_DIR_NOT_WRITABLE
+from app.api.errors import CONFIG_SAVED_BUT_UNREADABLE
 from app.config import CONFIG_NOT_JSON, ConfigError
 from tests.conftest import env_app_client, login
 

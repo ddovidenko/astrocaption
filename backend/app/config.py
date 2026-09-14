@@ -16,7 +16,7 @@ import json
 import logging
 import os
 import tempfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -306,6 +306,17 @@ class SettingsSource:
         self._current = load_settings(self._env)
         self._stamp = stamp
         return self._current
+
+
+def write_and_reload[T](source: SettingsSource, write: Callable[[], T]) -> tuple[T, Settings]:
+    """Run ``write``, then re-read config.json, and hand back both results.
+
+    One thread hop for the pair (both halves block on the filesystem), and the caller gets
+    what the write itself produced as well as what the file says afterwards - which are not
+    always the same thing, because another process may write between the two.
+    """
+    written = write()
+    return written, source.reload()
 
 
 @contextmanager
