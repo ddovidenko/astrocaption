@@ -149,6 +149,11 @@ export interface FontOut {
   ascents: number[]
 }
 
+/** The owner-password bounds, as validate_new_password() enforces them (models.py). Mirrored
+ *  here so every password input in the app states the same rule the server will apply. */
+export const MIN_PASSWORD_LENGTH = 8
+export const MAX_PASSWORD_LENGTH = 1024
+
 export interface SetupRequest {
   password: string
   nova_api_key?: string
@@ -333,6 +338,9 @@ export const api = {
   login: (password: string) =>
     request<void>('/api/login', json('POST', { password }), { sessionAware: false }),
   logout: () => request<void>('/api/logout', json('POST')),
+  /** 403 = wrong current password (ApiError.message); a 401 here is a lost session like anywhere. */
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<void>('/api/password', json('POST', { current_password: currentPassword, new_password: newPassword })),
   config: () => request<ConfigOut>('/api/config'),
   fonts: () => request<FontOut[]>('/api/fonts'),
   updateConfig: (body: ConfigUpdate) => request<ConfigOut>('/api/config', json('PUT', body)),

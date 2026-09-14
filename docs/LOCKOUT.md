@@ -2,6 +2,9 @@
 
 Four situations, four fixes. None of them touches your images, exports or the database.
 
+Know the current password? Change it on the Config page instead; this guide is for when you
+cannot sign in.
+
 ## Wrong password too many times
 
 Five wrong passwords start a 60-second cooldown; the sign-in page says how long to wait.

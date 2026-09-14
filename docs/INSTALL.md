@@ -39,6 +39,9 @@ Headless installs set `ASTROCAPTION_PASSWORD` instead: on start, if no password 
 yet, the app performs setup with it. The variable is read once, so you can remove it afterwards.
 Passwords outside 8 to 1024 characters are ignored with a log line.
 
+Change the password later on the Config page: it asks for the current one, keeps you signed in,
+and signs every other browser out.
+
 Sign-ins are rate-limited (five wrong passwords → 60 seconds). Forgot the password:
 `make reset-password` (or `docker compose exec app python -m app.cli reset-password`) asks for
 a new one inside the running container and logs every browser out; on a source checkout it is
@@ -53,7 +56,7 @@ a new one inside the running container and logs every browser out; on a source c
 | Site title | `ASTROCAPTION_SITE_TITLE` env, or `"site_title"`, or the config page | AstroCaption |
 | Data directory | `ASTROCAPTION_DATA_DIR` env | `/data` in the container |
 | Default label style | `"default_style"` object in `data/config.json`, or the config page | built-in defaults (size-relative for the four size fields) |
-| Owner password | setup page, or `ASTROCAPTION_PASSWORD` env at first start | required |
+| Owner password | setup page, or `ASTROCAPTION_PASSWORD` env at first start, or the Config page later | required |
 | Secure cookies | `TRUST_PROXY=1` env when the app is served over HTTPS by a proxy | off |
 
 Values set by environment variables win over `data/config.json`; the config page shows

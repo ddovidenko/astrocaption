@@ -58,9 +58,10 @@ def _scrypt(password: str, salt: bytes, n: int, r: int, p: int, dklen: int) -> b
 def validate_new_password(password: str) -> str | None:
     """Why this password may not be used, as one plain sentence, or ``None`` when it may.
 
-    The one place the bound is applied: the setup route, the headless
-    ``ASTROCAPTION_PASSWORD`` start and ``app.cli reset-password`` all ask here, so a
-    password one of them accepts is never one the login endpoint would reject.
+    The one place the bound is applied. All four ways to choose a password ask here - the
+    setup page, the headless ``ASTROCAPTION_PASSWORD`` start, ``app.cli reset-password`` and
+    the config page's password change - so a password any of them accepts is never one the
+    login endpoint would reject.
     """
     if len(password) < MIN_PASSWORD_LENGTH:
         return f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
@@ -204,16 +205,22 @@ def set_owner_password(
     *,
     nova_api_key: str | None = None,
     site_title: str | None = None,
-) -> None:
+) -> tuple[str, str]:
     """Write the owner password hash and a fresh session secret (SPEC § 5.1 step 4).
+
+    Returns the ``(password_hash, session_secret)`` pair it wrote, so a caller that needs to
+    mint a session from it uses what this call stored rather than whatever a later read of
+    config.json happens to find (the CLI and setup ignore it).
 
     ``nova_api_key``/``site_title`` are skipped when ``settings.locked_by`` already pins
     them: the environment variable wins regardless, so writing the form value would only
     park a stale one in config.json that never takes effect.
     """
+    password_hash = hash_password(password)
+    session_secret = secrets.token_urlsafe(32)
     updates: dict[str, object | None] = {
-        "password_hash": hash_password(password),
-        "session_secret": secrets.token_urlsafe(32),
+        "password_hash": password_hash,
+        "session_secret": session_secret,
     }
     for name, raw in (("nova_api_key", nova_api_key), ("site_title", site_title)):
         value = raw.strip() if raw else ""
@@ -224,3 +231,4 @@ def set_owner_password(
             continue
         updates[name] = value
     update_config(settings.config_path, updates)
+    return password_hash, session_secret

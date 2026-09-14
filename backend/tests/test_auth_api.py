@@ -6,6 +6,7 @@ import os
 import re
 from collections.abc import Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -13,8 +14,19 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.routing import BaseRoute
 
-from app.auth import LoginLimiter, hash_password
-from app.config import update_config
+from app.api.auth import (
+    PASSWORD_CHANGED_BUT_UNREADABLE,
+    SAME_PASSWORD_MESSAGE,
+    WRONG_CURRENT_MESSAGE,
+)
+from app.auth import (
+    COOKIE_NAME,
+    LoginLimiter,
+    hash_password,
+    validate_new_password,
+    verify_password,
+)
+from app.config import SettingsSource, update_config
 from tests.conftest import TEST_PASSWORD, env_app_client, login
 
 # Routes that must stay reachable while logged out: health for the Docker healthcheck,
@@ -312,3 +324,175 @@ def test_password_reset_invalidates_sessions(
         assert client.get("/api/images").status_code == 401
         login(client, "new-password-1")
         assert client.get("/api/images").status_code == 200
+
+
+def test_password_change_keeps_this_session_and_signs_out_the_others(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with env_app_client(tmp_path, monkeypatch) as client:
+        client.post("/api/setup", json={"password": "hunter2hunter2"})
+        login(client, "hunter2hunter2")
+        # A second browser holding its own cookie.
+        old_cookie = client.cookies.get(COOKIE_NAME)
+        assert old_cookie
+
+        resp = client.post(
+            "/api/password",
+            json={"current_password": "hunter2hunter2", "new_password": "new-password-1"},
+        )
+        assert resp.status_code == 204, resp.text
+        assert "set-cookie" in resp.headers
+        # This client now carries the re-issued cookie and stays signed in.
+        assert client.get("/api/images").status_code == 200
+        # The old token is re-keyed away (SPEC § 10). A second client on the same app stands
+        # in for the second browser: per-request `cookies=` is deprecated on the installed
+        # Starlette TestClient.
+        other = TestClient(client.app)
+        other.cookies.set(COOKIE_NAME, old_cookie)
+        assert other.get("/api/images").status_code == 401
+        # Old password no longer signs in; the new one does.
+        assert client.post("/api/login", json={"password": "hunter2hunter2"}).status_code == 401
+        client.cookies.clear()
+        login(client, "new-password-1")
+
+
+def test_password_change_refuses_a_wrong_current_password(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    with env_app_client(tmp_path, monkeypatch) as client:
+        client.post("/api/setup", json={"password": "hunter2hunter2"})
+        login(client, "hunter2hunter2")
+        with caplog.at_level(logging.WARNING, logger="app.api.auth"):
+            resp = client.post(
+                "/api/password",
+                json={"current_password": "nope-nope-nope", "new_password": "new-password-1"},
+            )
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == WRONG_CURRENT_MESSAGE
+        assert "failed password change: wrong current password" in caplog.text
+        assert "nope-nope-nope" not in caplog.text
+        assert "new-password-1" not in caplog.text
+        # Still signed in, nothing written.
+        assert client.get("/api/images").status_code == 200
+        client.cookies.clear()
+        login(client, "hunter2hunter2")
+
+
+def test_password_change_shares_the_sign_in_cooldown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with env_app_client(tmp_path, monkeypatch) as client:
+        client.post("/api/setup", json={"password": "hunter2hunter2"})
+        login(client, "hunter2hunter2")
+        body = {"current_password": "nope-nope-nope", "new_password": "new-password-1"}
+        for _ in range(5):
+            assert client.post("/api/password", json=body).status_code == 403
+        # The fifth wrong password started the cooldown: even the right one is turned away now.
+        body["current_password"] = "hunter2hunter2"
+        resp = client.post("/api/password", json=body)
+        assert resp.status_code == 429 and resp.headers["retry-after"] == "60"
+        # One sentence for both routes: it is the password that was wrong, not the sign-in.
+        assert resp.json()["detail"] == "Too many wrong passwords. Try again in 60 seconds."
+        # The cooldown is the sign-in one: login is throttled too.
+        client.cookies.clear()
+        assert client.post("/api/login", json={"password": "hunter2hunter2"}).status_code == 429
+
+
+def test_password_change_validates_the_new_password(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with env_app_client(tmp_path, monkeypatch) as client:
+        client.post("/api/setup", json={"password": "hunter2hunter2"})
+        login(client, "hunter2hunter2")
+        short = client.post(
+            "/api/password", json={"current_password": "hunter2hunter2", "new_password": "short"}
+        )
+        assert short.status_code == 422
+        assert short.json()["detail"] == validate_new_password("short")
+        same = client.post(
+            "/api/password",
+            json={"current_password": "hunter2hunter2", "new_password": "hunter2hunter2"},
+        )
+        assert same.status_code == 422 and same.json()["detail"] == SAME_PASSWORD_MESSAGE
+        # Nothing changed.
+        client.cookies.clear()
+        login(client, "hunter2hunter2")
+
+
+def test_password_change_clears_the_cooldown_counter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Four wrong guesses then the right one: the change succeeds and the counter is reset,
+    so the owner does not walk straight into a cooldown on their next sign-in."""
+    with env_app_client(tmp_path, monkeypatch) as client:
+        client.post("/api/setup", json={"password": "hunter2hunter2"})
+        login(client, "hunter2hunter2")
+        for _ in range(4):
+            wrong = client.post(
+                "/api/password",
+                json={"current_password": "nope-nope-nope", "new_password": "new-password-1"},
+            )
+            assert wrong.status_code == 403
+        right = client.post(
+            "/api/password",
+            json={"current_password": "hunter2hunter2", "new_password": "new-password-1"},
+        )
+        assert right.status_code == 204, right.text
+        # The four failures are gone: signing in again is not throttled.
+        client.cookies.clear()
+        resp = client.post("/api/login", json={"password": "new-password-1"})
+        assert resp.status_code == 204, resp.text
+
+
+def test_a_refused_new_password_costs_no_cooldown_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 422 is decided from the request body alone, before the limiter is touched: it must
+    not be a way to push the owner into a cooldown (nor to spend a scrypt)."""
+    with env_app_client(tmp_path, monkeypatch) as client:
+        client.post("/api/setup", json={"password": "hunter2hunter2"})
+        login(client, "hunter2hunter2")
+        wrong = {"current_password": "nope-nope-nope", "new_password": "new-password-1"}
+        for _ in range(4):
+            assert client.post("/api/password", json=wrong).status_code == 403
+        short = client.post(
+            "/api/password", json={"current_password": "hunter2hunter2", "new_password": "short"}
+        )
+        assert short.status_code == 422
+        # Had the 422 claimed the fifth slot, this would be the 429 that follows a cooldown.
+        assert client.post("/api/password", json=wrong).status_code == 403
+
+
+def test_password_change_500_when_the_file_cannot_be_read_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The write landed but the reload sees no usable credentials: the password really did
+    change, so say that, and do not hand out a cookie the app could not honour anyway."""
+    with env_app_client(tmp_path, monkeypatch) as client:
+        client.post("/api/setup", json={"password": "hunter2hunter2"})
+        login(client, "hunter2hunter2")
+        monkeypatch.setattr(
+            SettingsSource,
+            "reload",
+            lambda self: replace(self.current(), password_hash=None, session_secret=None),
+        )
+        with caplog.at_level(logging.ERROR, logger="app.api.auth"):
+            resp = client.post(
+                "/api/password",
+                json={"current_password": "hunter2hunter2", "new_password": "new-password-1"},
+            )
+        assert resp.status_code == 500
+        assert resp.json() == {"detail": PASSWORD_CHANGED_BUT_UNREADABLE}
+        assert "set-cookie" not in resp.headers
+        assert "could not be read back" in caplog.text
+        assert "new-password-1" not in caplog.text and str(tmp_path) not in resp.text
+    # The new password is on disk: the sentence above is the truth, not a guess.
+    stored = json.loads((tmp_path / "data" / "config.json").read_text())["password_hash"]
+    assert verify_password("new-password-1", stored)
+
+
+def test_password_change_needs_a_session(anon_client: TestClient) -> None:
+    resp = anon_client.post(
+        "/api/password", json={"current_password": "x" * 8, "new_password": "y" * 8}
+    )
+    assert resp.status_code == 401
