@@ -38,12 +38,23 @@ test('first run: setup, sign in, solve, export, edit, config, sign out', async (
   const imageId = /\/images\/([^/?#]+)/.exec(page.url())?.[1]
   expect(imageId, `no image id in ${page.url()}`).toBeTruthy()
   const annotationsUrl = `/api/images/${imageId}/annotations`
-  const enabledCount = async (): Promise<number> => {
+  interface StoredLabel {
+    object_id: number
+    enabled: boolean
+    x: number
+    y: number
+  }
+  // What the server has stored, which is what every assertion below is about: the autosave has to
+  // have landed, not just the canvas to have moved.
+  const stored = async (): Promise<{ version: number; labels: StoredLabel[] }> => {
     const res = await page.request.get(annotationsUrl)
     expect(res.status()).toBe(200)
-    const { labels } = (await res.json()) as { labels: { enabled: boolean }[] }
-    return labels.filter((l) => l.enabled).length
+    return (await res.json()) as { version: number; labels: StoredLabel[] }
   }
+  const enabledCount = async (): Promise<number> =>
+    (await stored()).labels.filter((l) => l.enabled).length
+  const storedLabel = async (objectId: number): Promise<StoredLabel | undefined> =>
+    (await stored()).labels.find((l) => l.object_id === objectId)
 
   // Objects tab: toggling a row's checkbox is `toggleWithPlacement` (SPEC § 6.1), autosaved.
   await page.getByRole('tab', { name: 'Objects' }).click()
@@ -67,9 +78,11 @@ test('first run: setup, sign in, solve, export, edit, config, sign out', async (
   const start = await page.evaluate((l) => {
     const { stage } = window.__astrocaptionEditor!
     const scale = stage.scaleX()
-    // A few px in from the label's top-left corner (its box's own origin), safely inside the
-    // group's hit rect (LabelTextShape.tsx) rather than right on the edge.
-    return { x: stage.x() + (l!.x + 6) * scale, y: stage.y() + (l!.y + 6) * scale }
+    // A few SCREEN px in from the label's top-left corner (its box's own origin), safely inside
+    // the group's hit rect (LabelTextShape.tsx) rather than right on the edge. The offset is
+    // added after scaling: 6 original pixels can be well under one screen pixel when the image is
+    // fitted into the window.
+    return { x: stage.x() + l!.x * scale + 6, y: stage.y() + l!.y * scale + 6 }
   }, label)
   const startX = canvasBox!.x + start.x
   const startY = canvasBox!.y + start.y
@@ -78,27 +91,26 @@ test('first run: setup, sign in, solve, export, edit, config, sign out', async (
   await page.mouse.move(startX + 40, startY, { steps: 5 })
   await page.mouse.up()
   await expect
-    .poll(
-      async () => {
-        const res = await page.request.get(annotationsUrl)
-        expect(res.status()).toBe(200)
-        const { labels } = (await res.json()) as { labels: { object_id: number; x: number }[] }
-        return labels.find((l) => l.object_id === label!.id)?.x ?? Number.NEGATIVE_INFINITY
-      },
-      { timeout: 3_000 },
-    )
+    .poll(async () => (await storedLabel(label!.id))?.x ?? Number.NEGATIVE_INFINITY, { timeout: 3_000 })
     .toBeGreaterThan(label!.x)
+  // A horizontal drag moves nothing else: a pan or a re-place would have shifted y too.
+  expect((await storedLabel(label!.id))!.y).toBeCloseTo(label!.y, 0)
 
   // Layout tab: Auto-arrange flushes the pending drag save, re-places every enabled label, and the
-  // result is itself autosaved back to "Saved".
+  // result is itself autosaved back to "Saved" — a new stored version is the proof it ran.
+  const versionBeforeArrange = (await stored()).version
   await page.getByRole('tab', { name: 'Layout' }).click()
   await page.getByRole('button', { name: 'Auto-arrange' }).click()
+  await expect.poll(async () => (await stored()).version, { timeout: 10_000 }).toBeGreaterThan(versionBeforeArrange)
   await expect(page.locator('.save-status')).toHaveText('Saved')
 
   // Image tab: Export renders the current document and offers the download link.
   await page.getByRole('tab', { name: 'Image' }).click()
   await page.getByRole('button', { name: 'Export' }).click()
   await expect(page.getByRole('link', { name: 'Download full-resolution export' })).toBeVisible()
+
+  // None of the three tabs reported a failure along the way.
+  await expect(page.locator('.side-panel .error')).toHaveCount(0)
 
   await page.goto('/')
 
