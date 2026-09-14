@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures'
 import { ensureExported, ensureSetUpAndSignedIn, ensureSolvedImage, PASSWORD } from './helpers'
 
 // This runs against the built frontend bundle served by uvicorn (`make e2e`) or the Docker
@@ -8,9 +8,6 @@ import { ensureExported, ensureSetUpAndSignedIn, ensureSolvedImage, PASSWORD } f
 // opens on it, the config page changes the title, and signing out closes the door. Every step is
 // one the blank-page regression (#11) would have broken.
 test('first run: setup, sign in, solve, export, edit, config, sign out', async ({ page }) => {
-  const errors: string[] = []
-  page.on('pageerror', (e) => errors.push(e.message))
-
   await ensureSetUpAndSignedIn(page)
   // A second pass on the same data dir finds the title already renamed by the first pass's
   // Config step below.
@@ -154,6 +151,4 @@ test('first run: setup, sign in, solve, export, edit, config, sign out', async (
   await expect(page).toHaveURL(/\/login$/)
   await page.goto('/setup')
   await expect(page.getByText('This site is already set up.')).toBeVisible()
-
-  expect(errors).toEqual([])
 })

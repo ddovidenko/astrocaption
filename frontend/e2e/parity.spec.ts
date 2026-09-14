@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -18,9 +18,6 @@ interface Vectors {
 }
 
 test('the canvas measures every vector string within 0.5 px of Pillow', async ({ page }) => {
-  const errors: string[] = []
-  page.on('pageerror', (e) => errors.push(e.message))
-
   await ensureSetUpAndSignedIn(page)
   const { texts } = JSON.parse(readFileSync(VECTORS, 'utf8')) as Vectors
   const files = [...new Set(texts.map(([file]) => file))]
@@ -75,13 +72,9 @@ test('the canvas measures every vector string within 0.5 px of Pillow', async ({
   )
   const bad = deltas.filter((t) => t.delta > WIDTH_TOLERANCE_PX)
   expect(bad, JSON.stringify(bad.slice(0, 10), null, 1)).toEqual([])
-  expect(errors).toEqual([])
 })
 
 test('the editor stage matches the annotated preview within the pixel budget', async ({ page }, testInfo) => {
-  const errors: string[] = []
-  page.on('pageerror', (e) => errors.push(e.message))
-
   await ensureSetUpAndSignedIn(page)
   const card = await ensureSolvedImage(page)
   const previewUrl = await ensureExported(card)
@@ -191,5 +184,4 @@ test('the editor stage matches the annotated preview within the pixel budget', a
     result.fraction,
     `${result.differing} of ${result.w * result.h} pixels differ by more than ${PIXEL_THRESHOLD}`,
   ).toBeLessThanOrEqual(PIXEL_FRACTION)
-  expect(errors).toEqual([])
 })

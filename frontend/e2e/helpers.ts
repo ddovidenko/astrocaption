@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test'
+import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { HealthOut, ImageOut } from '../src/api'
@@ -58,17 +58,34 @@ export async function ensureSetUpAndSignedIn(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 }
 
-/** Switches how the fake nova answers job polls, for every solve from now on. */
-export async function setFakeNovaMode(page: Page, mode: FakeNovaMode): Promise<void> {
-  const res = await page.request.post(`${FAKE_NOVA_URL}/_fake/mode`, { data: { job: mode } })
-  expect(res.status(), `fake nova mode ${mode}`).toBe(200)
+export interface FakeNovaState {
+  job: FakeNovaMode
+  /** POST /api/upload count since the fake started. Check again must not add one. */
+  uploads: number
 }
 
-/** How many uploads the fake nova has been sent since it started. Check again must not add one. */
-export async function fakeNovaUploads(page: Page): Promise<number> {
-  const res = await page.request.get(`${FAKE_NOVA_URL}/_fake/mode`)
-  expect(res.status()).toBe(200)
-  return ((await res.json()) as { uploads: number }).uploads
+/** The fake nova's own control surface (`/_fake/…` in fake-nova.mjs), reached directly rather
+ *  than through the app. Built on an APIRequestContext, so a fixture or a cleanup hook can drive
+ *  it without a page (see fixtures.ts, which resets the mode after every test). */
+export class FakeNova {
+  constructor(private readonly request: APIRequestContext) {}
+
+  /** Switches how the fake answers job polls, for every solve from now on. */
+  async setMode(mode: FakeNovaMode): Promise<void> {
+    const res = await this.request.post(`${FAKE_NOVA_URL}/_fake/mode`, { data: { job: mode } })
+    expect(res.status(), `fake nova mode ${mode}`).toBe(200)
+  }
+
+  /** The mode in force and the upload count. */
+  async state(): Promise<FakeNovaState> {
+    const res = await this.request.get(`${FAKE_NOVA_URL}/_fake/state`)
+    expect(res.status(), 'fake nova state').toBe(200)
+    const body = (await res.json()) as FakeNovaState
+    // A shape check, not a formality: a renamed field would otherwise read as `undefined` and
+    // quietly turn every upload-count assertion into a comparison of two undefineds.
+    expect(typeof body.uploads, `fake nova upload count in ${JSON.stringify(body)}`).toBe('number')
+    return body
+  }
 }
 
 /** Uploads the fixture under `title` and returns its card, without waiting for a solve status. */
@@ -81,18 +98,30 @@ export async function uploadImage(page: Page, title: string): Promise<Locator> {
   return card
 }
 
+/** Every image the API lists under `title` (the one question three helpers below ask). */
+export async function imagesTitled(request: APIRequestContext, title: string): Promise<ImageOut[]> {
+  const res = await request.get('/api/images')
+  expect(res.status(), 'GET /api/images').toBe(200)
+  return ((await res.json()) as ImageOut[]).filter((i) => i.title === title)
+}
+
 /** Removes every image titled `title` through the API, so a re-run on the same data dir starts
- *  clean, and reloads so the list on screen agrees (a stale card would still match a selector). */
-export async function deleteImageIfPresent(page: Page, title: string): Promise<void> {
-  const res = await page.request.get('/api/images')
-  expect(res.status()).toBe(200)
-  for (const img of (await res.json()) as ImageOut[]) {
-    if (img.title === title) {
-      expect((await page.request.delete(`/api/images/${img.id}`)).status()).toBe(204)
-    }
+ *  clean. With a `page`, the list on screen is reloaded to agree (a stale card would still match
+ *  a selector) — only when something was actually deleted, so a cleanup hook on a clean install
+ *  costs nothing. */
+export async function deleteImageIfPresent(
+  request: APIRequestContext,
+  title: string,
+  page?: Page
+): Promise<void> {
+  const images = await imagesTitled(request, title)
+  for (const img of images) {
+    expect((await request.delete(`/api/images/${img.id}`)).status(), `DELETE ${title}`).toBe(204)
   }
-  await page.reload()
-  await expect(page.locator('article.card', { hasText: title })).toHaveCount(0)
+  if (images.length > 0 && page) {
+    await page.reload()
+    await expect(page.locator('article.card', { hasText: title })).toHaveCount(0)
+  }
 }
 
 /** Returns the card for `title`, uploading and solving the fixture first if it is not there.
@@ -100,12 +129,10 @@ export async function deleteImageIfPresent(page: Page, title: string): Promise<v
  *  card count of 0 is also what a list that has not rendered yet looks like, and that would
  *  upload a second copy. */
 export async function ensureSolvedImage(page: Page, title = 'Orion'): Promise<Locator> {
-  const res = await page.request.get('/api/images')
-  expect(res.status()).toBe(200)
-  const images = (await res.json()) as ImageOut[]
-  const card = images.some((i) => i.title === title)
-    ? page.locator('article.card', { hasText: title })
-    : await uploadImage(page, title)
+  const card =
+    (await imagesTitled(page.request, title)).length > 0
+      ? page.locator('article.card', { hasText: title })
+      : await uploadImage(page, title)
   await expect(card.locator('.badge')).toHaveText('Solved', { timeout: 60_000 })
   await expect(card.getByText(/[1-9]\d* objects/)).toBeVisible()
   return card

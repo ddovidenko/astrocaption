@@ -1,9 +1,10 @@
 // A fake nova.astrometry.net that replays the recorded fixtures, so the browser smoke test
 // never contacts nova (CLAUDE.md). Standard library only; started by Playwright's webServer.
 //
+// Everything under `/_fake/` is the fake's own control surface (`control()`), never nova:
 // `POST /_fake/mode` with {"job": "success"|"failure"|"timeout"} switches how job polls are
 // answered from then on, so a spec can drive a failed solve and a solve nova never finishes;
-// `GET /_fake/mode` reports the mode and how many uploads the fake has received.
+// `GET /_fake/state` reports the mode and how many uploads the fake has received.
 //
 //   FAKE_NOVA_PORT   default 8901
 //   FAKE_NOVA_HOST   default 127.0.0.1 (0.0.0.0 in CI so a container can reach it)
@@ -64,7 +65,7 @@ let job = firstThenRest()
 const MODES = ['success', 'failure', 'timeout']
 let mode = 'success'
 let uploads = 0
-const modeBody = () => JSON.stringify({ job: mode, uploads })
+const stateBody = () => JSON.stringify({ job: mode, uploads })
 
 /** Applies a POST /_fake/mode body. Returns the status and body to answer with. */
 function setMode(body) {
@@ -79,15 +80,22 @@ function setMode(body) {
   }
   if (wanted !== mode) console.log(`mode -> ${wanted}`)
   mode = wanted
-  return { status: 200, body: modeBody() }
+  return { status: 200, body: stateBody() }
+}
+
+/** The fake's own endpoints. Owns every path under /_fake/, so a typo there is a 404 from the
+ *  control surface rather than a nova replay (or a silently ignored request). */
+function control(method, path, body) {
+  if ((method === 'GET' || method === 'HEAD') && path === '/_fake/state') {
+    return { status: 200, body: stateBody() }
+  }
+  if (method === 'POST' && path === '/_fake/mode') return setMode(body)
+  return { status: 404, body: '{"status": "error", "errormessage": "no such fake control endpoint"}' }
 }
 
 function route(method, path) {
   if ((method === 'GET' || method === 'HEAD') && path === '/') return { type: 'application/json', body: '{"ok": true}' }
   if (method === 'POST' && path === '/api/login') return json('login.json')
-  if ((method === 'GET' || method === 'HEAD') && path === '/_fake/mode') {
-    return { type: 'application/json', body: modeBody() }
-  }
   if (method === 'POST' && path === '/api/upload') {
     uploads += 1
     submission = firstThenRest()
@@ -119,22 +127,22 @@ const server = createServer((req, res) => {
   // Drain the request body (uploads are multipart) before answering. Nova bodies are never
   // parsed or validated: a malformed upload still gets upload.json; this is a replay, not
   // a protocol check. A client that drops the connection mid-body fails only this request.
-  // The one body that is read is the mode switch below, which is the fake's own endpoint.
-  const switching = method === 'POST' && url.pathname === '/_fake/mode'
+  // The only bodies that are read are the fake's own control requests.
+  const isControl = url.pathname.startsWith('/_fake/')
   const chunks = []
   req.on('data', (chunk) => {
-    if (switching) chunks.push(chunk)
+    if (isControl) chunks.push(chunk)
   })
   req.on('error', (err) => {
     console.error(`fake nova: ${req.method} ${url.pathname} aborted (${err.message})`)
     res.destroy()
   })
   req.on('end', () => {
-    if (switching) {
-      const answer = setMode(Buffer.concat(chunks).toString('utf8'))
+    if (isControl) {
+      const answer = control(method, url.pathname, Buffer.concat(chunks).toString('utf8'))
       console.log(`${method} ${url.pathname} -> ${answer.status}`)
       res.writeHead(answer.status, { 'content-type': 'application/json' })
-      res.end(answer.body)
+      res.end(method === 'HEAD' ? undefined : answer.body)
       return
     }
     const hit = route(method, url.pathname)

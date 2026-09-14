@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,6 +9,9 @@ import { fileURLToPath } from 'node:url'
 // E2E_BASE_URL at it; the fake nova is still started here, on 0.0.0.0 so the container can
 // reach it through host.docker.internal.
 const startApp = process.env.E2E_START_APP === '1'
+// The Vite dev server (and the project that drives it) is opt-in: `make e2e` and the CI step set
+// this. An ad-hoc `npx playwright test` then starts no second server and runs the other specs.
+const devProxy = process.env.E2E_DEV_PROXY === '1'
 const appPort = 8765
 const novaPort = process.env.FAKE_NOVA_PORT ?? '8901'
 const novaHost = process.env.FAKE_NOVA_HOST ?? '127.0.0.1'
@@ -34,9 +37,20 @@ if (startApp) {
   }
 }
 
+const here = fileURLToPath(new URL('.', import.meta.url))
 const backend = resolve(fileURLToPath(new URL('..', import.meta.url)), 'backend')
+
 if (startApp && !existsSync(join(backend, 'static', 'index.html'))) {
   throw new Error('backend/static is missing; run `make e2e` (it builds the frontend first)')
+}
+
+/** The app environment the suite runs against (frontend/e2e/app.env), as KEY=VALUE pairs. One
+ *  file, so the local uvicorn below and CI's `docker run --env-file` cannot drift apart. */
+function appEnv(): string[] {
+  return readFileSync(join(here, 'e2e', 'app.env'), 'utf8')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'))
 }
 
 export default defineConfig({
@@ -57,10 +71,19 @@ export default defineConfig({
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: { trace: 'retain-on-failure' },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'], baseURL }, testIgnore: /dev-proxy\.spec\.ts/ },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], baseURL }, testIgnore: /\.dev\.spec\.ts$/ },
     // #52: the Vite dev server with its /api proxy, against the same app. Guards the blank-page
-    // regression a lost proxy causes; never touches :5173 or :8000.
-    { name: 'dev-proxy', use: { ...devices['Desktop Chrome'], baseURL: devURL }, testMatch: /dev-proxy\.spec\.ts/ },
+    // regression a lost proxy causes; never touches :5173 or :8000. `*.dev.spec.ts` is the
+    // convention for "needs the dev server", and only this project runs those.
+    ...(devProxy
+      ? [
+          {
+            name: 'dev-proxy',
+            use: { ...devices['Desktop Chrome'], baseURL: devURL },
+            testMatch: /\.dev\.spec\.ts$/,
+          },
+        ]
+      : []),
   ],
   webServer: [
     {
@@ -85,11 +108,7 @@ export default defineConfig({
               `ASTROCAPTION_STATIC_DIR="${backend}/static"`,
               `NOVA_BASE_URL=http://127.0.0.1:${novaPort}`,
               'NOVA_API_KEY=fixture',
-              // The fake answers instantly, so a solve that is going nowhere (fake-nova's
-              // 'timeout' mode, solve-failure.spec.ts) reaches the deadline in seconds
-              // instead of the default 15 minutes.
-              'ASTROCAPTION_SOLVE_TIMEOUT_SECONDS=12',
-              'ASTROCAPTION_SOLVE_POLL_SECONDS=1',
+              ...appEnv(),
               `${backend}/.venv/bin/uvicorn app.main:app --port ${appPort}`,
             ].join(' '),
             cwd: backend,
@@ -99,14 +118,20 @@ export default defineConfig({
           },
         ]
       : []),
-    {
-      // Started for every run, CI included: there it proxies to the container at E2E_BASE_URL.
-      // Vite needs only node_modules, so this works in the Docker job's Node-only environment.
-      command: `npx vite --port ${devPort} --strictPort --host 127.0.0.1`,
-      env: { ASTROCAPTION_API_URL: baseURL },
-      url: `${devURL}/`,
-      reuseExistingServer: false,
-      timeout: 30_000,
-    },
+    ...(devProxy
+      ? [
+          {
+            // CI included: there it proxies to the container at E2E_BASE_URL. Vite needs only
+            // node_modules, so this works in the Docker job's Node-only environment. No `npx`:
+            // `npm run e2e` already has node_modules/.bin on PATH, like the fake-nova entry.
+            command: `vite --port ${devPort} --strictPort --host 127.0.0.1`,
+            env: { ASTROCAPTION_DEV_PROXY_TARGET: baseURL },
+            url: `${devURL}/`,
+            reuseExistingServer: false,
+            timeout: 30_000,
+            stdout: 'pipe' as const,
+          },
+        ]
+      : []),
   ],
 })
