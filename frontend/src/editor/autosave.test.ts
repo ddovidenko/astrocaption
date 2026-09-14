@@ -105,4 +105,53 @@ describe('autosave', () => {
     expect(f.calls).toHaveLength(0)
     expect(useEditor.getState().save.status).toBe('dirty')
   })
+
+  it('does not save after stop()', async () => {
+    const f = fakeSave()
+    stop = startAutosave('img', { save: f.save })
+    useEditor.getState().toggleObject(1)
+    stop()
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 2)
+    expect(f.calls).toHaveLength(0)
+  })
+
+  it('ignores a save response that arrives after stop()', async () => {
+    const f = fakeSave()
+    stop = startAutosave('img', { save: f.save })
+    useEditor.getState().toggleObject(1)
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS)
+    expect(f.calls).toHaveLength(1)
+    stop()
+    f.done(f.calls[0]!)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(useEditor.getState().version).toBe(1)
+  })
+
+  it('retrySave() on a clean document makes no call', async () => {
+    const f = fakeSave()
+    stop = startAutosave('img', { save: f.save })
+    expect(useEditor.getState().save.status).toBe('saved')
+    retrySave()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(f.calls).toHaveLength(0)
+  })
+
+  it("flushSave() saves at once when dirty with a timer pending, and resolves 'saved'", async () => {
+    const f = fakeSave()
+    stop = startAutosave('img', { save: f.save })
+    useEditor.getState().toggleObject(1)
+    const flushed = flushSave()
+    expect(f.calls).toHaveLength(1)
+    f.done(f.calls[0]!)
+    expect(await flushed).toBe('saved')
+  })
+
+  it("flushSave() resolves 'error' after a failed save", async () => {
+    const f = fakeSave()
+    f.setFail(new ApiError(500, 'boom'))
+    stop = startAutosave('img', { save: f.save })
+    useEditor.getState().toggleObject(1)
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS)
+    expect(await flushSave()).toBe('error')
+  })
 })
