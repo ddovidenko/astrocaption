@@ -127,7 +127,8 @@ autoarrange / reset), `markSaved`, `markConflict`. Canvas nodes subscribe per la
   failure sentence with Retry. 409 → `conflict`: "This image was changed elsewhere" with a Reload
   button; editing continues locally but no further saves are attempted until reload.
   `beforeunload` warns while dirty or saving.
-- **Objects tab.** Search box; type filter chips (galaxy, nebula, cluster, star, other, hd) with `hd`
+- **Objects tab.** Search box; type filter chips (NGC, IC, bright stars, HD stars, other — nova's
+  types; morphological types arrive with M4's names catalog) with `hd`
   off by default (#37; both HD-twin rows stay); list rows: checkbox, primary name, type, radius in px.
   Bulk: "Enable shown", "Disable shown". Row hover highlights on canvas; clicking the name pans to the
   object. Tested against `nova-narrow` (8 objects, 5 `hd`, 3 enabled by default).

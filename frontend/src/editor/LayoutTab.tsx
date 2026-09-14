@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ApiError, api, pageError, type Label } from '../api'
+import { flushSave } from './autosave'
 import { isEditable } from './editing'
 import { documentForSave, enabledLabels, useEditor } from './store'
 
@@ -19,13 +20,23 @@ export default function LayoutTab() {
     return n
   }, [labels])
 
-  /** `prepare` runs first and its changes are part of what is sent: Reset moves the labels home
-   *  in the store, then the very same document goes to the placer. */
+  /** Flushes the autosave, then runs `prepare` (Reset moves the labels home in the store) and
+   *  sends the resulting document to the placer.
+   *
+   *  The flush comes first because `/autoarrange` checks the version the same way a save does: a
+   *  click while a save is still in flight would send the stale version, and the 409 that answers
+   *  it would become a sticky conflict the owner never caused — with Reset's flattened layout
+   *  already in the store and no way left to save it. */
   async function arrange(what: 'arrange' | 'reset', prepare?: () => void): Promise<void> {
     if (!imageId) return
     setBusy(what)
     setError(null)
     try {
+      const status = await flushSave()
+      if (status !== 'saved') {
+        setError(useEditor.getState().save.message ?? 'The layout could not be saved.')
+        return
+      }
       prepare?.()
       const res = await api.autoarrange(imageId, documentForSave(useEditor.getState()))
       useEditor.getState().applyLabels(res.labels)

@@ -1,12 +1,16 @@
 import { useState } from 'react'
 import { api, formatBytes, pageError, type ExportOut } from '../api'
 import { flushSave } from './autosave'
+import { isEditable } from './editing'
 import { useEditor } from './store'
 
 /** Read-only solve facts plus the export button (design § 5). Publish, re-solve and delete stay
  *  on the image card. */
 export default function ImageTab() {
   const image = useEditor((s) => s.image)
+  // The server refuses an export while a solve is running ("Image is not solved yet."); the
+  // button says so by being disabled rather than by failing.
+  const editable = useEditor(isEditable)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ExportOut | null>(null)
@@ -15,6 +19,7 @@ export default function ImageTab() {
   const cal = image.calibration
 
   async function exportNow(id: string): Promise<void> {
+    if (!editable) return
     setBusy(true)
     setError(null)
     try {
@@ -67,7 +72,11 @@ export default function ImageTab() {
         </p>
       )}
       <div className="tab-actions">
-        <button disabled={busy} onMouseDown={(e) => e.preventDefault()} onClick={() => void exportNow(image.id)}>
+        <button
+          disabled={busy || !editable}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => void exportNow(image.id)}
+        >
           {busy ? 'Rendering…' : 'Export'}
         </button>
       </div>
