@@ -143,6 +143,7 @@ def image_out(rec: ImageRecord, settings: Settings, object_count: int) -> ImageO
         height=rec.height,
         solve_status=rec.solve_status,
         solve_error=rec.solve_error,
+        check_available=check_available(rec),
         nova_submission_id=rec.nova_submission_id,
         nova_job_id=rec.nova_job_id,
         nova_status_url=(
@@ -168,11 +169,34 @@ def image_out(rec: ImageRecord, settings: Settings, object_count: int) -> ImageO
     )
 
 
+def check_available(rec: ImageRecord) -> bool:
+    """Whether POST /check can resume this row, which is the one thing Check again is for.
+
+    Only a deadline failure is resumable: the submission it still holds may well have finished
+    on nova since. A nova FAILURE, a re-submit that failed and left an *earlier* attempt's ids
+    on the row, and an unexpected server error are all dead ends where resuming would either
+    re-report the same failure or silently adopt a stale job's result — Re-solve is the answer
+    there. ``image_out`` reports this and ``check_solve`` enforces it, so the button the page
+    draws and the route's answer can never disagree.
+    """
+    return (
+        rec.solve_status == SolveStatus.FAILED
+        and rec.solve_failure == "timeout"
+        and rec.nova_submission_id is not None
+    )
+
+
 def _get_or_404(db: Database, image_id: str) -> ImageRecord:
     rec = db.get_image(image_id)
     if rec is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Image not found.")
     return rec
+
+
+def _require_idle(rec: ImageRecord) -> None:
+    """409 when a solve is already queued or running: neither route may touch the row then."""
+    if rec.solve_status in (SolveStatus.PENDING, SolveStatus.SOLVING):
+        raise HTTPException(status.HTTP_409_CONFLICT, IN_PROGRESS_MESSAGE)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -267,11 +291,15 @@ async def solve_image(
     hints: SolveHints | None = None,
 ) -> ImageOut:
     rec = _get_or_404(db, image_id)
-    if rec.solve_status in (SolveStatus.PENDING, SolveStatus.SOLVING):
-        raise HTTPException(status.HTTP_409_CONFLICT, "A solve is already in progress.")
+    _require_idle(rec)
     db.update_image(
         image_id,
-        {"solve_status": SolveStatus.PENDING, "solve_error": None, "solve_hints": hints},
+        {
+            "solve_status": SolveStatus.PENDING,
+            "solve_error": None,
+            "solve_failure": None,
+            "solve_hints": hints,
+        },
     )
     worker.enqueue(image_id)
     return image_out(_get_or_404(db, image_id), settings, db.count_objects(image_id))
@@ -281,18 +309,22 @@ async def solve_image(
 async def check_solve(
     image_id: str, settings: SettingsDep, db: DbDep, worker: WorkerDep
 ) -> ImageOut:
-    """Check again (#10): resume polling the stored nova submission/job of a failed row instead
-    of uploading the image again — the 15-minute deadline may have passed while nova was still
-    working. The worker's resume branch does the polling; a stored job id skips the submission
-    poll. Nothing about the row changes except the status and the cleared error."""
+    """Check again (#10): resume polling the stored nova submission/job of a row that timed
+    out, instead of uploading the image again — the 15-minute deadline may have passed while
+    nova was still working. The worker's resume branch does the polling; a stored job id skips
+    the submission poll. Nothing about the row changes except the status and the cleared error,
+    so the stored scale hints and ``solve_scale`` keep describing the attempt being resumed.
+    Any other failure is refused (``check_available``)."""
     rec = _get_or_404(db, image_id)
-    if rec.solve_status in (SolveStatus.PENDING, SolveStatus.SOLVING):
-        raise HTTPException(status.HTTP_409_CONFLICT, "A solve is already in progress.")
+    _require_idle(rec)
     if rec.solve_status == SolveStatus.SOLVED:
         raise HTTPException(status.HTTP_409_CONFLICT, ALREADY_SOLVED_MESSAGE)
-    if rec.nova_submission_id is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, NO_SUBMISSION_MESSAGE)
-    db.update_image(image_id, {"solve_status": SolveStatus.SOLVING, "solve_error": None})
+    if not check_available(rec):
+        raise HTTPException(status.HTTP_409_CONFLICT, NOT_RESUMABLE_MESSAGE)
+    db.update_image(
+        image_id,
+        {"solve_status": SolveStatus.SOLVING, "solve_error": None, "solve_failure": None},
+    )
     worker.enqueue(image_id)
     return image_out(_get_or_404(db, image_id), settings, db.count_objects(image_id))
 
@@ -327,7 +359,10 @@ async def get_annotations(image_id: str, settings: SettingsDep, db: DbDep) -> An
 
 
 SOLVING_MESSAGE = "The image is still being solved; try again when it is done."
-NO_SUBMISSION_MESSAGE = "There is no nova.astrometry.net submission to check; use Re-solve."
+IN_PROGRESS_MESSAGE = "A solve is already in progress."
+NOT_RESUMABLE_MESSAGE = (
+    "There is no nova.astrometry.net job to resume for this image; use Re-solve."
+)
 ALREADY_SOLVED_MESSAGE = "This image is already solved; use Re-solve to solve it again."
 CONFLICT_MESSAGE = "This image was changed elsewhere. Reload to continue editing."
 NOT_SOLVED_MESSAGE = "Image has not been solved yet."

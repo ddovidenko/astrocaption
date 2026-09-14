@@ -36,6 +36,16 @@ class SolveStatus(StrEnum):
     FAILED = "failed"
 
 
+SolveFailureKind = Literal["timeout", "failed", "error"]
+"""Why a FAILED row failed, so the API can tell a resumable failure from a dead one.
+
+``timeout``: the worker gave up waiting while nova was still working — the stored submission
+may well have finished since, so Check again can resume it. ``failed``: nova answered with a
+failure, or the solve was refused before nova ever saw it. ``error``: an unexpected error on
+this server. Only ``timeout`` is resumable; see ``ImageOut.check_available``.
+"""
+
+
 # ---------------------------------------------------------------------------
 # Catalogue objects (immutable after a solve)
 # ---------------------------------------------------------------------------
@@ -358,6 +368,9 @@ class ImageRecord(BaseModel):
     height: int
     solve_status: SolveStatus = SolveStatus.PENDING
     solve_error: str | None = None
+    # A SolveFailureKind while the row is FAILED, NULL otherwise; plain ``str`` because a row
+    # written by a future build (or hand-edited) must still load.
+    solve_failure: str | None = None
     solve_scale: float = 1.0
     nova_submission_id: int | None = None
     nova_job_id: int | None = None
@@ -386,6 +399,8 @@ class ImageOut(BaseModel):
     height: int
     solve_status: SolveStatus
     solve_error: str | None
+    #: The failed solve can be resumed by POST /check: it timed out with a stored submission.
+    check_available: bool
     nova_submission_id: int | None
     nova_job_id: int | None
     nova_status_url: str | None

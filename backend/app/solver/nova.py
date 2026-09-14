@@ -117,6 +117,14 @@ class NovaSolver:
 
     async def poll_submission(self, submission_id: int) -> int | None:
         payload = await self._json("GET", f"/api/submissions/{submission_id}")
+        if payload.get("status") == "error":
+            # nova answers a submission it cannot look up (dropped, or belonging to another
+            # account) with an error payload. Nothing will ever appear: say so now rather
+            # than poll to the deadline.
+            raise SolverError(
+                f"nova.astrometry.net no longer knows submission {submission_id} for this"
+                f" account (see {status_url(self._base, submission_id)}). Use Re-solve."
+            )
         jobs = payload.get("jobs") or []
         for job in jobs:
             if job is not None:
@@ -132,8 +140,21 @@ class NovaSolver:
         return None
 
     async def poll_job(self, job_id: int) -> JobState:
+        """The job's state; every non-terminal status ("solving", "processing", ...) is SOLVING.
+
+        An error payload or one without a ``status`` key is nova saying it cannot look this job
+        up any more (dropped, or belonging to another account). That is permanent, so it fails
+        now instead of letting Check again poll to the 15-minute deadline. ``joblog`` rather
+        than the status page: only the job id is known here.
+        """
         payload = await self._json("GET", f"/api/jobs/{job_id}")
-        status = str(payload.get("status") or "")
+        raw = payload.get("status")
+        if raw == "error" or raw is None:
+            raise SolverError(
+                f"nova.astrometry.net no longer knows job {job_id} for this account"
+                f" (see {job_log_url(self._base, job_id)}). Use Re-solve."
+            )
+        status = str(raw)
         if status == "success":
             return JobState.SUCCESS
         if status == "failure":

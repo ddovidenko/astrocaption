@@ -18,11 +18,11 @@ from pathlib import Path
 from .config import Settings, SettingsSource
 from .db import Database
 from .layout import build_default_annotations, rematch_annotations
-from .models import ImageRecord, SolveStatus
+from .models import ImageRecord, SolveFailureKind, SolveStatus
 from .objects import objects_from_nova
 from .solver import JobState, Solver, SolveRequest, SolverError, TransientSolverError
 from .solver.nova import status_url
-from .storage import image_dir, make_solve_copy
+from .storage import delete_image_files, image_dir, make_solve_copy
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +42,15 @@ UNEXPECTED_MESSAGE = (
 
 class ImageGoneError(Exception):
     """The image row disappeared (it was deleted) while its solve was in progress."""
+
+
+class SolveTimeoutError(SolverError):
+    """The deadline passed while nova was still working on the submission.
+
+    The one failure Check again can resume: the stored submission may well have finished on
+    nova since. It is recorded as ``solve_failure = "timeout"``; every other failure is not
+    resumable (see ``ImageOut.check_available``).
+    """
 
 
 class SolveWorker:
@@ -111,9 +120,15 @@ class SolveWorker:
             await self._solve(rec)
         except ImageGoneError:
             log.info("image %s was deleted during its solve; dropping it", image_id)
+            # DELETE removed the directory before this task created it again (the solve copy);
+            # clean up what the worker left behind so no orphan survives the deletion.
+            await asyncio.to_thread(delete_image_files, self.settings, image_id)
+        except SolveTimeoutError as exc:
+            log.warning("solve timed out for %s: %s", image_id, exc)
+            self._fail(image_id, str(exc), "timeout")
         except SolverError as exc:
             log.warning("solve failed for %s: %s", image_id, exc)
-            self._fail(image_id, str(exc))
+            self._fail(image_id, str(exc), "failed")
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - logged with traceback by _report_unexpected
@@ -136,12 +151,17 @@ class SolveWorker:
         if rec.nova_submission_id is not None:
             url = status_url(self.settings.nova_base_url, rec.nova_submission_id)
             message = f"{message} Nova status: {url}"
-        self._fail(image_id, message)
+        self._fail(image_id, message, "error")
 
-    def _fail(self, image_id: str, message: str) -> None:
+    def _fail(self, image_id: str, message: str, kind: SolveFailureKind) -> None:
         try:
             self.db.update_image(
-                image_id, {"solve_status": SolveStatus.FAILED, "solve_error": message}
+                image_id,
+                {
+                    "solve_status": SolveStatus.FAILED,
+                    "solve_error": message,
+                    "solve_failure": kind,
+                },
             )
         except Exception:  # the failure handler must never take the worker down
             log.exception("could not record the failure of image %s: %s", image_id, message)
@@ -179,11 +199,15 @@ class SolveWorker:
             )
             submission_id = await solver.submit(request)
             # Only now does the row leave PENDING: the new ids replace the old ones atomically.
+            # The nova ids and solve_scale are only ever written together, in this one place,
+            # which is what lets Check again (check_solve) resume the stored submission with
+            # the scale the coordinates of that attempt have to be multiplied by.
             self.db.update_image(
                 rec.id,
                 {
                     "solve_status": SolveStatus.SOLVING,
                     "solve_error": None,
+                    "solve_failure": None,
                     "solve_scale": scale,
                     "nova_submission_id": submission_id,
                     "nova_job_id": None,
@@ -216,6 +240,7 @@ class SolveWorker:
             {
                 "solve_status": SolveStatus.SOLVED,
                 "solve_error": None,
+                "solve_failure": None,
                 "wcs_text": result.wcs_text or None,
                 "calibration": result.calibration,
             },
@@ -257,7 +282,7 @@ class SolveWorker:
         minutes = round(self.timeout / 60)
         url = status_url(self.settings.nova_base_url, submission_id)
         detail = f" Last error: {last_error}" if last_error else ""
-        raise SolverError(
+        raise SolveTimeoutError(
             f"Timed out after {minutes} minutes waiting for nova.astrometry.net."
             f" Check {url}: if the job finished there, use Check again; otherwise Re-solve.{detail}"
         )

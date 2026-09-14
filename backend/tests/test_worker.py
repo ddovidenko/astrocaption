@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from app.api.images import check_available
 from app.config import Settings
 from app.db import Database
 from app.models import SolveHints, SolveStatus
@@ -168,11 +169,13 @@ def test_failure_paths_set_plain_language_errors(settings: Settings) -> None:
     got = db.get_image(rec.id)
     assert got is not None and got.solve_status == SolveStatus.FAILED
     assert got.solve_error == NO_KEY_MESSAGE
+    assert got.solve_failure == "failed"
 
     asyncio.run(make_worker(settings, db, FakeSolver(fail=True)).process(rec.id))
     got = db.get_image(rec.id)
     assert got is not None and got.solve_status == SolveStatus.FAILED
     assert got.solve_error and "could not solve" in got.solve_error
+    assert got.solve_failure == "failed"
 
     asyncio.run(
         make_worker(settings, db, FakeSolver(submit_error=SolverError("nova says no"))).process(
@@ -181,6 +184,7 @@ def test_failure_paths_set_plain_language_errors(settings: Settings) -> None:
     )
     got = db.get_image(rec.id)
     assert got is not None and got.solve_error == "nova says no"
+    assert got.solve_failure == "failed"
 
     asyncio.run(
         make_worker(settings, db, FakeSolver(submission_polls=10**9), timeout=0.02).process(rec.id)
@@ -188,6 +192,8 @@ def test_failure_paths_set_plain_language_errors(settings: Settings) -> None:
     got = db.get_image(rec.id)
     assert got is not None and got.solve_error and got.solve_error.startswith("Timed out")
     assert "/status/12345678" in got.solve_error
+    # The one failure kind Check again may resume.
+    assert got.solve_failure == "timeout" and check_available(got)
 
 
 def test_resolve_keeps_layout_and_rematches_by_name(settings: Settings) -> None:
@@ -291,6 +297,9 @@ def test_old_nova_ids_survive_a_failed_resubmit(settings: Settings) -> None:
     assert got is not None
     assert got.solve_error == "nova says no"
     assert (got.nova_submission_id, got.nova_job_id) == (100, 200)  # links to the old attempt kept
+    # Those ids belong to the *earlier* attempt, so resuming them would adopt a stale job:
+    # this failure is not a timeout and Check again is not offered for it.
+    assert got.solve_failure == "failed" and not check_available(got)
 
     db.update_image(rec.id, {"solve_status": SolveStatus.PENDING})
     asyncio.run(make_worker(settings, db, FakeSolver()).process(rec.id))
@@ -346,6 +355,9 @@ def test_deleted_image_mid_solve_is_dropped_quietly(settings: Settings) -> None:
     asyncio.run(make_worker(settings, db, solver).process(rec.id))
     assert db.get_image(rec.id) is None
     assert solver.submission_poll_count == 2  # noticed the deletion before the third poll
+    # DELETE's own cleanup ran before the worker recreated the directory for the solve copy;
+    # the worker cleans up after itself so nothing is orphaned under data/uploads.
+    assert not image_dir(settings, rec.id).exists()
 
 
 def test_unexpected_errors_never_leak_details_to_the_page(settings: Settings) -> None:
@@ -363,6 +375,7 @@ def test_unexpected_errors_never_leak_details_to_the_page(settings: Settings) ->
     assert got is not None and got.solve_status == SolveStatus.FAILED
     assert got.solve_error is not None
     assert got.solve_error.startswith(UNEXPECTED_MESSAGE)
+    assert got.solve_failure == "error" and not check_available(got)
     assert "/srv/" not in got.solve_error and "Errno" not in got.solve_error
     assert "https://nova.example.test/status/12345678" in got.solve_error
 
