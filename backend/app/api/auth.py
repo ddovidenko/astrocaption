@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from ..auth import (
     COOKIE_NAME,
@@ -18,18 +18,34 @@ from ..auth import (
     verify_password,
 )
 from ..config import ConfigError, Settings
-from ..models import LoginRequest, SetupRequest
-from .deps import SettingsDep, is_authenticated
+from ..models import LoginRequest, PasswordChangeRequest, SetupRequest
+from .deps import SettingsDep, is_authenticated, require_owner
 from .errors import config_write_error
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
+WRONG_CURRENT_MESSAGE = "The current password is wrong."
+SAME_PASSWORD_MESSAGE = "The new password must differ from the current one."
+
 
 def get_limiter(request: Request) -> LoginLimiter:
     limiter: LoginLimiter = request.app.state.login_limiter
     return limiter
+
+
+def _cooldown_response(limiter: LoginLimiter) -> HTTPException | None:
+    """The sign-in cooldown as a 429, shared by ``login`` and ``change_password`` (both
+    verify a password through the same limiter, SPEC § 10)."""
+    wait = limiter.retry_after()
+    if not wait:
+        return None
+    return HTTPException(
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        f"Too many failed sign-ins. Try again in {wait} seconds.",
+        headers={"Retry-After": str(wait)},
+    )
 
 
 def session_cookie_params(settings: Settings, *, with_max_age: bool = False) -> dict[str, Any]:
@@ -86,13 +102,9 @@ async def login(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail)
     assert settings.password_hash and settings.session_secret
     limiter = get_limiter(request)
-    wait = limiter.retry_after()
-    if wait:
-        raise HTTPException(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            f"Too many failed sign-ins. Try again in {wait} seconds.",
-            headers={"Retry-After": str(wait)},
-        )
+    cooldown = _cooldown_response(limiter)
+    if cooldown is not None:
+        raise cooldown
     # Claim the attempt before verifying, not after: verify_password runs in a worker
     # thread, so recording the failure only on a bad result would let N concurrent
     # requests all pass the retry_after() check first and each get a free guess. A
@@ -120,3 +132,55 @@ async def logout(request: Request, response: Response, settings: SettingsDep) ->
     # third-party page could force-log-out the owner (#39). No session: nothing to clear, 204.
     if is_authenticated(request, settings):
         response.delete_cookie(COOKIE_NAME, **session_cookie_params(settings))
+
+
+@router.post(
+    "/password", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_owner)]
+)
+async def change_password(
+    body: PasswordChangeRequest, request: Request, response: Response
+) -> None:
+    """Change the owner password from the config page (#43). The current password is checked
+    through the sign-in limiter, so a stolen session cannot guess it unthrottled; the write
+    goes through ``set_owner_password``, which also rotates the session secret (every other
+    session is signed out, SPEC § 10), and this response carries a fresh cookie so the owner
+    who made the change stays signed in. A wrong current password is 403, never 401: the page
+    treats a 401 as a lost session."""
+    lock: asyncio.Lock = request.app.state.config_write_lock
+    async with lock:
+        settings: Settings = request.app.state.settings_source.current()
+        if settings.config_error is not None:
+            raise HTTPException(status.HTTP_409_CONFLICT, settings.config_error)
+        assert settings.password_hash and settings.session_secret
+        limiter = get_limiter(request)
+        cooldown = _cooldown_response(limiter)
+        if cooldown is not None:
+            raise cooldown
+        just_locked = limiter.record_failure()
+        if not await asyncio.to_thread(
+            verify_password, body.current_password, settings.password_hash
+        ):
+            log.warning("failed password change: wrong current password")
+            if just_locked:
+                log.warning("sign-in cooldown started after %d failures", limiter.max_failures)
+            raise HTTPException(status.HTTP_403_FORBIDDEN, WRONG_CURRENT_MESSAGE)
+        limiter.reset()
+        refusal = validate_new_password(body.new_password)
+        if refusal is not None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, refusal)
+        if body.new_password == body.current_password:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, SAME_PASSWORD_MESSAGE)
+        try:
+            await asyncio.to_thread(set_owner_password, settings, body.new_password)
+        except (ConfigError, OSError) as exc:
+            if isinstance(exc, OSError):
+                log.exception("password change could not write config.json")
+            raise config_write_error(exc, "The password") from exc
+        fresh: Settings = request.app.state.settings_source.current()
+        assert fresh.password_hash and fresh.session_secret
+        log.info("owner password changed")
+    response.set_cookie(
+        COOKIE_NAME,
+        issue_session(fresh.session_secret, fresh.password_hash),
+        **session_cookie_params(fresh, with_max_age=True),
+    )

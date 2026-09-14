@@ -277,6 +277,9 @@ Owner (cookie session):
 - `POST /setup` {password, nova_api_key?, site_title?} → 404 once set up; `POST /login` {password} → sets the
   cookie, 401 on a wrong password, 429 with `Retry-After` during the cooldown; `POST /logout` clears it.
   Logged-out calls to any owner route get 401 with a plain message.
+- `POST /password` {current_password, new_password} → 204 with a fresh cookie; 403 on a wrong current
+  password; 429 with `Retry-After` during the cooldown (shared with `POST /login`); 422 on a rule violation
+  (new password out of the 8–1024 range, or the same as the current one).
 - `GET/PUT /config` → {site_title, max_upload_mb, nova_api_key_set, default_style, style_defaults, locked,
   locked_by}. `PUT` is partial: absent fields are kept, `nova_api_key: null` clears the key, and
   `default_style` replaces the owner's whole override set — a save from the page therefore stores exactly the
@@ -369,7 +372,9 @@ until the editor next saves it.
   prompts for a new password and rewrites the hash in `config.json`. Also documents deleting
   `config.json` to re-run setup while keeping images (images are not tied to the password).
 - Setup route is only reachable when `config.json` has no password hash (absent file, or a file with only
-  a key/title). Changing the password is done with the CLI, not from the config page.
+  a key/title). The password is changed from the config page (`POST /password`: current password checked
+  through the sign-in limiter, new one through the same 8–1024 rule, every other session re-keyed, the
+  changing session's cookie re-issued); the CLI is the lockout path.
 - A new password is 8 to 1024 characters wherever it is chosen (setup page, `ASTROCAPTION_PASSWORD`,
   CLI); the CLI refuses to write a `config.json` owned by another user and says which command to run
   as whom, so a reset can never leave the app unable to read its own config.

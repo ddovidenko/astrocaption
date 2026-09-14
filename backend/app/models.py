@@ -642,3 +642,8 @@ class SetupRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     password: str = Field(max_length=MAX_PASSWORD_LENGTH)
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(max_length=MAX_PASSWORD_LENGTH)
+    new_password: str = Field(max_length=MAX_PASSWORD_LENGTH)
