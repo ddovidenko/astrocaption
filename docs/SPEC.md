@@ -85,6 +85,8 @@ No multi-user, no roles, no invites in v1.
    mid-solve drops the job. Uploads whose `Content-Length` exceeds the limit are refused before the body is read (chunked
    uploads hit the same cap while streaming). Uploads are capped at 300 megapixels regardless of file size, 16-bit greyscale
    PNG/TIFF is rescaled rather than clipped, and JPEGs with a multi-picture (MPO) segment are accepted.
+   Every solve uploads a copy to the owner's own nova account (never publicly listed) and only the latest
+   one is linked from the card; copies can be deleted on nova only, which the card says in one sentence (#1).
 4. On success: store WCS header (`wcs.fits` text), the nova job ID, and nova's annotation
    list (`/api/jobs/<id>/annotations/`) as `nova_annotations.json`. Every object gets a stable local ID
    (assigned by descending radius, then name). *M1 note:* nova returns one designation per deep-sky
@@ -99,15 +101,20 @@ No multi-user, no roles, no invites in v1.
    "small", so NGC 206 in M 31 is enabled like any other NGC entry. Decided 2026-09-11, #9).
    `hd`-type stars have radius 0 and are therefore hidden by default (see § 14).
 6. On failure: show nova's job log link and let the owner retry, optionally with scale hints
-   (focal length / pixel size passed as nova's `scale_units` etc.). When the row still holds nova
-   ids (a timed-out or interrupted poll), **Check again** resumes polling the stored submission
-   and job without uploading again (#10); the worker's restart-resume path serves both.
-   The card shows the nova status link with a note that the upload stays in the owner's nova account
-   and must be deleted there (#1).
+   (focal length / pixel size passed as nova's `scale_units` etc.). **Check again** is offered only
+   after a timeout ("Timed out after…"): it resumes polling the submission and job the row still
+   holds, without uploading anything again (#10), and ignores the scale hints — a resume never
+   builds a new request, so hints apply to Re-solve. It is never offered after nova reported a
+   failure (that job is finished and unsolvable) or after a re-submit failed (the row then still
+   carries an *earlier* attempt's ids, which resuming would silently adopt) or after an unexpected
+   server error; the row records which of the three it was in `solve_failure` and the API reports
+   the verdict as `check_available`. The worker's restart-resume path serves Check again too.
 
 Optional resolve later: "Re-solve" button re-runs step 3 without deleting the annotation layout;
-objects are re-matched by catalogue name. Delete asks for confirmation in the page, not in a browser
-dialog.
+objects are re-matched by catalogue name.
+
+Delete asks for confirmation in the page, not in a browser dialog; so does the editor's
+"Reset positions" (§ 6).
 
 ### 5.3 Edit (see § 6)
 
@@ -231,6 +238,8 @@ images
   width, height int
   solve_status  enum(pending|solving|solved|failed)
   solve_error   text?  (plain-language message shown to the owner)
+  solve_failure text?  (why a failed row failed: timeout|failed|error; NULL unless failed. Only
+                        'timeout' is resumable — see § 5.2 step 6)
   solve_scale   real   (original px per solve-copy px, default 1.0)
   nova_submission_id, nova_job_id  int?
   wcs_text      text?
@@ -285,7 +294,9 @@ Owner (cookie session):
 - `POST /images` (multipart) → id, starts solve
 - `GET /images`, `GET /images/{id}`, `DELETE /images/{id}`
 - `POST /images/{id}/solve` (re-solve, optional scale hints)
-- `POST /images/{id}/check` (check again: resume polling the stored nova job without uploading, #10)
+- `POST /images/{id}/check` (check again: resume polling the stored nova job without uploading, #10).
+  409 unless the row's `check_available` is true (a failed solve that timed out and still holds a
+  submission id); `ImageOut.check_available` is what the card draws the button from.
 - `GET /images/{id}/objects`
 - `GET/PUT /images/{id}/annotations`. `PUT` is the editor's autosave (debounced 500 ms): body = {style, labels,
   version as loaded}; `labels` must list every one of the image's objects exactly once (disable a label, never drop
