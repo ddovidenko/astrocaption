@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import mimetypes
 import os
 from collections.abc import AsyncIterator, Callable
@@ -224,7 +225,11 @@ def _mount_spa(app: FastAPI, static_dir: Path) -> None:
 
 
 def _env_seconds(name: str, default: float) -> float:
-    """A positive number of seconds from the environment, or the default (with one log line)."""
+    """A positive number of seconds from the environment.
+
+    Unset or blank falls back to ``default`` silently (not configured); a value that is not
+    a positive finite number falls back to ``default`` with one warning line (misconfigured).
+    """
     raw = os.environ.get(name, "").strip()
     if not raw:
         return default
@@ -232,7 +237,7 @@ def _env_seconds(name: str, default: float) -> float:
         value = float(raw)
     except ValueError:
         value = 0.0
-    if value <= 0:
+    if not math.isfinite(value) or value <= 0:
         log.warning("%s=%r is not a positive number of seconds; using %s", name, raw, default)
         return default
     return value

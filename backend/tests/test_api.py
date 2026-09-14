@@ -645,11 +645,12 @@ def test_solve_knobs_come_from_the_environment(
     assert worker.timeout == 8.0 and worker.poll_interval == 0.5
 
 
+@pytest.mark.parametrize("bad", ["soon", "0", "-5", "nan", "inf"])
 def test_bad_solve_knobs_fall_back_to_defaults(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture, bad: str
 ) -> None:
     monkeypatch.setenv("ASTROCAPTION_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("ASTROCAPTION_SOLVE_TIMEOUT_SECONDS", "soon")
+    monkeypatch.setenv("ASTROCAPTION_SOLVE_TIMEOUT_SECONDS", bad)
     with caplog.at_level(logging.WARNING, logger="app.main"):
         app = build_app_from_env()
     assert app.state.worker.timeout == 15 * 60
