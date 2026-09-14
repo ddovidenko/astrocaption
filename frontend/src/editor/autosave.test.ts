@@ -86,8 +86,8 @@ describe('autosave', () => {
     stop = startAutosave('img', { save: f.save })
     useEditor.getState().toggleObject(1)
     await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS)
-    await flushSave()
     expect(useEditor.getState().save.status).toBe('error')
+    expect(f.calls).toHaveLength(1)
     f.setFail(null)
     retrySave()
     await vi.advanceTimersByTimeAsync(0)
@@ -104,6 +104,19 @@ describe('autosave', () => {
     await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 2)
     expect(f.calls).toHaveLength(0)
     expect(useEditor.getState().save.status).toBe('dirty')
+  })
+
+  // SPEC § 5: a failed re-solve leaves the previous layout editable, and the server accepts the
+  // PUT. Only a solve in progress is read-only.
+  it('saves after a failed re-solve', async () => {
+    const doc = makeDoc()
+    doc.image = { ...doc.image, solve_status: 'failed' }
+    useEditor.getState().load(doc)
+    const f = fakeSave()
+    stop = startAutosave('img', { save: f.save })
+    useEditor.getState().toggleObject(1)
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS)
+    expect(f.calls).toHaveLength(1)
   })
 
   it('does not save after stop()', async () => {
@@ -146,12 +159,49 @@ describe('autosave', () => {
     expect(await flushed).toBe('saved')
   })
 
-  it("flushSave() resolves 'error' after a failed save", async () => {
+  it("flushSave() resolves 'error' after a failed save, having tried once more", async () => {
     const f = fakeSave()
     f.setFail(new ApiError(500, 'boom'))
     stop = startAutosave('img', { save: f.save })
     useEditor.getState().toggleObject(1)
     await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS)
+    expect(useEditor.getState().save.status).toBe('error')
+    expect(f.calls).toHaveLength(1)
     expect(await flushSave()).toBe('error')
+    expect(f.calls).toHaveLength(2) // one more attempt, and then it gives up
+  })
+
+  it('flushSave() sends a change made during an in-flight save before it resolves', async () => {
+    const f = fakeSave()
+    stop = startAutosave('img', { save: f.save })
+    useEditor.getState().toggleObject(1)
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS)
+    expect(f.calls).toHaveLength(1) // in flight
+    useEditor.getState().toggleObject(2, { x: 1, y: 2 })
+    const flushed = flushSave()
+    f.done(f.calls[0]!)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(f.calls).toHaveLength(2) // the change made while the first save was in flight
+    expect(f.calls[1]!.labels.find((l) => l.object_id === 2)).toMatchObject({ enabled: true, x: 1, y: 2 })
+    f.done(f.calls[1]!)
+    expect(await flushed).toBe('saved')
+  })
+
+  it('a flush from a retired controller neither saves nor cancels the new one', async () => {
+    const a = fakeSave()
+    const first = startAutosave('img-a', { save: a.save })
+    useEditor.getState().toggleObject(1)
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS)
+    expect(a.calls).toHaveLength(1) // in flight for image A
+    const flushed = flushSave()
+    // Image B takes over while A's flush is waiting on A's save.
+    const b = fakeSave()
+    stop = startAutosave('img-b', { save: b.save })
+    a.done(a.calls[0]!)
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 2)
+    expect(await flushed).not.toBe('saved') // it reports what it last saw and stops there
+    expect(a.calls).toHaveLength(1)
+    expect(b.calls).toHaveLength(0) // B's document was never PUT by A's flush
+    first() // stale: a no-op
   })
 })

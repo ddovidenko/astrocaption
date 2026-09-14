@@ -78,13 +78,17 @@ export default function EditorPage() {
     return () => {
       cancelled = true
       // In-app navigation (back to the image list, or on to another image) must not drop a change
-      // still waiting out the debounce: flushSave() reads the payload synchronously, so the save
-      // it starts survives the reset below. Its outcome cannot be shown on a page we are leaving;
+      // still waiting out the debounce. The teardown waits for the flush to finish: emptying the
+      // store first would hand the save an empty document, and stopping the controller first would
+      // cancel the save outright. The outcome cannot be shown on a page we are leaving;
       // `beforeunload` is what covers a closing tab.
-      void flushSave()
-      // Stopped after the flush and before the reset, so the emptied document is never saved.
-      stop?.()
-      useEditor.getState().reset()
+      void flushSave().finally(() => {
+        // A no-op when a newer startAutosave has already retired this controller.
+        stop?.()
+        const s = useEditor.getState()
+        // Only if this image is still the one in the store: a later load() already owns it.
+        if (s.image?.id === id) s.reset()
+      })
     }
   }, [id])
 
