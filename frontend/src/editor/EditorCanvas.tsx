@@ -50,7 +50,6 @@ interface Entry {
   obj: ObjectOut
   box: LabelBox
   text: LabelLines
-  radius: number
   seg: LeaderSegment | null
   leader: boolean
 }
@@ -76,8 +75,7 @@ function entryFor(style: StyleConfig, label: Label, obj: ObjectOut, measure: Tex
   const hit = byLabel.get(label)
   if (hit && hit.obj === obj) return hit
   const box = measureLabel(measure, style, label, obj)
-  const radius = markerRadius(obj, style)
-  const seg = leaderSegment(obj.x, obj.y, radius, {
+  const seg = leaderSegment(obj.x, obj.y, markerRadius(obj, style), {
     left: label.x,
     top: label.y,
     right: label.x + box.width,
@@ -88,7 +86,6 @@ function entryFor(style: StyleConfig, label: Label, obj: ObjectOut, measure: Tex
     obj,
     box,
     text: labelText(obj, label, style),
-    radius,
     seg,
     leader: seg !== null && leaderVisible(label, seg.gap, unit),
   }
@@ -120,9 +117,14 @@ const AnnotationLayer = memo(function AnnotationLayer({
   onDrawError: (message: string) => void
   badgesRef: RefObject<Konva.Group | null>
 }) {
+  // Konva still fires dragmove/dragend after a stopDrag() in dragstart, and a dragend at the
+  // label's own position would mark the document dirty and wipe `collided` for a gesture that
+  // never moved anything. One ref is enough: Konva drags one node at a time.
+  const suppressDragRef = useRef(false)
+
   return (
     // Only the label groups listen, and only while the document may be edited: markers and leaders
-    // are drawn output, and hover is served by the overlay's hit circles.
+    // are drawn output, and hover is served by the hit-circle layer underneath.
     <Layer listening={editable}>
       {entries.map(({ label, obj, box, text, seg, leader }) => (
         <Group key={label.object_id}>
@@ -159,15 +161,28 @@ const AnnotationLayer = memo(function AnnotationLayer({
               select(label.object_id)
             }}
             onDragStart={(e) => {
-              // Belt and braces with Konva.dragButtons: a drag begun while Space is held is a pan.
-              if (spaceRef.current) {
+              // Belt and braces with Konva.dragButtons: a drag begun while Space is held, or with
+              // any button but the left one, is a pan.
+              if (spaceRef.current || e.evt.button !== 0) {
+                suppressDragRef.current = true
                 e.target.stopDrag()
                 return
               }
+              suppressDragRef.current = false
               select(label.object_id)
             }}
-            onDragMove={(e) => moveLabel(label.object_id, e.target.x(), e.target.y())}
-            onDragEnd={(e) => moveLabel(label.object_id, e.target.x(), e.target.y())}
+            onDragMove={(e) => {
+              if (suppressDragRef.current) return
+              moveLabel(label.object_id, e.target.x(), e.target.y())
+            }}
+            onDragEnd={(e) => {
+              const suppressed = suppressDragRef.current
+              suppressDragRef.current = false
+              // A drag that ended where it began changes nothing: saying so would only mark the
+              // document dirty and clear the placer's `collided` verdict.
+              if (suppressed || (e.target.x() === label.x && e.target.y() === label.y)) return
+              moveLabel(label.object_id, e.target.x(), e.target.y())
+            }}
           >
             <LabelTextShape label={label} style={style} font={font} box={box} text={text} onDrawError={onDrawError} />
           </Group>
@@ -219,8 +234,14 @@ export default function EditorCanvas() {
   const overlayRef = useRef<Konva.Layer>(null)
   const badgesRef = useRef<Konva.Group>(null)
   const panRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null)
-  // Whether the pointer moved between the last mousedown and the click Konva fires after mouseup:
-  // a drag of the background is a pan, not the click that deselects.
+  // Where the last mousedown that reached the stage landed, in screen pixels. A press on a label
+  // stops at the label (its own handler cancels the bubble), and that is harmless: Konva fires
+  // `click` only when the press and the release are on the same shape, so a gesture begun on a
+  // label can never end as a click on a marker.
+  const downRef = useRef<{ x: number; y: number } | null>(null)
+  // Whether the pointer travelled far enough between that mousedown and the click Konva fires
+  // after mouseup for the gesture to be a drag: a pan, or a label drag that happened to end over
+  // a marker, is not the click that deselects or toggles.
   const movedRef = useRef(false)
   const spaceRef = useRef(false)
 
@@ -434,8 +455,10 @@ export default function EditorCanvas() {
     [entries, selectedId],
   )
 
-  // The hit targets for hover: one transparent circle per object, rebuilt only when the objects,
-  // the marker sizes or the zoom (the 8 px floor is in screen pixels) change — not on every pan.
+  // The hit targets for hover and the toggle: one transparent circle per object, rebuilt only when
+  // the objects, the marker sizes or the zoom (the 8 px floor is in screen pixels) change — not on
+  // every pan. They sit on their own layer *below* the labels, so a label drawn inside a big
+  // marker (M 42 swallows the Trapezium stars) is still the thing a click on it hits.
   const hitCircles = useMemo(
     () =>
       objectOrder.map((id) => {
@@ -452,10 +475,10 @@ export default function EditorCanvas() {
             fill="transparent"
             onMouseEnter={() => hover(id)}
             onMouseLeave={() => hover(null)}
-            // Not after a pan: the click Konva fires when a pan happens to end on a marker is
-            // not a toggle.
-            onClick={() => {
-              if (!movedRef.current) toggleWithPlacement(id)
+            // Left button only, and not after a pan or a label drag that happened to end over
+            // this marker: the click Konva fires then is not a toggle.
+            onClick={(e) => {
+              if (e.evt.button === 0 && !movedRef.current) toggleWithPlacement(id)
             }}
           />
         )
@@ -483,19 +506,27 @@ export default function EditorCanvas() {
     const stage = stageRef.current
     if (!stage) return
     movedRef.current = false
-    if (!(e.target === stage || e.evt.button === 1 || spaceRef.current)) return
     const pointer = stage.getPointerPosition()
+    // Recorded for every press that reaches the stage, pan or not: a Space-pan begun on a marker
+    // ends with a click on that marker, and only the displacement below tells the two apart.
+    downRef.current = pointer ? { x: pointer.x, y: pointer.y } : null
+    if (!(e.target === stage || e.evt.button === 1 || spaceRef.current)) return
     if (!pointer) return
     e.evt.preventDefault()
     panRef.current = { sx: pointer.x, sy: pointer.y, vx: view.x, vy: view.y }
     setPanning(true)
   }
 
-  const onMouseMove = () => {
-    const start = panRef.current
+  const onMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
     const pointer = stageRef.current?.getPointerPosition()
-    if (!start || !pointer) return
-    if (pointer.x !== start.sx || pointer.y !== start.sy) movedRef.current = true
+    if (!pointer) return
+    // 3 screen pixels of slack, so a hand that shifts while clicking still counts as a click.
+    const down = downRef.current
+    if (down && e.evt.buttons !== 0 && Math.hypot(pointer.x - down.x, pointer.y - down.y) > 3) {
+      movedRef.current = true
+    }
+    const start = panRef.current
+    if (!start) return
     setView({ scale: view.scale, x: start.vx + (pointer.x - start.sx), y: start.vy + (pointer.y - start.sy) })
   }
 
@@ -558,6 +589,10 @@ export default function EditorCanvas() {
             <Layer listening={false}>
               {preview && <KImage image={preview} width={image.width} height={image.height} />}
             </Layer>
+            {/* Below the labels on purpose (see hitCircles). It keeps listening while the document
+                is read-only: hover and the tooltip are not edits, and the toggle itself is gated
+                by `toggleWithPlacement`. */}
+            <Layer>{hitCircles}</Layer>
             <AnnotationLayer
               entries={entries}
               style={style}
@@ -569,8 +604,9 @@ export default function EditorCanvas() {
               onDrawError={onDrawError}
               badgesRef={badgesRef}
             />
-            <Layer ref={overlayRef}>
-              {hitCircles}
+            {/* Chrome only, and none of it listens: `renderAt` hides this layer to diff the
+                canvas against the server's render. */}
+            <Layer ref={overlayRef} listening={false}>
               {selected && (
                 <Rect
                   x={selected.label.x}
