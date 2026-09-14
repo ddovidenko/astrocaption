@@ -31,6 +31,75 @@ test('first run: setup, sign in, solve, export, edit, config, sign out', async (
   await expect(page).toHaveURL(/\/images\/[0-9a-f-]+$/)
   await expect(page.locator('canvas').first()).toBeVisible()
   await expect(page.getByRole('button', { name: 'Fit' })).toBeVisible()
+  // The hook is published once the preview bitmap has loaded (EditorCanvas.tsx); everything below
+  // needs it, whether to read a label's position or just to know the stage has something drawn.
+  await page.waitForFunction(() => window.__astrocaptionEditor?.labelPositions !== undefined)
+
+  const imageId = /\/images\/([^/?#]+)/.exec(page.url())?.[1]
+  expect(imageId, `no image id in ${page.url()}`).toBeTruthy()
+  const annotationsUrl = `/api/images/${imageId}/annotations`
+  const enabledCount = async (): Promise<number> => {
+    const res = await page.request.get(annotationsUrl)
+    expect(res.status()).toBe(200)
+    const { labels } = (await res.json()) as { labels: { enabled: boolean }[] }
+    return labels.filter((l) => l.enabled).length
+  }
+
+  // Objects tab: toggling a row's checkbox is `toggleWithPlacement` (SPEC § 6.1), autosaved.
+  await page.getByRole('tab', { name: 'Objects' }).click()
+  const rows = page.locator('.object-list input[type=checkbox]')
+  await expect(rows.first()).toBeVisible()
+  // NGC 1924 is disabled by default in the Orion fixture (SPEC § 5.2 step 5); pick any other
+  // disabled row if the fixture ever changes, and fall back to an enabled one otherwise.
+  const unchecked = page.locator('.object-list input[type=checkbox]:not(:checked)').first()
+  const enabling = (await unchecked.count()) > 0
+  const target = enabling ? unchecked : page.locator('.object-list input[type=checkbox]:checked').first()
+  const before = await enabledCount()
+  await target.click()
+  await expect.poll(enabledCount, { timeout: 3_000 }).toBe(enabling ? before + 1 : before - 1)
+
+  // Drag the first drawn label 40 px right: locate it in screen space via the hook's stage
+  // transform (all label geometry is stored in original-image pixels, CLAUDE.md "Coordinates").
+  const canvasBox = await page.locator('.editor-canvas').boundingBox()
+  expect(canvasBox).toBeTruthy()
+  const label = await page.evaluate(() => window.__astrocaptionEditor!.labelPositions()[0])
+  expect(label, 'no label drawn to drag').toBeTruthy()
+  const start = await page.evaluate((l) => {
+    const { stage } = window.__astrocaptionEditor!
+    const scale = stage.scaleX()
+    // A few px in from the label's top-left corner (its box's own origin), safely inside the
+    // group's hit rect (LabelTextShape.tsx) rather than right on the edge.
+    return { x: stage.x() + (l!.x + 6) * scale, y: stage.y() + (l!.y + 6) * scale }
+  }, label)
+  const startX = canvasBox!.x + start.x
+  const startY = canvasBox!.y + start.y
+  await page.mouse.move(startX, startY)
+  await page.mouse.down()
+  await page.mouse.move(startX + 40, startY, { steps: 5 })
+  await page.mouse.up()
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get(annotationsUrl)
+        expect(res.status()).toBe(200)
+        const { labels } = (await res.json()) as { labels: { object_id: number; x: number }[] }
+        return labels.find((l) => l.object_id === label!.id)?.x ?? Number.NEGATIVE_INFINITY
+      },
+      { timeout: 3_000 },
+    )
+    .toBeGreaterThan(label!.x)
+
+  // Layout tab: Auto-arrange flushes the pending drag save, re-places every enabled label, and the
+  // result is itself autosaved back to "Saved".
+  await page.getByRole('tab', { name: 'Layout' }).click()
+  await page.getByRole('button', { name: 'Auto-arrange' }).click()
+  await expect(page.locator('.save-status')).toHaveText('Saved')
+
+  // Image tab: Export renders the current document and offers the download link.
+  await page.getByRole('tab', { name: 'Image' }).click()
+  await page.getByRole('button', { name: 'Export' }).click()
+  await expect(page.getByRole('link', { name: 'Download full-resolution export' })).toBeVisible()
+
   await page.goto('/')
 
   await page.getByRole('link', { name: 'Config' }).click()
