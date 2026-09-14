@@ -16,6 +16,7 @@ export function makeDoc(): LoadedDocument {
     height: 2000,
     solve_status: 'solved',
     solve_error: null,
+    check_available: false,
     nova_submission_id: null,
     nova_job_id: null,
     nova_status_url: null,

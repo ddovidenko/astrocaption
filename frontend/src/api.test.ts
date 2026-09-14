@@ -10,6 +10,7 @@ import {
   parseBody,
   setUnauthorizedHandler,
   statusLabel,
+  UPLOAD_TIMEOUT_MS,
   uploadForm,
 } from './api'
 
@@ -21,10 +22,12 @@ class FakeXHR {
   body: unknown = null
   status = 0
   responseText = ''
+  timeout = 0
   upload = { onprogress: null as ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null }
   onload: (() => void) | null = null
   onerror: (() => void) | null = null
   onabort: (() => void) | null = null
+  ontimeout: (() => void) | null = null
   constructor() {
     FakeXHR.last = this
   }
@@ -93,7 +96,7 @@ describe('api helpers', () => {
   })
 
   it('identifies the ApiError a page should not show because the shell is redirecting', () => {
-    // The flag is set once, by request(); the status alone cannot tell a lost session from
+    // The flag is set once, by settle(); the status alone cannot tell a lost session from
     // the 401 that a wrong password on /api/login earns (that call opts out).
     expect(isSessionLossError(new ApiError(401, 'Sign in to continue.', true))).toBe(true)
     expect(isSessionLossError(new ApiError(401, 'Wrong password.'))).toBe(false)
@@ -145,18 +148,52 @@ describe('uploadForm', () => {
     setUnauthorizedHandler(() => {
       called++
     })
-    const p = uploadForm('/api/images', new FormData(), undefined, XHR)
-    FakeXHR.last!.respond(401, JSON.stringify({ detail: 'Not signed in.' }))
-    await expect(p).rejects.toBeInstanceOf(ApiError)
-    await expect(p).rejects.toMatchObject({ sessionLost: true })
-    expect(called).toBe(1)
-    setUnauthorizedHandler(null)
+    try {
+      const p = uploadForm('/api/images', new FormData(), undefined, XHR)
+      FakeXHR.last!.respond(401, JSON.stringify({ detail: 'Not signed in.' }))
+      await expect(p).rejects.toBeInstanceOf(ApiError)
+      await expect(p).rejects.toMatchObject({ sessionLost: true })
+      expect(called).toBe(1)
+    } finally {
+      // Whatever this test does, the next one must not inherit a handler that counts into it.
+      setUnauthorizedHandler(null)
+    }
   })
 
-  it('fails in plain language when the server cannot be reached', async () => {
+  it('replaces the generic sentence when a proxy answers 413 with its own HTML page', async () => {
+    const p = uploadForm('/api/images', new FormData(), undefined, XHR)
+    FakeXHR.last!.respond(413, '<html><body>413 Request Entity Too Large</body></html>')
+    await expect(p).rejects.toMatchObject({
+      status: 413,
+      message: 'The file is larger than the upload limit; the server or a reverse proxy refused it.',
+    })
+  })
+
+  it('keeps the API sentence when the API itself answered the 413', async () => {
+    const p = uploadForm('/api/images', new FormData(), undefined, XHR)
+    FakeXHR.last!.respond(413, JSON.stringify({ detail: 'File is larger than the 60 MB upload limit.' }))
+    await expect(p).rejects.toMatchObject({ message: 'File is larger than the 60 MB upload limit.' })
+  })
+
+  it('explains a gateway timeout in plain language', async () => {
+    const p = uploadForm('/api/images', new FormData(), undefined, XHR)
+    FakeXHR.last!.respond(504, '<html>gateway timeout</html>')
+    await expect(p).rejects.toThrow('The server did not answer the upload in time. Try again.')
+  })
+
+  it('gives up after the upload timeout rather than hanging forever', async () => {
+    const p = uploadForm('/api/images', new FormData(), undefined, XHR)
+    expect(FakeXHR.last!.timeout).toBe(UPLOAD_TIMEOUT_MS)
+    FakeXHR.last!.ontimeout!()
+    await expect(p).rejects.toThrow('The upload timed out. Check the connection and try again.')
+  })
+
+  it('fails in plain language when the connection drops or the body is refused', async () => {
     const p = uploadForm('/api/images', new FormData(), undefined, XHR)
     FakeXHR.last!.onerror!()
-    await expect(p).rejects.toThrow('The upload did not reach the server. Check the connection and try again.')
+    await expect(p).rejects.toThrow(
+      'The upload did not finish: the connection dropped, or the server refused the file before it was fully sent (check the size against the upload limit).',
+    )
   })
 
   it('says so plainly when the upload is aborted', async () => {
