@@ -6,6 +6,7 @@ import os
 import re
 import uuid
 from collections import Counter
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, BinaryIO, Literal
 from urllib.parse import quote
@@ -45,6 +46,7 @@ from ..storage import (
     probe_image,
     render_dir,
 )
+from ..worker import SolveWorker
 from .deps import (
     DbDep,
     SettingsDep,
@@ -143,7 +145,7 @@ def image_out(rec: ImageRecord, settings: Settings, object_count: int) -> ImageO
         height=rec.height,
         solve_status=rec.solve_status,
         solve_error=rec.solve_error,
-        check_available=check_available(rec),
+        check_available=rec.check_available,
         nova_submission_id=rec.nova_submission_id,
         nova_job_id=rec.nova_job_id,
         nova_status_url=(
@@ -169,28 +171,33 @@ def image_out(rec: ImageRecord, settings: Settings, object_count: int) -> ImageO
     )
 
 
-def check_available(rec: ImageRecord) -> bool:
-    """Whether POST /check can resume this row, which is the one thing Check again is for.
-
-    Only a deadline failure is resumable: the submission it still holds may well have finished
-    on nova since. A nova FAILURE, a re-submit that failed and left an *earlier* attempt's ids
-    on the row, and an unexpected server error are all dead ends where resuming would either
-    re-report the same failure or silently adopt a stale job's result — Re-solve is the answer
-    there. ``image_out`` reports this and ``check_solve`` enforces it, so the button the page
-    draws and the route's answer can never disagree.
-    """
-    return (
-        rec.solve_status == SolveStatus.FAILED
-        and rec.solve_failure == "timeout"
-        and rec.nova_submission_id is not None
-    )
-
-
 def _get_or_404(db: Database, image_id: str) -> ImageRecord:
     rec = db.get_image(image_id)
     if rec is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Image not found.")
     return rec
+
+
+def _start_solve(
+    db: Database,
+    settings: Settings,
+    worker: SolveWorker,
+    image_id: str,
+    status_: SolveStatus,
+    extra: Mapping[str, object] | None = None,
+) -> ImageOut:
+    """The one way a route hands a row to the worker: the status moves, the previous failure is
+    cleared (``solve_error``/``solve_failure`` describe a FAILED row only), the row is queued,
+    and the response is re-read so it carries the database's ``updated_at``."""
+    fields: dict[str, object] = {
+        "solve_status": status_,
+        "solve_error": None,
+        "solve_failure": None,
+    }
+    fields.update(extra or {})
+    db.update_image(image_id, fields)
+    worker.enqueue(image_id)
+    return image_out(_get_or_404(db, image_id), settings, db.count_objects(image_id))
 
 
 def _require_idle(rec: ImageRecord) -> None:
@@ -292,17 +299,7 @@ async def solve_image(
 ) -> ImageOut:
     rec = _get_or_404(db, image_id)
     _require_idle(rec)
-    db.update_image(
-        image_id,
-        {
-            "solve_status": SolveStatus.PENDING,
-            "solve_error": None,
-            "solve_failure": None,
-            "solve_hints": hints,
-        },
-    )
-    worker.enqueue(image_id)
-    return image_out(_get_or_404(db, image_id), settings, db.count_objects(image_id))
+    return _start_solve(db, settings, worker, image_id, SolveStatus.PENDING, {"solve_hints": hints})
 
 
 @router.post("/{image_id}/check")
@@ -314,19 +311,14 @@ async def check_solve(
     nova was still working. The worker's resume branch does the polling; a stored job id skips
     the submission poll. Nothing about the row changes except the status and the cleared error,
     so the stored scale hints and ``solve_scale`` keep describing the attempt being resumed.
-    Any other failure is refused (``check_available``)."""
+    Any other failure is refused (``ImageRecord.check_available``)."""
     rec = _get_or_404(db, image_id)
     _require_idle(rec)
     if rec.solve_status == SolveStatus.SOLVED:
         raise HTTPException(status.HTTP_409_CONFLICT, ALREADY_SOLVED_MESSAGE)
-    if not check_available(rec):
+    if not rec.check_available:
         raise HTTPException(status.HTTP_409_CONFLICT, NOT_RESUMABLE_MESSAGE)
-    db.update_image(
-        image_id,
-        {"solve_status": SolveStatus.SOLVING, "solve_error": None, "solve_failure": None},
-    )
-    worker.enqueue(image_id)
-    return image_out(_get_or_404(db, image_id), settings, db.count_objects(image_id))
+    return _start_solve(db, settings, worker, image_id, SolveStatus.SOLVING)
 
 
 @router.get("/{image_id}/objects")

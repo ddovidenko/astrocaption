@@ -184,17 +184,25 @@ export class ApiError extends Error {
 
 /** Extract a human-readable message from a FastAPI error body. The backend's 422 handler
  *  always answers with a plain string detail, so there is no list form to unpack. */
-export function errorMessage(status: number, body: unknown): string {
+export function errorMessage(status: number, body: unknown, fallback?: string): string {
   if (body && typeof body === 'object' && 'detail' in body) {
     const detail = (body as { detail: unknown }).detail
     if (typeof detail === 'string') return detail
   }
-  return `Request failed (HTTP ${status})`
+  return fallback ?? `Request failed (HTTP ${status})`
 }
 
 /** Parse a response body; a 2xx that is not JSON (e.g. the dev server answering with
  *  index.html when the API is unreachable) is an error, not a silent null. */
-export function parseBody(status: number, ok: boolean, text: string, sessionLost = false): unknown {
+/** `fallbacks`: per-status sentences for bodies that carry no `detail` (a reverse proxy's own
+ *  page); the API's own message always wins. */
+export function parseBody(
+  status: number,
+  ok: boolean,
+  text: string,
+  sessionLost = false,
+  fallbacks?: Record<number, string>,
+): unknown {
   let body: unknown = null
   if (text) {
     try {
@@ -205,7 +213,7 @@ export function parseBody(status: number, ok: boolean, text: string, sessionLost
       }
     }
   }
-  if (!ok) throw new ApiError(status, errorMessage(status, body), sessionLost)
+  if (!ok) throw new ApiError(status, errorMessage(status, body, fallbacks?.[status]), sessionLost)
   return body
 }
 
@@ -243,11 +251,16 @@ interface RequestOptions {
 /** Turn a finished response into its parsed body, or throw the ApiError it deserves. Both
  *  transports end here, so the 401 rule lives in exactly one place: a session-aware 401 tells
  *  the shell to send the user to /login and marks the error so pages skip their own message. */
-function settle<T>(status: number, text: string, sessionAware = true): T {
+function settle<T>(
+  status: number,
+  text: string,
+  sessionAware = true,
+  fallbacks?: Record<number, string>,
+): T {
   const lost = sessionAware && status === 401
   if (lost) onUnauthorized?.()
   if (status === 204) return undefined as T
-  return parseBody(status, status >= 200 && status < 300, text, lost) as T
+  return parseBody(status, status >= 200 && status < 300, text, lost, fallbacks) as T
 }
 
 async function request<T>(url: string, init?: RequestInit, { sessionAware = true }: RequestOptions = {}): Promise<T> {
@@ -267,9 +280,8 @@ export type UploadProgress = (sent: number, total: number) => void
 export const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000
 
 /** Statuses a reverse proxy in front of the app answers itself, with its own HTML page rather
- *  than this API's JSON. `parseBody` can only produce "Request failed (HTTP n)" for those, which
- *  says nothing about what to do, so the sentence is supplied here instead. Applied only when
- *  the body carried no `detail` — the API's own message always wins. */
+ *  than this API's JSON; the generic "Request failed (HTTP n)" says nothing about what to do.
+ *  Used only when the body carried no `detail` — the API's own message always wins. */
 const PROXY_UPLOAD_MESSAGES: Record<number, string> = {
   413: 'The file is larger than the upload limit; the server or a reverse proxy refused it.',
   502: 'The server did not answer the upload in time. Try again.',
@@ -306,12 +318,9 @@ export function uploadForm<T>(
     xhr.onabort = () => reject(new Error('The upload was cancelled.'))
     xhr.onload = () => {
       try {
-        resolve(settle<T>(xhr.status, xhr.responseText))
+        resolve(settle<T>(xhr.status, xhr.responseText, true, PROXY_UPLOAD_MESSAGES))
       } catch (err) {
-        const plain = PROXY_UPLOAD_MESSAGES[xhr.status]
-        if (plain && err instanceof ApiError && err.message.startsWith('Request failed (HTTP')) {
-          reject(new ApiError(err.status, plain, err.sessionLost))
-        } else reject(err)
+        reject(err)
       }
     }
     xhr.send(form)

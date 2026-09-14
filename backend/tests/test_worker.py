@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from app.api.images import check_available
 from app.config import Settings
 from app.db import Database
 from app.models import SolveHints, SolveStatus
@@ -193,7 +192,7 @@ def test_failure_paths_set_plain_language_errors(settings: Settings) -> None:
     assert got is not None and got.solve_error and got.solve_error.startswith("Timed out")
     assert "/status/12345678" in got.solve_error
     # The one failure kind Check again may resume.
-    assert got.solve_failure == "timeout" and check_available(got)
+    assert got.solve_failure == "timeout" and got.check_available
 
 
 def test_resolve_keeps_layout_and_rematches_by_name(settings: Settings) -> None:
@@ -299,7 +298,7 @@ def test_old_nova_ids_survive_a_failed_resubmit(settings: Settings) -> None:
     assert (got.nova_submission_id, got.nova_job_id) == (100, 200)  # links to the old attempt kept
     # Those ids belong to the *earlier* attempt, so resuming them would adopt a stale job:
     # this failure is not a timeout and Check again is not offered for it.
-    assert got.solve_failure == "failed" and not check_available(got)
+    assert got.solve_failure == "failed" and not got.check_available
 
     db.update_image(rec.id, {"solve_status": SolveStatus.PENDING})
     asyncio.run(make_worker(settings, db, FakeSolver()).process(rec.id))
@@ -375,7 +374,7 @@ def test_unexpected_errors_never_leak_details_to_the_page(settings: Settings) ->
     assert got is not None and got.solve_status == SolveStatus.FAILED
     assert got.solve_error is not None
     assert got.solve_error.startswith(UNEXPECTED_MESSAGE)
-    assert got.solve_failure == "error" and not check_available(got)
+    assert got.solve_failure == "error" and not got.check_available
     assert "/srv/" not in got.solve_error and "Errno" not in got.solve_error
     assert "https://nova.example.test/status/12345678" in got.solve_error
 

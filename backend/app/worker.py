@@ -119,10 +119,7 @@ class SolveWorker:
         try:
             await self._solve(rec)
         except ImageGoneError:
-            log.info("image %s was deleted during its solve; dropping it", image_id)
-            # DELETE removed the directory before this task created it again (the solve copy);
-            # clean up what the worker left behind so no orphan survives the deletion.
-            await asyncio.to_thread(delete_image_files, self.settings, image_id)
+            await self._drop_gone(image_id)
         except SolveTimeoutError as exc:
             log.warning("solve timed out for %s: %s", image_id, exc)
             self._fail(image_id, str(exc), "timeout")
@@ -132,11 +129,18 @@ class SolveWorker:
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - logged with traceback by _report_unexpected
-            self._report_unexpected(image_id)
+            await self._report_unexpected(image_id)
         finally:
             self.current = None
 
-    def _report_unexpected(self, image_id: str) -> None:
+    async def _drop_gone(self, image_id: str) -> None:
+        """The row was deleted while its solve ran. DELETE removed the directory before this
+        task created it again (the solve copy), so clean up what the worker left behind: no
+        orphan survives the deletion."""
+        log.info("image %s was deleted during its solve; dropping it", image_id)
+        await asyncio.to_thread(delete_image_files, self.settings, image_id)
+
+    async def _report_unexpected(self, image_id: str) -> None:
         """Plain language for the owner; the traceback stays in the log (CLAUDE.md)."""
         try:
             rec = self.db.get_image(image_id)
@@ -144,7 +148,7 @@ class SolveWorker:
             log.exception("unexpected error while solving %s (database unavailable)", image_id)
             return
         if rec is None:
-            log.info("image %s was deleted during its solve; dropping it", image_id)
+            await self._drop_gone(image_id)
             return
         log.exception("unexpected error while solving %s", image_id)
         message = UNEXPECTED_MESSAGE

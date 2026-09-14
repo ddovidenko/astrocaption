@@ -380,6 +380,23 @@ class ImageRecord(BaseModel):
     published: bool = False
     exported_at: str | None = None
 
+    @property
+    def check_available(self) -> bool:
+        """Whether POST /check can resume this row, which is the one thing Check again is for.
+
+        Only a deadline failure is resumable: the submission it still holds may well have
+        finished on nova since. A nova FAILURE, a re-submit that failed and left an *earlier*
+        attempt's ids on the row, and an unexpected server error are all dead ends where
+        resuming would either re-report the same failure or silently adopt a stale job's
+        result — Re-solve is the answer there. ``image_out`` reports this and ``check_solve``
+        enforces it, so the button the page draws and the route's answer can never disagree.
+        """
+        return (
+            self.solve_status == SolveStatus.FAILED
+            and self.solve_failure == "timeout"
+            and self.nova_submission_id is not None
+        )
+
 
 # ---------------------------------------------------------------------------
 # API payloads

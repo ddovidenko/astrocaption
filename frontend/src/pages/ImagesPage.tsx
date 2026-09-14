@@ -46,27 +46,19 @@ export default function ImagesPage({
     }
   }, [refreshHealth])
 
+  // The first load obeys the same "newest answer wins" rule as `refresh`. Not `void refresh()`:
+  // react-hooks/set-state-in-effect forbids a setState-wrapping call in an effect body.
   useEffect(() => {
-    let cancelled = false
-    api
-      .listImages()
-      .then((list) => {
-        if (!cancelled) setImages(list)
+    const mine = ++seq.current
+    Promise.all([api.listImages(), api.config()])
+      .then(([list, cfg]) => {
+        if (mine !== seq.current) return
+        setImages(list)
+        setConfig(cfg)
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(pageError(err))
+        if (mine === seq.current) setError(pageError(err))
       })
-    api
-      .config()
-      .then((c) => {
-        if (!cancelled) setConfig(c)
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(pageError(err))
-      })
-    return () => {
-      cancelled = true
-    }
   }, [])
 
   const busy = images.some((img) => isBusy(img.solve_status))
