@@ -4,8 +4,8 @@ import type Konva from 'konva'
 import { useShallow } from 'zustand/react/shallow'
 import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
 import { LabelTextShape } from './LabelTextShape'
+import { getMeasurer, isEditable, toggleWithPlacement } from './editing'
 import {
-  canvasMeasurer,
   labelText,
   leaderSegment,
   leaderVisible,
@@ -16,6 +16,7 @@ import {
   type LabelBox,
   type LabelLines,
   type LeaderSegment,
+  type TextMeasurer,
 } from './metrics'
 import { enabledLabels, fontFor, useEditor } from './store'
 import { toScreen, zoomAt } from './view'
@@ -33,6 +34,8 @@ export interface EditorTestHook {
   imageWidth: number
   /** How many enabled labels the canvas actually drew (orphaned ones are not counted). */
   labelCount: number
+  /** Where the drawn labels sit, in original image pixels — what a drag has to move. */
+  labelPositions(): { id: number; x: number; y: number }[]
   renderAt(scale: number): string
 }
 
@@ -54,25 +57,66 @@ interface Entry {
 
 const HOVER_COLOR = '#8ab4ff'
 
+/** Layout numbers per label, memoised on the label's identity. A drag replaces one `Label` object
+ *  per frame (the store never mutates them), so without this every other label would be measured
+ *  again 60 times a second. A hit is only reused while the style and the object behind it are the
+ *  same objects; the maps are weak, so a replaced label or style needs no eviction. */
+const entryCache = new WeakMap<StyleConfig, WeakMap<Label, Entry>>()
+
+function entryFor(style: StyleConfig, label: Label, obj: ObjectOut, measure: TextMeasurer, unit: number): Entry {
+  let byLabel = entryCache.get(style)
+  if (!byLabel) {
+    byLabel = new WeakMap<Label, Entry>()
+    entryCache.set(style, byLabel)
+  }
+  const hit = byLabel.get(label)
+  if (hit && hit.obj === obj) return hit
+  const box = measureLabel(measure, style, label, obj)
+  const radius = markerRadius(obj, style)
+  const seg = leaderSegment(obj.x, obj.y, radius, {
+    left: label.x,
+    top: label.y,
+    right: label.x + box.width,
+    bottom: label.y + box.height,
+  })
+  const entry: Entry = {
+    label,
+    obj,
+    box,
+    text: labelText(obj, label, style),
+    radius,
+    seg,
+    leader: seg !== null && leaderVisible(label, seg.gap, unit),
+  }
+  byLabel.set(label, entry)
+  return entry
+}
+
 /** The layer that draws exactly what the export draws. It is memoised and deliberately blind to
  *  the view transform (the Stage carries zoom and pan), so panning and zooming never rebuild it. */
 const AnnotationLayer = memo(function AnnotationLayer({
   entries,
   style,
   font,
+  editable,
+  select,
+  moveLabel,
   onDrawError,
   badgesRef,
 }: {
   entries: Entry[]
   style: StyleConfig
   font: FontOut
+  editable: boolean
+  select: (id: number | null) => void
+  moveLabel: (id: number, x: number, y: number) => void
   onDrawError: (message: string) => void
   badgesRef: RefObject<Konva.Group | null>
 }) {
   return (
-    // Hover is served by the overlay's hit circles, so nothing here has to listen.
-    // PR 5: drag/select will turn this on.
-    <Layer listening={false}>
+    // Only the label groups listen, and only while the document may be edited: markers and leaders
+    // are drawn output, and hover is served by the overlay's hit circles.
+    <Layer listening={editable}>
       {entries.map(({ label, obj, box, text, seg, leader }) => (
         <Group key={label.object_id}>
           {/* Not the stored radius: the stroke sits half a marker width inside it so Konva's
@@ -93,7 +137,23 @@ const AnnotationLayer = memo(function AnnotationLayer({
               listening={false}
             />
           )}
-          <LabelTextShape label={label} style={style} font={font} box={box} text={text} onDrawError={onDrawError} />
+          {/* The group carries the position, so a drag is `e.target.x()/y()` in original pixels
+              (neither this layer nor the parent group has a transform of its own). */}
+          <Group
+            x={label.x}
+            y={label.y}
+            draggable={editable}
+            onMouseDown={(e) => {
+              // Without this the stage would read the press as the start of a pan.
+              e.cancelBubble = true
+              select(label.object_id)
+            }}
+            onDragStart={() => select(label.object_id)}
+            onDragMove={(e) => moveLabel(label.object_id, e.target.x(), e.target.y())}
+            onDragEnd={(e) => moveLabel(label.object_id, e.target.x(), e.target.y())}
+          >
+            <LabelTextShape label={label} style={style} font={font} box={box} text={text} onDrawError={onDrawError} />
+          </Group>
         </Group>
       ))}
       {/* UI chrome, not part of the export: hidden by renderAt. */}
@@ -127,6 +187,10 @@ export default function EditorCanvas() {
   const selectedId = useEditor((s) => s.selectedId)
   const setView = useEditor((s) => s.setView)
   const hover = useEditor((s) => s.hover)
+  const select = useEditor((s) => s.select)
+  const moveLabel = useEditor((s) => s.moveLabel)
+  // A conflict keeps editing local (design § 5): only the saves stop, not the page.
+  const editable = useEditor(isEditable)
   // A stale document (a font the server no longer lists) must throw, not draw in a fallback face.
   const font = useEditor((s) => (s.style ? fontFor(s) : null))
   // useShallow keeps the array identity while the labels themselves are unchanged, so the
@@ -138,6 +202,9 @@ export default function EditorCanvas() {
   const overlayRef = useRef<Konva.Layer>(null)
   const badgesRef = useRef<Konva.Group>(null)
   const panRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null)
+  // Whether the pointer moved between the last mousedown and the click Konva fires after mouseup:
+  // a drag of the background is a pan, not the click that deselects.
+  const movedRef = useRef(false)
   const spaceRef = useRef(false)
 
   // Keyed by the URL it was loaded from, so a second image opened without unmounting can never
@@ -216,43 +283,23 @@ export default function EditorCanvas() {
     }
   }, [image])
 
-  // 3. One offscreen context for every width the canvas measures (design § 3).
-  const measure = useMemo(() => {
-    const ctx = document.createElement('canvas').getContext('2d')
-    if (!ctx) throw new Error('This browser could not open a canvas to measure text with.')
-    return canvasMeasurer(ctx)
-  }, [])
+  // 3. The one offscreen context the editor measures with (design § 3); shared with the placer.
+  const measure = getMeasurer()
 
   // 4. Every layout number for the enabled labels, recomputed only when the document changes.
   const { entries, orphans } = useMemo<{ entries: Entry[]; orphans: number }>(() => {
     if (!image || !style) return { entries: [], orphans: 0 }
     const out: Entry[] = []
     let orphans = 0
-    const s = scaleUnit(image.width, image.height)
+    const unit = scaleUnit(image.width, image.height)
     for (const label of labels) {
       const obj = objects.get(label.object_id)
-      // PR 5: these labels are hidden, not dropped — the save path must write them back.
+      // Hidden, not dropped: the save path writes these labels back untouched.
       if (!obj) {
         orphans++
         continue
       }
-      const box = measureLabel(measure, style, label, obj)
-      const radius = markerRadius(obj, style)
-      const seg = leaderSegment(obj.x, obj.y, radius, {
-        left: label.x,
-        top: label.y,
-        right: label.x + box.width,
-        bottom: label.y + box.height,
-      })
-      out.push({
-        label,
-        obj,
-        box,
-        text: labelText(obj, label, style),
-        radius,
-        seg,
-        leader: seg !== null && leaderVisible(label, seg.gap, s),
-      })
+      out.push(entryFor(style, label, obj, measure, unit))
     }
     return { entries: out, orphans }
   }, [image, style, labels, objects, measure])
@@ -282,6 +329,15 @@ export default function EditorCanvas() {
       if (inField() || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === 'f' || e.key === 'F') useEditor.getState().fit()
       else if (e.key === '1') useEditor.getState().actual()
+      else if (e.key === 'Escape') useEditor.getState().select(null)
+      else if (e.key === 'Delete' || e.key === 'Backspace') {
+        const s = useEditor.getState()
+        if (s.selectedId === null || !isEditable(s)) return
+        // Backspace is still "back" in some browsers when nothing has the focus.
+        e.preventDefault()
+        s.toggleObject(s.selectedId)
+        s.select(null)
+      }
     }
     const up = (e: KeyboardEvent) => {
       if (e.code === 'Space') spaceRef.current = false
@@ -341,7 +397,13 @@ export default function EditorCanvas() {
     // Published only once there is something to diff: no preview bitmap (or a failed one) means
     // the stage would render the annotations over an empty background.
     if (!stage || !image || !preview || previewError) return
-    window.__astrocaptionEditor = { stage, imageWidth: image.width, labelCount: entries.length, renderAt }
+    window.__astrocaptionEditor = {
+      stage,
+      imageWidth: image.width,
+      labelCount: entries.length,
+      labelPositions: () => entries.map((e) => ({ id: e.label.object_id, x: e.label.x, y: e.label.y })),
+      renderAt,
+    }
     return () => {
       delete window.__astrocaptionEditor
     }
@@ -372,11 +434,18 @@ export default function EditorCanvas() {
             fill="transparent"
             onMouseEnter={() => hover(id)}
             onMouseLeave={() => hover(null)}
+            onClick={() => toggleWithPlacement(id)}
           />
         )
       }),
     [objectOrder, objects, style, view.scale, hover],
   )
+
+  // A click on the empty background (never on a label or a marker) clears the selection; a click
+  // that ended a pan does not.
+  const onStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (e.target === stageRef.current && !movedRef.current) select(null)
+  }
 
   // 7. Wheel zoom about the cursor.
   const onWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
@@ -391,6 +460,7 @@ export default function EditorCanvas() {
   const onMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
     const stage = stageRef.current
     if (!stage) return
+    movedRef.current = false
     if (!(e.target === stage || e.evt.button === 1 || spaceRef.current)) return
     const pointer = stage.getPointerPosition()
     if (!pointer) return
@@ -403,6 +473,7 @@ export default function EditorCanvas() {
     const start = panRef.current
     const pointer = stageRef.current?.getPointerPosition()
     if (!start || !pointer) return
+    if (pointer.x !== start.sx || pointer.y !== start.sy) movedRef.current = true
     setView({ scale: view.scale, x: start.vx + (pointer.x - start.sx), y: start.vy + (pointer.y - start.sy) })
   }
 
@@ -457,6 +528,7 @@ export default function EditorCanvas() {
             y={view.y}
             onWheel={onWheel}
             onMouseDown={onMouseDown}
+            onClick={onStageClick}
             onMouseMove={onMouseMove}
             onMouseUp={stopPan}
             onMouseLeave={stopPan}
@@ -468,6 +540,9 @@ export default function EditorCanvas() {
               entries={entries}
               style={style}
               font={font}
+              editable={editable}
+              select={select}
+              moveLabel={moveLabel}
               onDrawError={onDrawError}
               badgesRef={badgesRef}
             />

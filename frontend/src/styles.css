@@ -94,6 +94,9 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
 .editor-toolbar a { text-decoration: none; }
 .editor-main > .notice { margin: 0.75rem 1rem 0; }
 .editor-main > .error, .editor-main > .meta { padding: 1.5rem; }
+.save-status { margin-left: auto; display: flex; gap: 0.5rem; align-items: center; color: var(--muted); font-size: 0.9rem; }
+.save-status.error { color: var(--danger); }
+.save-status button { padding: 0.2rem 0.6rem; font-size: 0.85rem; }
 .editor-canvas { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #000; cursor: grab; }
 .editor-canvas.panning { cursor: grabbing; }
 .editor-tooltip { position: absolute; pointer-events: none; padding: 0.15rem 0.5rem; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; white-space: nowrap; }

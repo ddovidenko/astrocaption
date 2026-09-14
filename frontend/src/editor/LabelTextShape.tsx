@@ -17,7 +17,10 @@ interface Props {
 
 /** Text drawn the way Pillow draws it (design § 3): geometricPrecision, alphabetic baseline at
  *  y + ascent, the halo as a round-joined stroke of 2 × halo_width under the fill. The hit area
- *  is the measured text box so hover and (in PR 5) drag use the same rectangle the placer used.
+ *  is the measured text box, so a drag grabs exactly the rectangle the placer placed.
+ *
+ *  Everything is drawn at the origin: the enclosing Konva Group carries `label.x`/`label.y`, and
+ *  dragging that group is what moves the label (the store keeps the position in original pixels).
  *
  *  Nothing here is chrome: this shape draws exactly what the export draws, so the parity render
  *  can keep it and hide the overlay layer (selection outline, hover ring) instead. */
@@ -41,14 +44,14 @@ export function LabelTextShape({ label, style, font, box, text, onDrawError }: P
       if (text.alias !== null) lines.push([text.alias, box.aliasSize, box.line1Height])
       for (const [str, size, dy] of lines) {
         c.font = fontShorthand(size, style.font_file)
-        const y = label.y + dy + ascentFor(font, size)
+        const y = dy + ascentFor(font, size)
         if (style.halo && style.halo_width > 0) {
           c.lineWidth = 2 * style.halo_width
           c.strokeStyle = style.halo_color
-          c.strokeText(str, label.x, y)
+          c.strokeText(str, 0, y)
         }
         c.fillStyle = color
-        c.fillText(str, label.x, y)
+        c.fillText(str, 0, y)
       }
     } catch (err) {
       failedRef.current = true
@@ -60,13 +63,10 @@ export function LabelTextShape({ label, style, font, box, text, onDrawError }: P
       sceneFunc={draw}
       hitFunc={(ctx, shape) => {
         ctx.beginPath()
-        ctx.rect(label.x, label.y, box.width, box.height)
+        ctx.rect(0, 0, box.width, box.height)
         ctx.closePath()
         ctx.fillStrokeShape(shape)
       }}
-      // Hover is served by the canvas overlay's hit circles; the hit area above stays so the
-      // rectangle is ready. PR 5: drag/select will turn this on.
-      listening={false}
     />
   )
 }

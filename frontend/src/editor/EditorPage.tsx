@@ -1,9 +1,48 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { pageError } from '../api'
+import { retrySave, startAutosave } from './autosave'
 import EditorCanvas from './EditorCanvas'
 import { loadEditor } from './load'
 import { useEditor } from './store'
+
+/** The toolbar's save state (design § 5). Editing stays local after a conflict; only saving
+ *  stops, so the sentence offers a reload rather than a retry. */
+function SaveStatus() {
+  const solved = useEditor((s) => s.image?.solve_status === 'solved')
+  const save = useEditor((s) => s.save)
+  if (!solved) return <span className="save-status">Read-only while solving</span>
+  switch (save.status) {
+    case 'saving':
+      return <span className="save-status">Saving…</span>
+    case 'dirty':
+      return <span className="save-status">Unsaved changes</span>
+    case 'error':
+      return (
+        <span className="save-status error">
+          {save.message ?? 'The last change could not be saved.'}{' '}
+          <button className="secondary" onMouseDown={(e) => e.preventDefault()} onClick={retrySave}>
+            Retry
+          </button>
+        </span>
+      )
+    case 'conflict':
+      return (
+        <span className="save-status error">
+          {save.message ?? 'This image was changed elsewhere. Reload to continue editing.'}{' '}
+          <button
+            className="secondary"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => window.location.reload()}
+          >
+            Reload
+          </button>
+        </span>
+      )
+    default:
+      return <span className="save-status">Saved</span>
+  }
+}
 
 export default function EditorPage() {
   const { id } = useParams()
@@ -19,10 +58,13 @@ export default function EditorPage() {
   useEffect(() => {
     if (!id) return
     let cancelled = false
+    // Started only once the document is in the store, so the controller never sees the empty one.
+    let stop: (() => void) | null = null
     loadEditor(id)
       .then((doc) => {
         if (cancelled) return
         useEditor.getState().load(doc)
+        stop = startAutosave(id)
         setResult({ id, error: null })
       })
       .catch((err: unknown) => {
@@ -31,6 +73,8 @@ export default function EditorPage() {
       })
     return () => {
       cancelled = true
+      // Stopped before the reset, so the empty document is never scheduled for a save.
+      stop?.()
       useEditor.getState().reset()
     }
   }, [id])
@@ -69,6 +113,7 @@ export default function EditorPage() {
         >
           100 %
         </button>
+        <SaveStatus />
       </div>
       {image.solve_status !== 'solved' && (
         <div className="notice">
