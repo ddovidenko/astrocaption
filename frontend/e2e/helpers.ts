@@ -11,6 +11,11 @@ import type { EditorTestHook } from '../src/editor/EditorCanvas'
 
 export const PASSWORD = 'e2e-password-1'
 export const FIXTURE = resolve(fileURLToPath(new URL('.', import.meta.url)), 'fixtures', 'field.jpg')
+// The fake nova is reached directly, not through the app: in CI it listens on 0.0.0.0 (so the
+// container can call it through host.docker.internal) and 127.0.0.1 still reaches it there.
+export const FAKE_NOVA_URL = `http://127.0.0.1:${process.env.FAKE_NOVA_PORT ?? '8901'}`
+
+export type FakeNovaMode = 'success' | 'failure' | 'timeout'
 
 declare global {
   interface Window {
@@ -53,6 +58,43 @@ export async function ensureSetUpAndSignedIn(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 }
 
+/** Switches how the fake nova answers job polls, for every solve from now on. */
+export async function setFakeNovaMode(page: Page, mode: FakeNovaMode): Promise<void> {
+  const res = await page.request.post(`${FAKE_NOVA_URL}/_fake/mode`, { data: { job: mode } })
+  expect(res.status(), `fake nova mode ${mode}`).toBe(200)
+}
+
+/** How many uploads the fake nova has been sent since it started. Check again must not add one. */
+export async function fakeNovaUploads(page: Page): Promise<number> {
+  const res = await page.request.get(`${FAKE_NOVA_URL}/_fake/mode`)
+  expect(res.status()).toBe(200)
+  return ((await res.json()) as { uploads: number }).uploads
+}
+
+/** Uploads the fixture under `title` and returns its card, without waiting for a solve status. */
+export async function uploadImage(page: Page, title: string): Promise<Locator> {
+  await page.locator('input[type=file]').setInputFiles(FIXTURE)
+  await page.getByPlaceholder('Title (optional)').fill(title)
+  await page.getByRole('button', { name: 'Upload & solve' }).click()
+  const card = page.locator('article.card', { hasText: title })
+  await expect(card).toBeVisible()
+  return card
+}
+
+/** Removes every image titled `title` through the API, so a re-run on the same data dir starts
+ *  clean, and reloads so the list on screen agrees (a stale card would still match a selector). */
+export async function deleteImageIfPresent(page: Page, title: string): Promise<void> {
+  const res = await page.request.get('/api/images')
+  expect(res.status()).toBe(200)
+  for (const img of (await res.json()) as ImageOut[]) {
+    if (img.title === title) {
+      expect((await page.request.delete(`/api/images/${img.id}`)).status()).toBe(204)
+    }
+  }
+  await page.reload()
+  await expect(page.locator('article.card', { hasText: title })).toHaveCount(0)
+}
+
 /** Returns the card for `title`, uploading and solving the fixture first if it is not there.
  *  Assumes the signed-in image list is already open. Asks the API whether the image exists: a
  *  card count of 0 is also what a list that has not rendered yet looks like, and that would
@@ -61,12 +103,9 @@ export async function ensureSolvedImage(page: Page, title = 'Orion'): Promise<Lo
   const res = await page.request.get('/api/images')
   expect(res.status()).toBe(200)
   const images = (await res.json()) as ImageOut[]
-  const card = page.locator('article.card', { hasText: title })
-  if (!images.some((i) => i.title === title)) {
-    await page.locator('input[type=file]').setInputFiles(FIXTURE)
-    await page.getByPlaceholder('Title (optional)').fill(title)
-    await page.getByRole('button', { name: 'Upload & solve' }).click()
-  }
+  const card = images.some((i) => i.title === title)
+    ? page.locator('article.card', { hasText: title })
+    : await uploadImage(page, title)
   await expect(card.locator('.badge')).toHaveText('Solved', { timeout: 60_000 })
   await expect(card.getByText(/[1-9]\d* objects/)).toBeVisible()
   return card

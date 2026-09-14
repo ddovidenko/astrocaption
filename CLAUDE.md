@@ -53,7 +53,8 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
   must still pass. Konva needs a browser, so the pixel diff lives in the Playwright suite, not pytest.
 - Never call nova.astrometry.net during tests. Use the recorded fixtures in `backend/tests/fixtures/nova/`
   (3.9° Orion field) and `backend/tests/fixtures/nova-narrow/` (1° Pelican field with `hd` stars);
-  `frontend/e2e/fake-nova.mjs` replays the Orion set for the browser test.
+  `frontend/e2e/fake-nova.mjs` replays the Orion set for the browser test, and can be switched to
+  a failed or never-finishing job (`POST /_fake/mode`) for the failure spec.
 - Secrets (nova API key, password hash, session secret) live only in `data/config.json`
   and env vars. Never in the repo, never in logs, never returned by any API endpoint.
 - Public (logged-out) routes are read-only and must never expose the editor, the config,

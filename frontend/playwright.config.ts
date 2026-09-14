@@ -76,6 +76,11 @@ export default defineConfig({
               `ASTROCAPTION_STATIC_DIR="${backend}/static"`,
               `NOVA_BASE_URL=http://127.0.0.1:${novaPort}`,
               'NOVA_API_KEY=fixture',
+              // The fake answers instantly, so a solve that is going nowhere (fake-nova's
+              // 'timeout' mode, solve-failure.spec.ts) reaches the deadline in seconds
+              // instead of the default 15 minutes.
+              'ASTROCAPTION_SOLVE_TIMEOUT_SECONDS=8',
+              'ASTROCAPTION_SOLVE_POLL_SECONDS=1',
               `${backend}/.venv/bin/uvicorn app.main:app --port ${appPort}`,
             ].join(' '),
             cwd: backend,

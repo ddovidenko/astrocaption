@@ -96,3 +96,16 @@ alongside `SidePanel.tsx` (the Objects/Layout/Image tabs, SPEC § 6.3). The canv
 — published only once the preview bitmap has loaded — so `frontend/e2e/parity.spec.ts` can force a
 render at a fixed scale for the pixel diff and read how many labels were drawn (the width test
 measures on its own canvas), and `frontend/e2e/smoke.spec.ts` can locate a label on screen to drag it.
+
+## Browser tests
+
+`frontend/e2e/` runs under Playwright against the built frontend served by uvicorn (`make e2e`) or
+the Docker image (CI), with `frontend/e2e/fake-nova.mjs` standing in for nova.astrometry.net: one
+worker, one data dir, and the spec files run in alphabetical order as one story —
+`parity.spec.ts` (the pixel diff above), `smoke.spec.ts` (setup, solve, export, edit, config, sign
+out) and `solve-failure.spec.ts` last, which drives a solve nova reports as failed, a Re-solve that
+never finishes and times out, and Check again resuming that stored job back to Solved without a
+second upload. The last one needs the fake to misbehave on demand (`POST /_fake/mode` with
+`success`, `failure` or `timeout`, and an upload counter in the answer) and needs the app's solve
+deadline to be seconds rather than 15 minutes, so uvicorn and the CI container are started with
+`ASTROCAPTION_SOLVE_TIMEOUT_SECONDS=8` and `ASTROCAPTION_SOLVE_POLL_SECONDS=1`.
