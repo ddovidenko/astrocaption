@@ -333,6 +333,9 @@ export const api = {
   login: (password: string) =>
     request<void>('/api/login', json('POST', { password }), { sessionAware: false }),
   logout: () => request<void>('/api/logout', json('POST')),
+  /** 403 = wrong current password (ApiError.message); a 401 here is a lost session like anywhere. */
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<void>('/api/password', json('POST', { current_password: currentPassword, new_password: newPassword })),
   config: () => request<ConfigOut>('/api/config'),
   fonts: () => request<FontOut[]>('/api/fonts'),
   updateConfig: (body: ConfigUpdate) => request<ConfigOut>('/api/config', json('PUT', body)),

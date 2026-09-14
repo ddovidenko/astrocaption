@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { ensureExported, ensureSetUpAndSignedIn, ensureSolvedImage } from './helpers'
+import { ensureExported, ensureSetUpAndSignedIn, ensureSolvedImage, PASSWORD } from './helpers'
 
 // This runs against the built frontend bundle served by uvicorn (`make e2e`) or the Docker
 // image (CI) — never the Vite dev server, so it does not guard `make dev`'s /api proxy.
@@ -121,9 +121,28 @@ test('first run: setup, sign in, solve, export, edit, config, sign out', async (
   await expect(page.getByText('Saved.')).toBeVisible()
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Renamed sky')
 
+  // Password change (#43): the changing session stays signed in, and the change is reverted so
+  // the next run of this suite on the same data dir can still sign in.
+  const changePassword = async (from: string, to: string) => {
+    await page.getByLabel('Current password').fill(from)
+    await page.getByLabel('New password', { exact: true }).fill(to)
+    await page.getByLabel('New password again').fill(to)
+    await page.getByRole('button', { name: 'Change password' }).click()
+    await expect(page.getByText('Password changed.')).toBeVisible()
+  }
+  await changePassword(PASSWORD, `${PASSWORD}-2`)
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible() // still signed in, still on the page
+  await changePassword(`${PASSWORD}-2`, PASSWORD)
+
   await page.getByRole('button', { name: 'Log out' }).click()
   await expect(page).toHaveURL(/\/login$/)
   await page.goto('/')
+  await expect(page).toHaveURL(/\/login$/)
+  // The restored password still signs in: the round trip above really put it back.
+  await page.getByLabel('Password').fill(PASSWORD)
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await page.getByRole('button', { name: 'Log out' }).click()
   await expect(page).toHaveURL(/\/login$/)
   await page.goto('/setup')
   await expect(page.getByText('This site is already set up.')).toBeVisible()
