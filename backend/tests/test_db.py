@@ -16,13 +16,42 @@ def test_migration_from_v1_adds_hints_column(tmp_path: Path) -> None:
     db.init()
     with db.connect() as conn:  # rewind to the version-1 shape
         conn.execute("ALTER TABLE images DROP COLUMN solve_hints_json")
+        conn.execute("ALTER TABLE images DROP COLUMN solve_failure")
         conn.execute("PRAGMA user_version = 1")
     db.init()
     with db.connect() as conn:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(images)")}
-        assert "solve_hints_json" in columns
+        assert {"solve_hints_json", "solve_failure"} <= columns
         assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     db.init()  # idempotent
+
+
+def test_migration_from_v2_adds_the_failure_kind_column(tmp_path: Path) -> None:
+    """A database written by the previous build gains ``solve_failure`` and reads NULL there:
+    rows that failed before this column existed are simply not resumable."""
+    db = Database(tmp_path / "x.sqlite")
+    db.init()
+    with db.connect() as conn:  # rewind to the version-2 shape
+        conn.execute("ALTER TABLE images DROP COLUMN solve_failure")
+        conn.execute("PRAGMA user_version = 2")
+    db.init()
+    with db.connect() as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(images)")}
+        assert "solve_failure" in columns
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    db.init()  # idempotent
+
+
+def test_solve_failure_round_trip(settings: Settings) -> None:
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    assert rec.solve_failure is None
+    db.update_image(rec.id, {"solve_failure": "timeout"})
+    got = db.get_image(rec.id)
+    assert got is not None and got.solve_failure == "timeout"
+    db.update_image(rec.id, {"solve_failure": None})
+    got = db.get_image(rec.id)
+    assert got is not None and got.solve_failure is None
 
 
 def test_solve_hints_round_trip(settings: Settings) -> None:
@@ -52,14 +81,16 @@ def test_failed_migration_rolls_back(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     db = Database(tmp_path / "x.sqlite")
     db.init()
-    monkeypatch.setattr(dbmod, "SCHEMA_VERSION", 3)
+    monkeypatch.setattr(dbmod, "SCHEMA_VERSION", SCHEMA_VERSION + 1)
     monkeypatch.setitem(
-        dbmod.MIGRATIONS, 3, ("ALTER TABLE images ADD COLUMN scratch TEXT", "THIS IS NOT SQL")
+        dbmod.MIGRATIONS,
+        SCHEMA_VERSION + 1,
+        ("ALTER TABLE images ADD COLUMN scratch TEXT", "THIS IS NOT SQL"),
     )
     with pytest.raises(Exception, match="syntax error"):
         db.init()
     with db.connect() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(images)")}
         assert "scratch" not in columns
 

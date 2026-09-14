@@ -21,6 +21,8 @@ export interface ImageOut {
   height: number
   solve_status: SolveStatus
   solve_error: string | null
+  /** The failed solve timed out with a stored nova submission, so Check again can resume it. */
+  check_available: boolean
   nova_submission_id: number | null
   nova_job_id: number | null
   nova_status_url: string | null
@@ -171,7 +173,7 @@ export interface SolveHints {
 
 export class ApiError extends Error {
   readonly status: number
-  /** Decided once, in `request()`: this 401 is the shell's cue to send the user to /login. */
+  /** Decided once, in `settle()`: this 401 is the shell's cue to send the user to /login. */
   readonly sessionLost: boolean
   constructor(status: number, message: string, sessionLost = false) {
     super(message)
@@ -182,17 +184,25 @@ export class ApiError extends Error {
 
 /** Extract a human-readable message from a FastAPI error body. The backend's 422 handler
  *  always answers with a plain string detail, so there is no list form to unpack. */
-export function errorMessage(status: number, body: unknown): string {
+export function errorMessage(status: number, body: unknown, fallback?: string): string {
   if (body && typeof body === 'object' && 'detail' in body) {
     const detail = (body as { detail: unknown }).detail
     if (typeof detail === 'string') return detail
   }
-  return `Request failed (HTTP ${status})`
+  return fallback ?? `Request failed (HTTP ${status})`
 }
 
 /** Parse a response body; a 2xx that is not JSON (e.g. the dev server answering with
  *  index.html when the API is unreachable) is an error, not a silent null. */
-export function parseBody(status: number, ok: boolean, text: string, sessionLost = false): unknown {
+/** `fallbacks`: per-status sentences for bodies that carry no `detail` (a reverse proxy's own
+ *  page); the API's own message always wins. */
+export function parseBody(
+  status: number,
+  ok: boolean,
+  text: string,
+  sessionLost = false,
+  fallbacks?: Record<number, string>,
+): unknown {
   let body: unknown = null
   if (text) {
     try {
@@ -203,7 +213,7 @@ export function parseBody(status: number, ok: boolean, text: string, sessionLost
       }
     }
   }
-  if (!ok) throw new ApiError(status, errorMessage(status, body), sessionLost)
+  if (!ok) throw new ApiError(status, errorMessage(status, body, fallbacks?.[status]), sessionLost)
   return body
 }
 
@@ -216,7 +226,7 @@ export function setUnauthorizedHandler(fn: (() => void) | null): void {
 
 /** True when `err` is the ApiError the shell's 401 handler is about to act on; callers that
  *  display page-level errors should skip setting one for it (the shell is already redirecting).
- *  It reads the flag `request()` set, so the rule lives in exactly one place. */
+ *  It reads the flag `settle()` set, so the rule lives in exactly one place. */
 export function isSessionLossError(err: unknown): boolean {
   return err instanceof ApiError && err.sessionLost
 }
@@ -238,12 +248,24 @@ interface RequestOptions {
   sessionAware?: boolean
 }
 
+/** Turn a finished response into its parsed body, or throw the ApiError it deserves. Both
+ *  transports end here, so the 401 rule lives in exactly one place: a session-aware 401 tells
+ *  the shell to send the user to /login and marks the error so pages skip their own message. */
+function settle<T>(
+  status: number,
+  text: string,
+  sessionAware = true,
+  fallbacks?: Record<number, string>,
+): T {
+  const lost = sessionAware && status === 401
+  if (lost) onUnauthorized?.()
+  if (status === 204) return undefined as T
+  return parseBody(status, status >= 200 && status < 300, text, lost, fallbacks) as T
+}
+
 async function request<T>(url: string, init?: RequestInit, { sessionAware = true }: RequestOptions = {}): Promise<T> {
   const res = await fetch(url, init)
-  const lost = sessionAware && res.status === 401
-  if (lost) onUnauthorized?.()
-  if (res.status === 204) return undefined as T
-  return parseBody(res.status, res.ok, await res.text(), lost) as T
+  return settle<T>(res.status, await res.text(), sessionAware)
 }
 
 const json = (method: string, body?: unknown): RequestInit => ({
@@ -251,6 +273,59 @@ const json = (method: string, body?: unknown): RequestInit => ({
   headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
   body: body === undefined ? undefined : JSON.stringify(body),
 })
+
+export type UploadProgress = (sent: number, total: number) => void
+
+/** A big upload over a slow line is normal; only a stall this long is a failure. */
+export const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000
+
+/** Statuses a reverse proxy in front of the app answers itself, with its own HTML page rather
+ *  than this API's JSON; the generic "Request failed (HTTP n)" says nothing about what to do.
+ *  Used only when the body carried no `detail` — the API's own message always wins. */
+const PROXY_UPLOAD_MESSAGES: Record<number, string> = {
+  413: 'The file is larger than the upload limit; the server or a reverse proxy refused it.',
+  502: 'The server did not answer the upload in time. Try again.',
+  504: 'The server did not answer the upload in time. Try again.',
+}
+
+/** Multipart POST over XMLHttpRequest — the one browser transport that reports upload
+ *  progress — with the same session and error handling as `request()`: a 401 sends the shell to
+ *  /login, every body goes through `parseBody`. `XHR` is injectable for tests. */
+export function uploadForm<T>(
+  url: string,
+  form: FormData,
+  onProgress?: UploadProgress,
+  XHR: typeof XMLHttpRequest = XMLHttpRequest,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XHR()
+    xhr.open('POST', url)
+    xhr.timeout = UPLOAD_TIMEOUT_MS
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(e.loaded, e.total)
+    }
+    // A refused upload is often cut off mid-body, which the browser reports as a transport
+    // error with no status at all; the size is the first thing to check when that happens.
+    xhr.onerror = () =>
+      reject(
+        new Error(
+          'The upload did not finish: the connection dropped, or the server refused the file' +
+            ' before it was fully sent (check the size against the upload limit).',
+        ),
+      )
+    xhr.ontimeout = () =>
+      reject(new Error('The upload timed out. Check the connection and try again.'))
+    xhr.onabort = () => reject(new Error('The upload was cancelled.'))
+    xhr.onload = () => {
+      try {
+        resolve(settle<T>(xhr.status, xhr.responseText, true, PROXY_UPLOAD_MESSAGES))
+      } catch (err) {
+        reject(err)
+      }
+    }
+    xhr.send(form)
+  })
+}
 
 export const api = {
   health: () => request<HealthOut>('/api/health'),
@@ -263,14 +338,16 @@ export const api = {
   updateConfig: (body: ConfigUpdate) => request<ConfigOut>('/api/config', json('PUT', body)),
   listImages: () => request<ImageOut[]>('/api/images'),
   image: (id: string) => request<ImageOut>(`/api/images/${id}`),
-  upload(file: File, title: string): Promise<ImageOut> {
+  upload(file: File, title: string, onProgress?: UploadProgress): Promise<ImageOut> {
     const form = new FormData()
     form.append('file', file)
     if (title.trim()) form.append('title', title.trim())
-    return request<ImageOut>('/api/images', { method: 'POST', body: form })
+    return uploadForm<ImageOut>('/api/images', form, onProgress)
   },
   resolve: (id: string, hints?: SolveHints) =>
     request<ImageOut>(`/api/images/${id}/solve`, json('POST', hints)),
+  /** Check again (#10): resumes the stored nova job of a failed row; a 409 says why it cannot. */
+  checkSolve: (id: string) => request<ImageOut>(`/api/images/${id}/check`, json('POST')),
   objects: (id: string) => request<ObjectOut[]>(`/api/images/${id}/objects`),
   annotations: (id: string) => request<Annotations>(`/api/images/${id}/annotations`),
   /** A 409 (ApiError.status) means the save was refused; show err.message: either the stored

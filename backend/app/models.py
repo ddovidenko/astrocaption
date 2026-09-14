@@ -36,6 +36,16 @@ class SolveStatus(StrEnum):
     FAILED = "failed"
 
 
+SolveFailureKind = Literal["timeout", "failed", "error"]
+"""Why a FAILED row failed, so the API can tell a resumable failure from a dead one.
+
+``timeout``: the worker gave up waiting while nova was still working — the stored submission
+may well have finished since, so Check again can resume it. ``failed``: nova answered with a
+failure, or the solve was refused before nova ever saw it. ``error``: an unexpected error on
+this server. Only ``timeout`` is resumable; see ``ImageOut.check_available``.
+"""
+
+
 # ---------------------------------------------------------------------------
 # Catalogue objects (immutable after a solve)
 # ---------------------------------------------------------------------------
@@ -358,6 +368,9 @@ class ImageRecord(BaseModel):
     height: int
     solve_status: SolveStatus = SolveStatus.PENDING
     solve_error: str | None = None
+    # A SolveFailureKind while the row is FAILED, NULL otherwise; plain ``str`` because a row
+    # written by a future build (or hand-edited) must still load.
+    solve_failure: str | None = None
     solve_scale: float = 1.0
     nova_submission_id: int | None = None
     nova_job_id: int | None = None
@@ -366,6 +379,23 @@ class ImageRecord(BaseModel):
     solve_hints: SolveHints | None = None  # persisted so a restart keeps the owner's hints
     published: bool = False
     exported_at: str | None = None
+
+    @property
+    def check_available(self) -> bool:
+        """Whether POST /check can resume this row, which is the one thing Check again is for.
+
+        Only a deadline failure is resumable: the submission it still holds may well have
+        finished on nova since. A nova FAILURE, a re-submit that failed and left an *earlier*
+        attempt's ids on the row, and an unexpected server error are all dead ends where
+        resuming would either re-report the same failure or silently adopt a stale job's
+        result — Re-solve is the answer there. ``image_out`` reports this and ``check_solve``
+        enforces it, so the button the page draws and the route's answer can never disagree.
+        """
+        return (
+            self.solve_status == SolveStatus.FAILED
+            and self.solve_failure == "timeout"
+            and self.nova_submission_id is not None
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +416,8 @@ class ImageOut(BaseModel):
     height: int
     solve_status: SolveStatus
     solve_error: str | None
+    #: The failed solve can be resumed by POST /check: it timed out with a stored submission.
+    check_available: bool
     nova_submission_id: int | None
     nova_job_id: int | None
     nova_status_url: str | None

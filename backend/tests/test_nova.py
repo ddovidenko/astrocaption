@@ -181,6 +181,38 @@ def test_transport_failures_become_solver_errors(
     assert isinstance(excinfo.value, TransientSolverError) is transient
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param({"status": "error", "errormessage": "no job with id"}, id="error-payload"),
+        pytest.param({"jobs": []}, id="no-status-key"),
+    ],
+)
+def test_a_job_nova_no_longer_knows_fails_fast(payload: dict[str, Any]) -> None:
+    """A dropped job (or one belonging to another account) must not be polled to the
+    15-minute deadline: Check again would then burn a quarter of an hour saying nothing."""
+    replay = Replay({f"GET /api/jobs/{JOBID}": payload})
+    with pytest.raises(SolverError, match="no longer knows job") as excinfo:
+        run(make_solver(replay).poll_job(JOBID))
+    assert not isinstance(excinfo.value, TransientSolverError)
+    assert job_log_url(BASE, JOBID) in str(excinfo.value)
+    assert "Re-solve" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("status", ["solving", "processing", "queued"])
+def test_every_other_non_terminal_job_status_is_still_solving(status: str) -> None:
+    replay = Replay({f"GET /api/jobs/{JOBID}": {"status": status}})
+    assert run(make_solver(replay).poll_job(JOBID)) == JobState.SOLVING
+
+
+def test_a_submission_nova_no_longer_knows_fails_fast() -> None:
+    replay = Replay({f"GET /api/submissions/{SUBID}": {"status": "error"}})
+    with pytest.raises(SolverError, match="no longer knows submission") as excinfo:
+        run(make_solver(replay).poll_submission(SUBID))
+    assert not isinstance(excinfo.value, TransientSolverError)
+    assert f"/status/{SUBID}" in str(excinfo.value)
+
+
 def test_submission_finished_without_a_job_is_permanent() -> None:
     dead = {
         "processing_started": "2026-09-08 00:37:58.522033+00:00",

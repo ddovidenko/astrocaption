@@ -13,6 +13,11 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from starlette.requests import Request
 
+from app.api.images import (
+    ALREADY_SOLVED_MESSAGE,
+    IN_PROGRESS_MESSAGE,
+    NOT_RESUMABLE_MESSAGE,
+)
 from app.config import CONFIG_FIX_HINT, Settings
 from app.db import Database
 from app.fonts import FontNotFoundError, load_font
@@ -394,6 +399,97 @@ def test_failed_solve_then_resolve_with_hints(tmp_path: Path, sample_jpeg: Path)
         assert solved["solve_status"] == "solved" and solved["solve_error"] is None
         assert solver.requests[-1].scale_arcsec_per_px is not None
         assert abs(solver.requests[-1].scale_arcsec_per_px - 206.265 * 3.76 / 400) < 1e-9
+
+
+def test_check_again_resumes_a_timed_out_job_without_a_second_upload(
+    tmp_path: Path, sample_jpeg: Path
+) -> None:
+    """The one resumable failure: the deadline passed while nova was still working. A tiny
+    ``solve_timeout`` and a job that never finishes reproduce it without waiting 15 minutes."""
+    settings = make_settings(tmp_path)
+    solver = FakeSolver(job_polls=10_000)
+    app = create_app(
+        settings, solver_factory=lambda: solver, poll_interval=0.01, solve_timeout=0.05
+    )
+    with TestClient(app) as client:
+        login(client)
+        body = upload(client, sample_jpeg)
+        failed = wait_for_status(client, body["id"], {"solved", "failed"})
+        assert failed["solve_status"] == "failed"
+        assert failed["solve_error"] is not None and failed["solve_error"].startswith("Timed out")
+        assert failed["nova_submission_id"] == 12345678
+        assert failed["nova_job_id"] == 7654321
+        assert failed["check_available"] is True
+        stored = Database(settings.db_path).get_image(body["id"])
+        assert stored is not None and stored.solve_failure == "timeout"
+
+        solver.job_polls = 1  # nova finished it in the meantime
+        resp = client.post(f"/api/images/{body['id']}/check")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["solve_status"] == "solving"
+        assert resp.json()["solve_error"] is None
+        assert resp.json()["nova_submission_id"] == 12345678
+
+        solved = wait_for_status(client, body["id"], {"solved", "failed"})
+        assert solved["solve_status"] == "solved", solved["solve_error"]
+        assert solved["check_available"] is False
+        # Nothing was uploaded again and the stored job id spared the submission poll.
+        assert len(solver.requests) == 1
+        assert solver.submission_poll_count == 1
+        assert solved["nova_submission_id"] == 12345678
+        assert solved["nova_job_id"] == 7654321
+        stored = Database(settings.db_path).get_image(body["id"])
+        assert stored is not None and stored.solve_failure is None
+
+
+def test_check_again_is_not_offered_after_nova_reported_a_failure(
+    tmp_path: Path, sample_jpeg: Path
+) -> None:
+    """nova answered FAILURE: the job is finished and unsolvable, so resuming it would only
+    re-report the same thing. Re-solve (with hints) is the way forward."""
+    settings = make_settings(tmp_path)
+    solver = FakeSolver(fail=True)
+    with make_client(settings, lambda: solver) as client:
+        login(client)
+        body = upload(client, sample_jpeg)
+        failed = wait_for_status(client, body["id"], {"solved", "failed"})
+        assert failed["solve_status"] == "failed"
+        assert failed["nova_submission_id"] == 12345678  # the ids are still on the row
+        assert failed["check_available"] is False
+        resp = client.post(f"/api/images/{body['id']}/check")
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == NOT_RESUMABLE_MESSAGE
+        assert len(solver.requests) == 1  # and nothing was re-submitted
+
+
+def test_check_again_is_refused_when_there_is_nothing_to_check(
+    tmp_path: Path, sample_jpeg: Path
+) -> None:
+    settings = make_settings(tmp_path)
+    # No solver at all: the row fails before nova ever sees it, so it has no ids.
+    with make_client(settings, lambda: None) as client:
+        login(client)
+        body = upload(client, sample_jpeg)
+        failed = wait_for_status(client, body["id"], {"solved", "failed"})
+        assert failed["solve_status"] == "failed" and failed["nova_submission_id"] is None
+        assert failed["check_available"] is False
+        resp = client.post(f"/api/images/{body['id']}/check")
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == NOT_RESUMABLE_MESSAGE
+        assert client.post("/api/images/nope/check").status_code == 404
+
+
+def test_check_again_is_refused_while_busy_or_solved(client: TestClient, sample_jpeg: Path) -> None:
+    body = upload(client, sample_jpeg)
+    solved = wait_for_status(client, body["id"], {"solved", "failed"})
+    assert solved["solve_status"] == "solved"
+    resp = client.post(f"/api/images/{body['id']}/check")
+    assert resp.status_code == 409 and resp.json()["detail"] == ALREADY_SOLVED_MESSAGE
+    # Queue a re-solve, then the row is busy.
+    assert client.post(f"/api/images/{body['id']}/solve").status_code == 200
+    resp = client.post(f"/api/images/{body['id']}/check")
+    assert resp.status_code == 409 and resp.json()["detail"] == IN_PROGRESS_MESSAGE
+    wait_for_status(client, body["id"], {"solved", "failed"})
 
 
 def test_missing_key_gives_guidance(tmp_path: Path, sample_jpeg: Path) -> None:

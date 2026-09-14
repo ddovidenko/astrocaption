@@ -6,6 +6,7 @@ import os
 import re
 import uuid
 from collections import Counter
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, BinaryIO, Literal
 from urllib.parse import quote
@@ -45,6 +46,7 @@ from ..storage import (
     probe_image,
     render_dir,
 )
+from ..worker import SolveWorker
 from .deps import (
     DbDep,
     SettingsDep,
@@ -143,6 +145,7 @@ def image_out(rec: ImageRecord, settings: Settings, object_count: int) -> ImageO
         height=rec.height,
         solve_status=rec.solve_status,
         solve_error=rec.solve_error,
+        check_available=rec.check_available,
         nova_submission_id=rec.nova_submission_id,
         nova_job_id=rec.nova_job_id,
         nova_status_url=(
@@ -173,6 +176,34 @@ def _get_or_404(db: Database, image_id: str) -> ImageRecord:
     if rec is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Image not found.")
     return rec
+
+
+def _start_solve(
+    db: Database,
+    settings: Settings,
+    worker: SolveWorker,
+    image_id: str,
+    status_: SolveStatus,
+    extra: Mapping[str, object] | None = None,
+) -> ImageOut:
+    """The one way a route hands a row to the worker: the status moves, the previous failure is
+    cleared (``solve_error``/``solve_failure`` describe a FAILED row only), the row is queued,
+    and the response is re-read so it carries the database's ``updated_at``."""
+    fields: dict[str, object] = {
+        "solve_status": status_,
+        "solve_error": None,
+        "solve_failure": None,
+    }
+    fields.update(extra or {})
+    db.update_image(image_id, fields)
+    worker.enqueue(image_id)
+    return image_out(_get_or_404(db, image_id), settings, db.count_objects(image_id))
+
+
+def _require_idle(rec: ImageRecord) -> None:
+    """409 when a solve is already queued or running: neither route may touch the row then."""
+    if rec.solve_status in (SolveStatus.PENDING, SolveStatus.SOLVING):
+        raise HTTPException(status.HTTP_409_CONFLICT, IN_PROGRESS_MESSAGE)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -267,14 +298,27 @@ async def solve_image(
     hints: SolveHints | None = None,
 ) -> ImageOut:
     rec = _get_or_404(db, image_id)
-    if rec.solve_status in (SolveStatus.PENDING, SolveStatus.SOLVING):
-        raise HTTPException(status.HTTP_409_CONFLICT, "A solve is already in progress.")
-    db.update_image(
-        image_id,
-        {"solve_status": SolveStatus.PENDING, "solve_error": None, "solve_hints": hints},
-    )
-    worker.enqueue(image_id)
-    return image_out(_get_or_404(db, image_id), settings, db.count_objects(image_id))
+    _require_idle(rec)
+    return _start_solve(db, settings, worker, image_id, SolveStatus.PENDING, {"solve_hints": hints})
+
+
+@router.post("/{image_id}/check")
+async def check_solve(
+    image_id: str, settings: SettingsDep, db: DbDep, worker: WorkerDep
+) -> ImageOut:
+    """Check again (#10): resume polling the stored nova submission/job of a row that timed
+    out, instead of uploading the image again — the 15-minute deadline may have passed while
+    nova was still working. The worker's resume branch does the polling; a stored job id skips
+    the submission poll. Nothing about the row changes except the status and the cleared error,
+    so the stored scale hints and ``solve_scale`` keep describing the attempt being resumed.
+    Any other failure is refused (``ImageRecord.check_available``)."""
+    rec = _get_or_404(db, image_id)
+    _require_idle(rec)
+    if rec.solve_status == SolveStatus.SOLVED:
+        raise HTTPException(status.HTTP_409_CONFLICT, ALREADY_SOLVED_MESSAGE)
+    if not rec.check_available:
+        raise HTTPException(status.HTTP_409_CONFLICT, NOT_RESUMABLE_MESSAGE)
+    return _start_solve(db, settings, worker, image_id, SolveStatus.SOLVING)
 
 
 @router.get("/{image_id}/objects")
@@ -307,6 +351,11 @@ async def get_annotations(image_id: str, settings: SettingsDep, db: DbDep) -> An
 
 
 SOLVING_MESSAGE = "The image is still being solved; try again when it is done."
+IN_PROGRESS_MESSAGE = "A solve is already in progress."
+NOT_RESUMABLE_MESSAGE = (
+    "There is no nova.astrometry.net job to resume for this image; use Re-solve."
+)
+ALREADY_SOLVED_MESSAGE = "This image is already solved; use Re-solve to solve it again."
 CONFLICT_MESSAGE = "This image was changed elsewhere. Reload to continue editing."
 NOT_SOLVED_MESSAGE = "Image has not been solved yet."
 OBJECTS_DUPLICATE_MESSAGE = "labels: each of this image's objects may appear only once."

@@ -29,11 +29,12 @@ from .models import (
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Statements that bring an existing database from version N-1 to N.
 MIGRATIONS: dict[int, tuple[str, ...]] = {
     2: ("ALTER TABLE images ADD COLUMN solve_hints_json TEXT",),
+    3: ("ALTER TABLE images ADD COLUMN solve_failure TEXT",),
 }
 
 SCHEMA = """
@@ -50,6 +51,7 @@ CREATE TABLE IF NOT EXISTS images (
     height             INTEGER NOT NULL,
     solve_status       TEXT NOT NULL DEFAULT 'pending',
     solve_error        TEXT,
+    solve_failure      TEXT,
     solve_scale        REAL NOT NULL DEFAULT 1.0,
     nova_submission_id INTEGER,
     nova_job_id        INTEGER,
