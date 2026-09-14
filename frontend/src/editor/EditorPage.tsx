@@ -4,6 +4,7 @@ import { pageError } from '../api'
 import { flushSave, retrySave, startAutosave } from './autosave'
 import EditorCanvas from './EditorCanvas'
 import { loadEditor } from './load'
+import SidePanel from './SidePanel'
 import { useEditor } from './store'
 
 /** The toolbar's save state (design § 5). Editing stays local after a conflict; only saving
@@ -54,6 +55,7 @@ export default function EditorPage() {
   const error = id ? (settled?.error ?? null) : 'That image could not be found.'
   const image = useEditor((s) => s.image)
   const scale = useEditor((s) => s.view.scale)
+  const [panelOpen, setPanelOpen] = useState(true)
 
   useEffect(() => {
     if (!id) return
@@ -126,7 +128,14 @@ export default function EditorPage() {
           until it finishes.
         </div>
       )}
-      <EditorCanvas />
+      <div className={panelOpen ? 'editor-body' : 'editor-body collapsed'}>
+        {/* The canvas keeps its own column: its notices are siblings of the stage, and as direct
+            grid children they would land in the panel's column. */}
+        <div className="editor-pane">
+          <EditorCanvas />
+        </div>
+        <SidePanel open={panelOpen} onToggle={() => setPanelOpen((v) => !v)} />
+      </div>
     </>
   )
 }
