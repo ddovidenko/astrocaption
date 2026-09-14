@@ -128,6 +128,23 @@ describe('document actions', () => {
     s.toggleObject(2) // on again, at its own position: the owner's placement is not a collision
     expect(useEditor.getState().labels.get(2)).toMatchObject({ enabled: true, collided: false })
   })
+  it('toggleObject clears a selection that is being disabled, and keeps one being enabled', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.select(1)
+    s.toggleObject(1) // off: nothing left on the canvas to select
+    expect(useEditor.getState().selectedId).toBeNull()
+    s.select(1)
+    useEditor.getState().toggleObject(1) // on again
+    expect(useEditor.getState().selectedId).toBe(1)
+  })
+  it('toggleObject leaves another label\'s selection alone', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.select(1)
+    s.toggleObject(2, { x: 1, y: 2 })
+    expect(useEditor.getState().selectedId).toBe(1)
+  })
   it('moveLabel sets the position and clears collided', () => {
     const s = useEditor.getState()
     s.load(doc)

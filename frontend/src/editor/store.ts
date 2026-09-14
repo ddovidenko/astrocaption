@@ -41,7 +41,6 @@ export interface EditorState {
   toggleObject(id: number, placed?: { x: number; y: number; collided?: boolean }): void
   moveLabel(id: number, x: number, y: number): void
   applyLabels(labels: Label[]): void
-  markDirty(): void
   markSaving(): void
   markSaved(version: number, updatedAt: string): void
   markSaveError(message: string): void
@@ -146,7 +145,11 @@ export const useEditor = create<EditorState>()((set) => ({
           }
       const labels = new Map(s.labels)
       labels.set(id, next)
-      return changed(s, labels)
+      const patch = changed(s, labels)
+      // A disabled label has nothing on the canvas to select, and Delete/Backspace on a selection
+      // left behind would toggle it straight back on.
+      if (!next.enabled && s.selectedId === id) patch.selectedId = null
+      return patch
     }),
   moveLabel: (id, x, y) =>
     set((s) => {
@@ -165,7 +168,6 @@ export const useEditor = create<EditorState>()((set) => ({
       }
       return changed(s, labels)
     }),
-  markDirty: () => set((s) => (s.save.status === 'conflict' ? {} : { save: { status: 'dirty', message: null } })),
   markSaving: () => set({ pendingChanges: 0, save: { status: 'saving', message: null } }),
   markSaved: (version, updatedAt) =>
     set((s) => ({
