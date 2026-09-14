@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { pageError } from '../api'
-import { retrySave, startAutosave } from './autosave'
+import { flushSave, retrySave, startAutosave } from './autosave'
 import EditorCanvas from './EditorCanvas'
 import { loadEditor } from './load'
 import { useEditor } from './store'
@@ -73,7 +73,12 @@ export default function EditorPage() {
       })
     return () => {
       cancelled = true
-      // Stopped before the reset, so the empty document is never scheduled for a save.
+      // In-app navigation (back to the image list, or on to another image) must not drop a change
+      // still waiting out the debounce: flushSave() reads the payload synchronously, so the save
+      // it starts survives the reset below. Its outcome cannot be shown on a page we are leaving;
+      // `beforeunload` is what covers a closing tab.
+      void flushSave()
+      // Stopped after the flush and before the reset, so the emptied document is never saved.
       stop?.()
       useEditor.getState().reset()
     }

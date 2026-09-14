@@ -38,7 +38,7 @@ export interface EditorState {
   fit(): void
   actual(): void
   panTo(objectId: number): void
-  toggleObject(id: number, placed?: { x: number; y: number }): void
+  toggleObject(id: number, placed?: { x: number; y: number; collided?: boolean }): void
   moveLabel(id: number, x: number, y: number): void
   applyLabels(labels: Label[]): void
   markDirty(): void
@@ -132,9 +132,18 @@ export const useEditor = create<EditorState>()((set) => ({
     set((s) => {
       const label = s.labels.get(id)
       if (!label) return {}
+      // A placement keeps the placer's verdict: a label it could not fit anywhere clean is
+      // enabled *and* flagged, so the badge shows immediately. Re-enabling a label that keeps its
+      // own position clears the flag — the owner put it there.
       const next = label.enabled
         ? { ...label, enabled: false }
-        : { ...label, enabled: true, x: placed?.x ?? label.x, y: placed?.y ?? label.y, collided: false }
+        : {
+            ...label,
+            enabled: true,
+            x: placed?.x ?? label.x,
+            y: placed?.y ?? label.y,
+            collided: placed ? (placed.collided ?? false) : false,
+          }
       const labels = new Map(s.labels)
       labels.set(id, next)
       return changed(s, labels)

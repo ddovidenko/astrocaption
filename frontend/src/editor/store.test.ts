@@ -119,6 +119,15 @@ describe('document actions', () => {
     s.toggleObject(2, { x: 123, y: 456 })
     expect(useEditor.getState().labels.get(2)).toMatchObject({ enabled: true, x: 123, y: 456, collided: false })
   })
+  it('toggleObject keeps the placer collided verdict from a placement', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(2, { x: 123, y: 456, collided: true })
+    expect(useEditor.getState().labels.get(2)).toMatchObject({ enabled: true, collided: true })
+    s.toggleObject(2) // off
+    s.toggleObject(2) // on again, at its own position: the owner's placement is not a collision
+    expect(useEditor.getState().labels.get(2)).toMatchObject({ enabled: true, collided: false })
+  })
   it('moveLabel sets the position and clears collided', () => {
     const s = useEditor.getState()
     s.load(doc)

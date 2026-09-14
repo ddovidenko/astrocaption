@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { Circle, Group, Image as KImage, Layer, Line, Rect, Stage, Text } from 'react-konva'
-import type Konva from 'konva'
+import Konva from 'konva'
 import { useShallow } from 'zustand/react/shallow'
 import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
 import { LabelTextShape } from './LabelTextShape'
@@ -57,6 +57,10 @@ interface Entry {
 
 const HOVER_COLOR = '#8ab4ff'
 
+// Only the left button ever drags a label: the middle button is a pan gesture everywhere on the
+// canvas (SPEC § 6.1), and Konva would otherwise start a drag with it.
+Konva.dragButtons = [0]
+
 /** Layout numbers per label, memoised on the label's identity. A drag replaces one `Label` object
  *  per frame (the store never mutates them), so without this every other label would be measured
  *  again 60 times a second. A hit is only reused while the style and the object behind it are the
@@ -101,6 +105,7 @@ const AnnotationLayer = memo(function AnnotationLayer({
   editable,
   select,
   moveLabel,
+  spaceRef,
   onDrawError,
   badgesRef,
 }: {
@@ -110,6 +115,8 @@ const AnnotationLayer = memo(function AnnotationLayer({
   editable: boolean
   select: (id: number | null) => void
   moveLabel: (id: number, x: number, y: number) => void
+  /** Whether Space is held: a pan gesture, which wins over selecting or dragging a label. */
+  spaceRef: RefObject<boolean>
   onDrawError: (message: string) => void
   badgesRef: RefObject<Konva.Group | null>
 }) {
@@ -144,11 +151,21 @@ const AnnotationLayer = memo(function AnnotationLayer({
             y={label.y}
             draggable={editable}
             onMouseDown={(e) => {
+              // Space-drag and the middle button pan anywhere on the canvas, labels included, so
+              // those presses are left to bubble to the stage untouched.
+              if (spaceRef.current || e.evt.button === 1) return
               // Without this the stage would read the press as the start of a pan.
               e.cancelBubble = true
               select(label.object_id)
             }}
-            onDragStart={() => select(label.object_id)}
+            onDragStart={(e) => {
+              // Belt and braces with Konva.dragButtons: a drag begun while Space is held is a pan.
+              if (spaceRef.current) {
+                e.target.stopDrag()
+                return
+              }
+              select(label.object_id)
+            }}
             onDragMove={(e) => moveLabel(label.object_id, e.target.x(), e.target.y())}
             onDragEnd={(e) => moveLabel(label.object_id, e.target.x(), e.target.y())}
           >
@@ -331,11 +348,12 @@ export default function EditorCanvas() {
       else if (e.key === '1') useEditor.getState().actual()
       else if (e.key === 'Escape') useEditor.getState().select(null)
       else if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Backspace is still "back" in some browsers when nothing has the focus, so it is
+        // swallowed here whether or not there is a selection to disable.
+        e.preventDefault()
         const s = useEditor.getState()
         if (s.selectedId === null || !isEditable(s)) return
-        // Backspace is still "back" in some browsers when nothing has the focus.
-        e.preventDefault()
-        s.toggleObject(s.selectedId)
+        toggleWithPlacement(s.selectedId)
         s.select(null)
       }
     }
@@ -434,7 +452,11 @@ export default function EditorCanvas() {
             fill="transparent"
             onMouseEnter={() => hover(id)}
             onMouseLeave={() => hover(null)}
-            onClick={() => toggleWithPlacement(id)}
+            // Not after a pan: the click Konva fires when a pan happens to end on a marker is
+            // not a toggle.
+            onClick={() => {
+              if (!movedRef.current) toggleWithPlacement(id)
+            }}
           />
         )
       }),
@@ -543,6 +565,7 @@ export default function EditorCanvas() {
               editable={editable}
               select={select}
               moveLabel={moveLabel}
+              spaceRef={spaceRef}
               onDrawError={onDrawError}
               badgesRef={badgesRef}
             />
