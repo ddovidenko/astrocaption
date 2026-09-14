@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { ApiError, api, pageError, type Label } from '../api'
+import { ApiError, api, pageError } from '../api'
 import { flushSave } from './autosave'
 import { isEditable } from './editing'
-import { documentForSave, enabledLabels, useEditor } from './store'
+import { documentForSave, useEditor } from './store'
 
 /** Auto-arrange and Reset positions (design § 5). Both send the document the editor is holding to
  *  `POST /autoarrange`, which places it and hands the labels back without storing them; applying
@@ -20,49 +20,49 @@ export default function LayoutTab() {
     return n
   }, [labels])
 
-  /** Flushes the autosave, then runs `prepare` (Reset moves the labels home in the store) and
-   *  sends the resulting document to the placer.
+  /** Flushes the autosave, then sends the document the editor is holding to the placer and
+   *  applies what comes back. Nothing in the store is touched before the response arrives.
    *
    *  The flush comes first because `/autoarrange` checks the version the same way a save does: a
    *  click while a save is still in flight would send the stale version, and the 409 that answers
-   *  it would become a sticky conflict the owner never caused — with Reset's flattened layout
-   *  already in the store and no way left to save it. */
-  async function arrange(what: 'arrange' | 'reset', prepare?: () => void): Promise<void> {
+   *  it would become a sticky conflict the owner never caused. */
+  async function arrange(what: 'arrange' | 'reset'): Promise<void> {
     if (!imageId) return
     setBusy(what)
     setError(null)
     try {
       const status = await flushSave()
       if (status !== 'saved') {
-        setError(useEditor.getState().save.message ?? 'The layout could not be saved.')
+        setError(useEditor.getState().save.message ?? 'Unsaved changes could not be saved first.')
         return
       }
-      prepare?.()
+      // The placer answers about the document as it was sent. A drag during the round trip would
+      // be silently undone by applying it, so the answer is dropped instead.
+      const seq = useEditor.getState().changeSeq
       const res = await api.autoarrange(imageId, documentForSave(useEditor.getState()))
+      if (useEditor.getState().changeSeq !== seq) {
+        setError('Labels moved while the layout was being arranged; nothing was changed. Try again.')
+        return
+      }
       useEditor.getState().applyLabels(res.labels)
     } catch (err) {
-      // A 409 is the same stale-document story the autosave tells, so it goes to the toolbar's
-      // save state (Reload) rather than being repeated as a tab error.
-      if (err instanceof ApiError && err.status === 409) useEditor.getState().markConflict(err.message)
-      else setError(pageError(err))
+      // A 409 is the same stale-document story the autosave tells, so the sentence with the
+      // Reload button goes to the toolbar; the tab only says this button did nothing.
+      if (err instanceof ApiError && err.status === 409) {
+        useEditor.getState().markConflict(err.message)
+        setError('The layout was not arranged; see the message in the toolbar.')
+      } else setError(pageError(err))
     } finally {
       setBusy(null)
     }
   }
 
+  // In M3 this is Auto-arrange behind a confirmation: the server's placer ignores the positions of
+  // the labels it places, so "putting them back" first changed nothing it could see. M4's pinned
+  // labels are what will make Reset different — it will discard the pins.
   const reset = () => {
-    if (!window.confirm('Put every enabled label back at its object and auto-arrange?')) return
-    void arrange('reset', () => {
-      const state = useEditor.getState()
-      const home: Label[] = []
-      for (const label of enabledLabels(state)) {
-        const obj = state.objects.get(label.object_id)
-        // Labels whose object is gone are left exactly as they are; the canvas hides them and
-        // the save path writes them back untouched.
-        if (obj) home.push({ ...label, x: obj.x, y: obj.y, collided: false })
-      }
-      state.applyLabels(home)
-    })
+    if (!window.confirm('Discard the positions you have dragged and place every enabled label from scratch?')) return
+    void arrange('reset')
   }
 
   return (
