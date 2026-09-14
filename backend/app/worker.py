@@ -259,7 +259,7 @@ class SolveWorker:
         detail = f" Last error: {last_error}" if last_error else ""
         raise SolverError(
             f"Timed out after {minutes} minutes waiting for nova.astrometry.net."
-            f" Check {url} and use Re-solve.{detail}"
+            f" Check {url}: if the job finished there, use Check again; otherwise Re-solve.{detail}"
         )
 
     def _store_result(

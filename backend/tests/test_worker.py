@@ -135,6 +135,31 @@ def test_resume_after_restart_skips_upload(settings: Settings) -> None:
     assert got is not None and got.solve_status == SolveStatus.SOLVED
 
 
+def test_check_again_with_a_stored_job_id_skips_submit_and_submission_poll(
+    settings: Settings,
+) -> None:
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    # What POST /check leaves behind after a timed-out solve: SOLVING with both ids and the scale.
+    db.update_image(
+        rec.id,
+        {
+            "solve_status": SolveStatus.SOLVING,
+            "solve_error": None,
+            "solve_scale": 1.0,
+            "nova_submission_id": 12345678,
+            "nova_job_id": 7654321,
+        },
+    )
+    solver = FakeSolver()
+    asyncio.run(make_worker(settings, db, solver).process(rec.id))
+    assert solver.requests == []
+    assert solver.submission_poll_count == 0
+    got = db.get_image(rec.id)
+    assert got is not None and got.solve_status == SolveStatus.SOLVED
+    assert got.nova_submission_id == 12345678 and got.nova_job_id == 7654321
+
+
 def test_failure_paths_set_plain_language_errors(settings: Settings) -> None:
     db = Database(settings.db_path)
     rec = seed_image(settings, db)

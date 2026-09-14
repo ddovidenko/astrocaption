@@ -98,7 +98,9 @@ No multi-user, no roles, no invites in v1.
    "small", so NGC 206 in M 31 is enabled like any other NGC entry. Decided 2026-09-11, #9).
    `hd`-type stars have radius 0 and are therefore hidden by default (see § 14).
 6. On failure: show nova's job log link and let the owner retry, optionally with scale hints
-   (focal length / pixel size passed as nova's `scale_units` etc.).
+   (focal length / pixel size passed as nova's `scale_units` etc.). When the row still holds nova
+   ids (a timed-out or interrupted poll), **Check again** resumes polling the stored submission
+   and job without uploading again (#10); the worker's restart-resume path serves both.
 
 Optional resolve later: "Re-solve" button re-runs step 3 without deleting the annotation layout;
 objects are re-matched by catalogue name.
@@ -279,6 +281,7 @@ Owner (cookie session):
 - `POST /images` (multipart) → id, starts solve
 - `GET /images`, `GET /images/{id}`, `DELETE /images/{id}`
 - `POST /images/{id}/solve` (re-solve, optional scale hints)
+- `POST /images/{id}/check` (check again: resume polling the stored nova job without uploading, #10)
 - `GET /images/{id}/objects`
 - `GET/PUT /images/{id}/annotations`. `PUT` is the editor's autosave (debounced 500 ms): body = {style, labels,
   version as loaded}; `labels` must list every one of the image's objects exactly once (disable a label, never drop

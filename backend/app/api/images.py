@@ -277,6 +277,26 @@ async def solve_image(
     return image_out(_get_or_404(db, image_id), settings, db.count_objects(image_id))
 
 
+@router.post("/{image_id}/check")
+async def check_solve(
+    image_id: str, settings: SettingsDep, db: DbDep, worker: WorkerDep
+) -> ImageOut:
+    """Check again (#10): resume polling the stored nova submission/job of a failed row instead
+    of uploading the image again — the 15-minute deadline may have passed while nova was still
+    working. The worker's resume branch does the polling; a stored job id skips the submission
+    poll. Nothing about the row changes except the status and the cleared error."""
+    rec = _get_or_404(db, image_id)
+    if rec.solve_status in (SolveStatus.PENDING, SolveStatus.SOLVING):
+        raise HTTPException(status.HTTP_409_CONFLICT, "A solve is already in progress.")
+    if rec.solve_status == SolveStatus.SOLVED:
+        raise HTTPException(status.HTTP_409_CONFLICT, ALREADY_SOLVED_MESSAGE)
+    if rec.nova_submission_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, NO_SUBMISSION_MESSAGE)
+    db.update_image(image_id, {"solve_status": SolveStatus.SOLVING, "solve_error": None})
+    worker.enqueue(image_id)
+    return image_out(_get_or_404(db, image_id), settings, db.count_objects(image_id))
+
+
 @router.get("/{image_id}/objects")
 async def list_objects(image_id: str, db: DbDep) -> list[ObjectOut]:
     _get_or_404(db, image_id)
@@ -307,6 +327,8 @@ async def get_annotations(image_id: str, settings: SettingsDep, db: DbDep) -> An
 
 
 SOLVING_MESSAGE = "The image is still being solved; try again when it is done."
+NO_SUBMISSION_MESSAGE = "There is no nova.astrometry.net submission to check; use Re-solve."
+ALREADY_SOLVED_MESSAGE = "This image is already solved; use Re-solve to solve it again."
 CONFLICT_MESSAGE = "This image was changed elsewhere. Reload to continue editing."
 NOT_SOLVED_MESSAGE = "Image has not been solved yet."
 OBJECTS_DUPLICATE_MESSAGE = "labels: each of this image's objects may appear only once."
