@@ -1,82 +1,22 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Annotations, FontOut, ImageOut, ObjectOut, StyleConfig } from '../api'
-import { enabledLabels, fontFor, labelFor, useEditor, type LoadedDocument } from './store'
+import { documentForSave, enabledLabels, fontFor, labelFor, useEditor, type LoadedDocument } from './store'
+import { makeDoc } from './testDoc'
 
-const image: ImageOut = {
-  id: 'img-1',
-  title: 'Orion',
-  original_name: 'orion.jpg',
-  created_at: '2026-01-01T00:00:00Z',
-  updated_at: '2026-01-01T00:00:00Z',
-  width: 3000,
-  height: 2000,
-  solve_status: 'solved',
-  solve_error: null,
-  nova_submission_id: null,
-  nova_job_id: null,
-  nova_status_url: null,
-  nova_job_log_url: null,
-  calibration: null,
-  published: false,
-  object_count: 2,
-  exported_at: null,
-  original_format: 'jpeg',
-  preview_url: '/preview',
-  thumb_url: '/thumb',
-  original_url: '/original',
-  annotated_preview_url: null,
-  export_url: null,
-}
+let doc: LoadedDocument
 
-const objects: ObjectOut[] = [
-  { id: 1, catalog_names: ['M42'], primary_name: 'M42', type: 'nebula', x: 100, y: 100, radius: 20 },
-  { id: 2, catalog_names: ['M43'], primary_name: 'M43', type: 'nebula', x: 200, y: 200, radius: 10 },
-]
-
-const style: StyleConfig = {
-  font_file: 'Inter-Regular.ttf',
-  font_size: 24,
-  text_color: '#ffffff',
-  marker_color: '#ff0000',
-  leader_color: '#ffffff',
-  halo: true,
-  halo_color: '#000000',
-  halo_width: 2,
-  marker_width: 2,
-  marker_min_radius: 4,
-  show_aliases: false,
-  name_preference: 'popular',
-}
-
-const annotations: Annotations = {
-  image_id: 'img-1',
-  style,
-  labels: [
-    { object_id: 1, enabled: true, x: 120, y: 80, font_size: null, text_override: null, color: null, show_aliases: null, leader: 'auto', collided: false },
-    { object_id: 2, enabled: false, x: 220, y: 180, font_size: null, text_override: null, color: null, show_aliases: null, leader: 'auto', collided: false },
-  ],
-  version: 5,
-  updated_at: '2026-01-01T00:00:00Z',
-}
-
-const fonts: FontOut[] = [
-  { file: 'Inter-Regular.ttf', family: 'Inter', weight: '400', sample: 'Aa', ascents: new Array(195).fill(20) },
-]
-
-const doc: LoadedDocument = { image, objects, annotations, fonts }
+beforeEach(() => {
+  useEditor.getState().reset()
+  doc = makeDoc()
+})
 
 describe('editor store', () => {
-  beforeEach(() => {
-    useEditor.getState().reset()
-  })
-
   it('loads a document into normalized state', () => {
     useEditor.getState().load(doc)
     const state = useEditor.getState()
     expect(state.objectOrder).toEqual([1, 2])
     expect(state.labels.get(1)?.enabled).toBe(true)
     expect(state.labels.get(2)?.enabled).toBe(false)
-    expect(state.version).toBe(5)
+    expect(state.version).toBe(doc.annotations.version)
     expect(state.save.status).toBe('saved')
     expect(state.view).toEqual({ scale: 1, x: 0, y: 0 })
   })
@@ -101,7 +41,7 @@ describe('editor store', () => {
 
     useEditor.getState().load({
       ...doc,
-      annotations: { ...annotations, style: { ...style, font_file: 'Missing.ttf' } },
+      annotations: { ...doc.annotations, style: { ...doc.annotations.style, font_file: 'Missing.ttf' } },
     })
     expect(() => fontFor(useEditor.getState())).toThrow('Font Missing.ttf is not listed by the server.')
   })
@@ -134,5 +74,88 @@ describe('editor store', () => {
     expect(state.selectedId).toBeNull()
     expect(state.hoveredId).toBeNull()
     expect(state.save).toEqual({ status: 'saved', message: null })
+  })
+})
+
+describe('viewport and view actions', () => {
+  it('fits on the first viewport size and keeps the view on later resizes', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.setViewport(1000, 500)
+    const first = useEditor.getState().view
+    expect(first.scale).toBeGreaterThan(0)
+    useEditor.getState().setView({ scale: 2, x: 5, y: 5 })
+    useEditor.getState().setViewport(1200, 500)
+    expect(useEditor.getState().view).toEqual({ scale: 2, x: 5, y: 5 })
+  })
+  it('panTo centres the object without changing the scale', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.setViewport(1000, 500)
+    s.setView({ scale: 0.5, x: 0, y: 0 })
+    s.panTo(2)
+    const v = useEditor.getState().view
+    const obj = doc.objects[1]!
+    expect(v.scale).toBe(0.5)
+    expect(v.x + obj.x * 0.5).toBeCloseTo(500)
+    expect(v.y + obj.y * 0.5).toBeCloseTo(250)
+  })
+})
+
+describe('document actions', () => {
+  it('toggleObject disables and re-enables keeping the position, and marks dirty', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const before = useEditor.getState().labels.get(1)!
+    s.toggleObject(1)
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ enabled: false, x: before.x, y: before.y })
+    expect(useEditor.getState().save.status).toBe('dirty')
+    useEditor.getState().toggleObject(1)
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ enabled: true, x: before.x, y: before.y })
+  })
+  it('toggleObject enables at the placed position when one is given', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(2, { x: 123, y: 456 })
+    expect(useEditor.getState().labels.get(2)).toMatchObject({ enabled: true, x: 123, y: 456, collided: false })
+  })
+  it('moveLabel sets the position and clears collided', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.applyLabels([{ ...s.labels.get(1)!, collided: true }])
+    s.moveLabel(1, 10, 20)
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ x: 10, y: 20, collided: false })
+  })
+  it('documentForSave lists every label in object order with the loaded version', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const out = documentForSave(useEditor.getState())
+    expect(out.labels.map((l) => l.object_id)).toEqual(doc.objects.map((o) => o.id))
+    expect(out.version).toBe(doc.annotations.version)
+    expect(out.style).toEqual(doc.annotations.style)
+  })
+  it('save state: dirty → saving → saved, but stays dirty if a change landed during the save', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(1)
+    s.markSaving()
+    expect(useEditor.getState().save.status).toBe('saving')
+    s.markSaved(5, '2026-09-14T00:00:00+00:00')
+    expect(useEditor.getState().save.status).toBe('saved')
+    expect(useEditor.getState().version).toBe(5)
+    s.toggleObject(1)
+    s.markSaving()
+    s.toggleObject(1) // a change while saving
+    s.markSaved(6, '2026-09-14T00:00:01+00:00')
+    expect(useEditor.getState().save.status).toBe('dirty')
+    expect(useEditor.getState().version).toBe(6)
+  })
+  it('conflict and error carry the message', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.markConflict('This image was changed elsewhere. Reload to continue editing.')
+    expect(useEditor.getState().save).toEqual({ status: 'conflict', message: 'This image was changed elsewhere. Reload to continue editing.' })
+    s.markSaveError('boom')
+    expect(useEditor.getState().save.status).toBe('error')
   })
 })

@@ -18,7 +18,7 @@ import {
   type LeaderSegment,
 } from './metrics'
 import { enabledLabels, fontFor, useEditor } from './store'
-import { actualSize, fitView, toScreen, zoomAt } from './view'
+import { toScreen, zoomAt } from './view'
 
 /** What the parity spec (PR 4's Playwright test) drives the canvas with. `renderAt` returns a PNG
  *  data URL of the annotated image alone — no hover overlay, no collided badges — at `scale`
@@ -40,13 +40,6 @@ declare global {
   interface Window {
     __astrocaptionEditor?: EditorTestHook
   }
-}
-
-/** Fit and 100 % are driven from the page's toolbar as well as from the keyboard, and only the
- *  canvas knows the viewport size, so it publishes the two actions through this ref. */
-export interface CanvasControls {
-  fit(): void
-  actual(): void
 }
 
 interface Entry {
@@ -123,12 +116,13 @@ const AnnotationLayer = memo(function AnnotationLayer({
   )
 })
 
-export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<CanvasControls | null> }) {
+export default function EditorCanvas() {
   const image = useEditor((s) => s.image)
   const style = useEditor((s) => s.style)
   const objects = useEditor((s) => s.objects)
   const objectOrder = useEditor((s) => s.objectOrder)
   const view = useEditor((s) => s.view)
+  const viewport = useEditor((s) => s.viewport)
   const hoveredId = useEditor((s) => s.hoveredId)
   const selectedId = useEditor((s) => s.selectedId)
   const setView = useEditor((s) => s.setView)
@@ -145,9 +139,7 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
   const badgesRef = useRef<Konva.Group>(null)
   const panRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null)
   const spaceRef = useRef(false)
-  const fittedRef = useRef(false)
 
-  const [viewport, setViewport] = useState({ w: 0, h: 0 })
   // Keyed by the URL it was loaded from, so a second image opened without unmounting can never
   // show the first bitmap (or the first failure) — resetting the state in the effect below would
   // paint the stale bitmap for one frame, and lint forbids the synchronous reset anyway.
@@ -168,11 +160,7 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
     const apply = (w: number, h: number) => {
       measured = true
       setSizeError(null)
-      setViewport((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))
-      if (!fittedRef.current && image) {
-        fittedRef.current = true
-        setView(fitView(image.width, image.height, w, h))
-      }
+      useEditor.getState().setViewport(w, h)
     }
     const ro = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect
@@ -197,7 +185,7 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
       window.clearTimeout(fallback)
       ro.disconnect()
     }
-  }, [image, setView])
+  }, [])
 
   const current = loadedPreview && image && loadedPreview.src === image.preview_url ? loadedPreview : null
   const preview = current?.el ?? null
@@ -206,8 +194,6 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
   // 2. The preview bitmap; until it has loaded the stage draws nothing but the background.
   useEffect(() => {
     if (!image) return
-    // A new image has to be fitted again; the view of the previous one means nothing here.
-    fittedRef.current = false
     const src = image.preview_url
     let cancelled = false
     const el = new window.Image()
@@ -276,26 +262,6 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
     setDrawError((prev) => prev ?? message)
   }, [])
 
-  const fit = useCallback(() => {
-    const { image: img, setView: apply } = useEditor.getState()
-    if (!img || viewport.w <= 0) return
-    apply(fitView(img.width, img.height, viewport.w, viewport.h))
-  }, [viewport])
-
-  const actual = useCallback(() => {
-    const { view: current, setView: apply } = useEditor.getState()
-    if (viewport.w <= 0) return
-    apply(actualSize(current, viewport.w, viewport.h))
-  }, [viewport])
-
-  useEffect(() => {
-    if (!controlsRef) return
-    controlsRef.current = { fit, actual }
-    return () => {
-      controlsRef.current = null
-    }
-  }, [controlsRef, fit, actual])
-
   // 5. Keys, ignored while a form field has the focus.
   useEffect(() => {
     // `f` and `1` must keep working after a toolbar button was clicked, so a focused BUTTON only
@@ -314,8 +280,8 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
         return
       }
       if (inField() || e.ctrlKey || e.metaKey || e.altKey) return
-      if (e.key === 'f' || e.key === 'F') fit()
-      else if (e.key === '1') actual()
+      if (e.key === 'f' || e.key === 'F') useEditor.getState().fit()
+      else if (e.key === '1') useEditor.getState().actual()
     }
     const up = (e: KeyboardEvent) => {
       if (e.code === 'Space') spaceRef.current = false
@@ -332,7 +298,7 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
       window.removeEventListener('keyup', up)
       window.removeEventListener('blur', blur)
     }
-  }, [fit, actual])
+  }, [])
 
   // 6. The test hook, live only while the canvas is mounted.
   const renderAt = useCallback(

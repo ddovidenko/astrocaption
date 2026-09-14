@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { pageError } from '../api'
-import EditorCanvas, { type CanvasControls } from './EditorCanvas'
+import EditorCanvas from './EditorCanvas'
 import { loadEditor } from './load'
 import { useEditor } from './store'
 
@@ -15,7 +15,6 @@ export default function EditorPage() {
   const error = id ? (settled?.error ?? null) : 'That image could not be found.'
   const image = useEditor((s) => s.image)
   const scale = useEditor((s) => s.view.scale)
-  const controlsRef = useRef<CanvasControls | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -59,14 +58,14 @@ export default function EditorPage() {
         <button
           className="secondary"
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => controlsRef.current?.fit()}
+          onClick={() => useEditor.getState().fit()}
         >
           Fit
         </button>
         <button
           className="secondary"
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => controlsRef.current?.actual()}
+          onClick={() => useEditor.getState().actual()}
         >
           100 %
         </button>
@@ -77,7 +76,7 @@ export default function EditorPage() {
           until it finishes.
         </div>
       )}
-      <EditorCanvas controlsRef={controlsRef} />
+      <EditorCanvas />
     </>
   )
 }
