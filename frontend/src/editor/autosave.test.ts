@@ -52,6 +52,25 @@ describe('autosave', () => {
     expect(useEditor.getState().version).toBe(2)
   })
 
+  it('a save that throws synchronously becomes the error state and does not block the next', async () => {
+    const f = fakeSave()
+    let boom = true
+    const save = (id: string, doc: AnnotationsUpdate) => {
+      if (boom) throw new Error('bad document')
+      return f.save(id, doc)
+    }
+    stop = startAutosave('img', { save })
+    useEditor.getState().toggleObject(1)
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS)
+    expect(useEditor.getState().save.status).toBe('error')
+    boom = false
+    retrySave()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(f.calls).toHaveLength(1)
+    f.done(f.calls[0]!)
+    expect(await flushSave()).toBe('saved')
+  })
+
   it('defers a change made during a save until the save returns', async () => {
     const f = fakeSave()
     stop = startAutosave('img', { save: f.save })

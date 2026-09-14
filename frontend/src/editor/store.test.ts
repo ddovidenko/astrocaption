@@ -152,6 +152,17 @@ describe('document actions', () => {
     s.moveLabel(1, 10, 20)
     expect(useEditor.getState().labels.get(1)).toMatchObject({ x: 10, y: 20, collided: false })
   })
+  it('moveLabel to the current position changes nothing', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.applyLabels([{ ...useEditor.getState().labels.get(1)!, collided: true }])
+    s.markSaving()
+    s.markSaved(2, 't')
+    const { x, y } = useEditor.getState().labels.get(1)!
+    s.moveLabel(1, x, y)
+    expect(useEditor.getState().labels.get(1)!.collided).toBe(true)
+    expect(useEditor.getState().save.status).toBe('saved')
+  })
   it('documentForSave lists every label in object order with the loaded version', () => {
     const s = useEditor.getState()
     s.load(doc)

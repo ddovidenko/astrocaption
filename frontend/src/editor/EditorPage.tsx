@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
-import { pageError } from '../api'
+import { pageError, type ImageOut } from '../api'
 import { flushSave, retrySave, startAutosave } from './autosave'
 import EditorCanvas from './EditorCanvas'
 import { isEditable } from './editing'
@@ -68,7 +68,7 @@ export default function EditorPage() {
     // Started only once the document is in the store, so the controller never sees the empty one.
     let stop: (() => void) | null = null
     // The document this mount loaded: a newer load() of the same image installs a different one.
-    let loaded: unknown = null
+    let loaded: ImageOut | null = null
     loadEditor(id)
       .then((doc) => {
         if (cancelled) return
@@ -93,7 +93,7 @@ export default function EditorPage() {
         stop?.()
         const s = useEditor.getState()
         // Only if the store still holds the document this mount loaded: a later load() — of any
-        // image, this one included — already owns it.
+        // image, this one included — already owns it, and a load that failed loaded nothing.
         if (s.image !== null && s.image === loaded) s.reset()
       })
     }

@@ -37,7 +37,7 @@ function schedule(c: Controller, delay = AUTOSAVE_DELAY_MS): void {
   clearTimer(c)
   c.timer = setTimeout(() => {
     c.timer = null
-    run(c)
+    void run(c)
   }, delay)
 }
 
@@ -61,6 +61,9 @@ function run(c: Controller): Promise<void> | null {
   }
   useEditor.getState().markSaving()
 
+  // A `save` that throws synchronously settles this promise before it is recorded below; its
+  // `finally` runs first, and recording it afterwards would leave `inFlight` set for good.
+  let settled = false
   const promise = (async () => {
     try {
       const res = await c.deps.save(c.imageId, doc)
@@ -74,6 +77,7 @@ function run(c: Controller): Promise<void> | null {
         useEditor.getState().markSaveError(describeError(err))
       }
     } finally {
+      settled = true
       c.inFlight = null
       if (c.alive) {
         const s = useEditor.getState()
@@ -81,7 +85,7 @@ function run(c: Controller): Promise<void> | null {
       }
     }
   })()
-  c.inFlight = promise
+  if (!settled) c.inFlight = promise
   return promise
 }
 
