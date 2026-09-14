@@ -58,12 +58,15 @@ a new one inside the running container and logs every browser out; on a source c
 | Default label style | `"default_style"` object in `data/config.json`, or the config page | built-in defaults (size-relative for the four size fields) |
 | Owner password | setup page, or `ASTROCAPTION_PASSWORD` env at first start, or the Config page later | required |
 | Secure cookies | `TRUST_PROXY=1` env when the app is served over HTTPS by a proxy | off |
-| Solve timeout | `ASTROCAPTION_SOLVE_TIMEOUT_SECONDS` env | 900 |
-| Solve poll interval | `ASTROCAPTION_SOLVE_POLL_SECONDS` env | 5 |
+| Solve timeout | `ASTROCAPTION_SOLVE_TIMEOUT_SECONDS` env | 900 (bounds 1-86400) |
+| Solve poll interval | `ASTROCAPTION_SOLVE_POLL_SECONDS` env | 5 (bounds 0.1-3600) |
 
-Solve timeout and poll interval are not exposed on the config page; they are set once at
-process start. An unset, blank, or non-positive value falls back to the default with a log
-line. The browser test suite sets them low so a timed-out solve can be exercised in seconds.
+Solve timeout and poll interval are not exposed on the config page; they are read once at
+process start, so changing one means restarting the app. Unset or blank = the default; a
+non-numeric, non-finite or out-of-range value falls back to the default with one log line
+naming the variable and the bounds. Under `compose.yml` they have to be added to the service's
+`environment:` list (two commented-out lines there show the spelling). The browser test suite
+sets them low, in `frontend/e2e/app.env`, so a timed-out solve can be exercised in seconds.
 
 Values set by environment variables win over `data/config.json`; the config page shows
 them read-only and names the variable that pinned each one. `max_upload_mb` outside 1-1024 is
@@ -165,6 +168,14 @@ make test           # pytest + vitest
 make lint           # ruff + mypy + eslint + tsc
 make e2e            # browser smoke test, plus the Vite dev server through its /api proxy
 ```
+
+| Dev-only setting | Where | Default |
+|---|---|---|
+| Dev proxy target | `ASTROCAPTION_DEV_PROXY_TARGET` env, read by `frontend/vite.config.ts` | `http://localhost:8000` (the uvicorn `make dev` starts) |
+
+`make e2e` sets `ASTROCAPTION_DEV_PROXY_TARGET` itself, to the app under test; setting it by hand
+also moves the Vite dep cache to `node_modules/.vite-e2e`, so a suite run cannot disturb the cache
+of a `make dev` server that is already up.
 
 The browser test runs against a fake nova that replays recorded responses, so it never contacts
 nova.astrometry.net and never touches `./data`. The first run downloads Chromium (about 170 MB, into

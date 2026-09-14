@@ -34,7 +34,7 @@ make names-catalog       # rebuild backend/app/catalog/names.json from OpenNGC (
 make fonts               # refresh fonts/*.ttf + LICENSES from Google Fonts (network); family list in backend/scripts/fetch_fonts.py
 make favicons            # regenerate frontend/public/ icons from frontend/icon/icon-source.png
 make record-fixtures IMAGE=path.jpg [OUT=dir]   # record nova fixtures from a real solve into backend/tests/fixtures/nova/ or OUT (network, needs the key)
-make e2e          # Playwright: built frontend + uvicorn on a scratch data dir + a fake nova, and the Vite dev proxy
+make e2e          # Playwright: built frontend + uvicorn on a scratch data dir + a fake nova, and the Vite dev proxy (app env: frontend/e2e/app.env)
 make e2e-fixture  # regenerate frontend/e2e/fixtures/field.jpg
 ```
 
@@ -97,6 +97,6 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
   (pr-review-toolkit agent) on the diff, then `/simplify`; fix, re-run `make lint test`, and let the
   owner smoke-test on `make dev` before committing.
 - Don't switch git branches that add or remove `frontend/vite.config.ts` while `make dev` runs: Vite
-  restarts without the `/api` proxy and the page goes blank (`make e2e`'s dev-proxy project guards
-  this). Stop the servers first (kill by port, not
-  by process pattern). If `docker` needs `sudo`, the docker group hasn't taken effect in that shell yet.
+  restarts without the `/api` proxy and the page goes blank (`make e2e`'s dev-proxy project catches a
+  `vite.config.ts` that lost the proxy; it cannot see a live-restart). Stop the servers first (kill by
+  port, not by process pattern). If `docker` needs `sudo`, the docker group hasn't taken effect in that shell yet.

@@ -15,4 +15,7 @@ services:
       - NOVA_API_KEY=${NOVA_API_KEY:-${ASTROMETRY_API_KEY:-}}
       # headless first run (optional); read once, see docs/INSTALL.md
       - ASTROCAPTION_PASSWORD=${ASTROCAPTION_PASSWORD:-}
+      # solve queue timings, in seconds; read once at start, see docs/INSTALL.md
+      # - ASTROCAPTION_SOLVE_TIMEOUT_SECONDS=900
+      # - ASTROCAPTION_SOLVE_POLL_SECONDS=5
     restart: unless-stopped
