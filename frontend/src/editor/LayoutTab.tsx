@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ApiError, api, pageError } from '../api'
+import ConfirmInline from '../ConfirmInline'
 import { flushSave } from './autosave'
 import { isEditable } from './editing'
 import { documentForSave, useEditor } from './store'
@@ -12,6 +13,7 @@ export default function LayoutTab() {
   const labels = useEditor((s) => s.labels)
   const editable = useEditor(isEditable)
   const [busy, setBusy] = useState<'arrange' | 'reset' | null>(null)
+  const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const collided = useMemo(() => {
@@ -59,9 +61,10 @@ export default function LayoutTab() {
 
   // In M3 this is Auto-arrange behind a confirmation: the server's placer ignores the positions of
   // the labels it places, so "putting them back" first changed nothing it could see. M4's pinned
-  // labels are what will make Reset different — it will discard the pins.
+  // labels are what will make Reset different — it will discard the pins. The confirmation is in
+  // the page, like the card's Delete, not a browser dialog (SPEC § 5.2).
   const reset = () => {
-    if (!window.confirm('Discard the positions you have dragged and place every enabled label from scratch?')) return
+    setConfirming(false)
     void arrange('reset')
   }
 
@@ -79,9 +82,24 @@ export default function LayoutTab() {
         >
           {busy === 'arrange' ? 'Arranging…' : 'Auto-arrange'}
         </button>
-        <button className="secondary" disabled={!editable || busy !== null} onMouseDown={(e) => e.preventDefault()} onClick={reset}>
-          {busy === 'reset' ? 'Resetting…' : 'Reset positions'}
-        </button>
+        {confirming ? (
+          <ConfirmInline
+            question="Discard the positions you have dragged and place every enabled label from scratch?"
+            confirmLabel="Reset positions"
+            onConfirm={reset}
+            onCancel={() => setConfirming(false)}
+            disabled={busy !== null}
+          />
+        ) : (
+          <button
+            className="secondary"
+            disabled={!editable || busy !== null}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setConfirming(true)}
+          >
+            {busy === 'reset' ? 'Resetting…' : 'Reset positions'}
+          </button>
+        )}
       </div>
       <p className="meta">{collided === 1 ? '1 label overlaps' : `${collided} labels overlap`}</p>
       {error && <p className="error">{error}</p>}

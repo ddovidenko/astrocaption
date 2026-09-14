@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import {
+  ApiError,
   api,
   formatBytes,
   isBusy,
@@ -11,6 +12,7 @@ import {
   type HealthOut,
   type ImageOut,
 } from '../api'
+import ConfirmInline from '../ConfirmInline'
 
 const POLL_MS = 3000
 
@@ -24,17 +26,23 @@ export default function ImagesPage({
   const [images, setImages] = useState<ImageOut[]>([])
   const [config, setConfig] = useState<ConfigOut | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Refreshes overlap: the 3-second poll, an action's own refresh and a card's finally block
+  // all call it, and a slow answer arriving after a fast one would put the old list back (a
+  // deleted card reappearing, a solved row going back to Solving…). Only the newest applies.
+  const seq = useRef(0)
 
   // One refresh covers all three: a nova key added in config.json, or a config.json that
   // just broke, must reach the banners as promptly as the image rows do.
   const refresh = useCallback(async () => {
+    const mine = ++seq.current
     try {
       const [list, cfg] = await Promise.all([api.listImages(), api.config(), refreshHealth()])
+      if (mine !== seq.current) return
       setImages(list)
       setConfig(cfg)
       setError(null)
     } catch (err) {
-      setError(pageError(err))
+      if (mine === seq.current) setError(pageError(err))
     }
   }, [refreshHealth])
 
@@ -82,7 +90,7 @@ export default function ImagesPage({
           solves fail until a key is present.
         </div>
       )}
-      <UploadPanel onUploaded={refresh} />
+      <UploadPanel onUploaded={refresh} maxUploadMb={config?.max_upload_mb ?? null} />
       {error && <p className="error">{error}</p>}
       <section className="images">
         {images.length === 0 && <p className="meta">No images yet. Upload a finished JPG to start.</p>}
@@ -94,7 +102,14 @@ export default function ImagesPage({
   )
 }
 
-function UploadPanel({ onUploaded }: { onUploaded: () => Promise<void> }) {
+function UploadPanel({
+  onUploaded,
+  maxUploadMb,
+}: {
+  onUploaded: () => Promise<void>
+  /** From the config the page has loaded; null until it arrives, and then no pre-check. */
+  maxUploadMb: number | null
+}) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [title, setTitle] = useState('')
   const [uploading, setUploading] = useState(false)
@@ -105,6 +120,11 @@ function UploadPanel({ onUploaded }: { onUploaded: () => Promise<void> }) {
     e.preventDefault()
     const file = fileRef.current?.files?.[0]
     if (!file) return
+    // Refuse here rather than spend minutes sending a body the server will reject at the door.
+    if (maxUploadMb !== null && file.size > maxUploadMb * 1024 * 1024) {
+      setError(`The file is ${formatBytes(file.size)}; the upload limit is ${maxUploadMb} MB.`)
+      return
+    }
     setUploading(true)
     setProgress(null)
     setError(null)
@@ -121,14 +141,17 @@ function UploadPanel({ onUploaded }: { onUploaded: () => Promise<void> }) {
     }
   }
 
-  // The bytes are all sent well before the server answers: it still has to write the file and
-  // build the preview and thumbnail, hence "Processing…".
+  // Three states, in order: the request is open but no progress event has arrived yet; bytes
+  // are going out; and — once they are all out — the server is still writing the file and
+  // building the preview and thumbnail, which is the "Processing…" the owner waits through.
   const sent = progress !== null && progress.total > 0 && progress.sent >= progress.total
   const label = !uploading
     ? 'Upload & solve'
-    : progress === null || sent
-      ? 'Processing…'
-      : `Uploading… ${Math.floor((progress.sent / progress.total) * 100)} %`
+    : progress === null
+      ? 'Uploading…'
+      : sent
+        ? 'Processing…'
+        : `Uploading… ${Math.floor((progress.sent / progress.total) * 100)}%`
 
   return (
     <section className="panel">
@@ -160,7 +183,12 @@ function UploadPanel({ onUploaded }: { onUploaded: () => Promise<void> }) {
 
 function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promise<void> }) {
   const [working, setWorking] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // The card's own error describes the row as it was when the action ran, so it carries the
+  // version it belongs to: once the row changes underneath the card — its own refresh, or the
+  // 3-second poll — the sentence is stale and stops being shown. (Clearing it from an effect
+  // on `image.updated_at` would say the same thing at the cost of a cascading render.)
+  const [error, setError] = useState<{ updatedAt: string; message: string } | null>(null)
+  const shownError = error?.updatedAt === image.updated_at ? error.message : null
   const [focal, setFocal] = useState('')
   const [pixel, setPixel] = useState('')
   const [quality, setQuality] = useState<number | null>(null)
@@ -168,15 +196,20 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
   const [lastExport, setLastExport] = useState<ExportOut | null>(null)
   const [confirming, setConfirming] = useState(false)
 
+  /** Runs one card action and then refreshes the list — including after a refusal, because a
+   *  409 usually means the row already moved on (a solve started elsewhere, the image was
+   *  deleted) and the card must show that, not just the sentence. `onChange` is the page's
+   *  `refresh`, which never rejects: it reports its own failures as the page-level error. */
   async function run(action: () => Promise<unknown>) {
     setWorking(true)
     setError(null)
     try {
       await action()
-      await onChange()
     } catch (err) {
-      setError(pageError(err))
+      const message = pageError(err)
+      if (message !== null) setError({ updatedAt: image.updated_at, message })
     } finally {
+      await onChange()
       setWorking(false)
     }
   }
@@ -194,7 +227,15 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
     })
   const remove = () => {
     setConfirming(false)
-    return run(() => api.deleteImage(image.id))
+    return run(async () => {
+      try {
+        await api.deleteImage(image.id)
+      } catch (err) {
+        // Already gone — deleted in another tab, or a retry after the answer was lost. That is
+        // the end state that was asked for, so the refresh below is the whole story.
+        if (!(err instanceof ApiError && err.status === 404)) throw err
+      }
+    })
   }
 
   const busy = isBusy(image.solve_status)
@@ -230,12 +271,12 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
         </div>
         {image.nova_status_url && (
           <p className="field-note">
-            The upload stays in your nova.astrometry.net account (not publicly listed). To remove it,
-            open the nova status page and delete it there — AstroCaption cannot delete it for you.
+            Each solve uploads a copy to your nova.astrometry.net account (not publicly listed);
+            only the latest is linked here. Delete copies on nova — AstroCaption cannot.
           </p>
         )}
         {image.solve_error && <p className="error">{image.solve_error}</p>}
-        {error && <p className="error">{error}</p>}
+        {shownError && <p className="error">{shownError}</p>}
         <div className="actions">
           {image.solve_status === 'solved' && (
             <>
@@ -273,31 +314,35 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
           {!busy && (
             <>
               {image.solve_status === 'failed' && (
-                <span className="hints">
-                  <input
-                    type="number"
-                    placeholder="Focal mm"
-                    value={focal}
-                    onChange={(e) => setFocal(e.target.value)}
-                  />
-                  <input
-                    type="number"
-                    placeholder="Pixel µm"
-                    step="0.01"
-                    value={pixel}
-                    onChange={(e) => setPixel(e.target.value)}
-                  />
-                </span>
-              )}
-              {image.solve_status === 'failed' && image.nova_submission_id !== null && (
-                <button
-                  className="secondary"
-                  onClick={checkAgain}
-                  disabled={working}
-                  title="Resumes the stored nova job; nothing is uploaded again"
-                >
-                  Check again
-                </button>
+                <>
+                  {/* Only a timed-out solve has a job worth resuming; the server decides
+                      (ImageOut.check_available) so this button and POST /check agree. */}
+                  {image.check_available && (
+                    <button
+                      className="secondary"
+                      onClick={checkAgain}
+                      disabled={working}
+                      title="Resumes the stored nova job; nothing is uploaded again and scale hints are not used (they apply to Re-solve)"
+                    >
+                      Check again
+                    </button>
+                  )}
+                  <span className="hints">
+                    <input
+                      type="number"
+                      placeholder="Focal mm"
+                      value={focal}
+                      onChange={(e) => setFocal(e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      placeholder="Pixel µm"
+                      step="0.01"
+                      value={pixel}
+                      onChange={(e) => setPixel(e.target.value)}
+                    />
+                  </span>
+                </>
               )}
               <button className="secondary" onClick={resolve} disabled={working}>
                 Re-solve
@@ -305,22 +350,13 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
             </>
           )}
           {confirming ? (
-            <span
-              className="confirm"
-              role="group"
-              aria-label="Confirm delete"
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') setConfirming(false)
-              }}
-            >
-              Delete “{image.title}” and its export?
-              <button className="danger" onClick={remove} disabled={working} autoFocus>
-                Delete
-              </button>
-              <button className="secondary" onClick={() => setConfirming(false)} disabled={working}>
-                Cancel
-              </button>
-            </span>
+            <ConfirmInline
+              question={`Delete “${image.title}” and its export?`}
+              confirmLabel="Delete"
+              onConfirm={remove}
+              onCancel={() => setConfirming(false)}
+              disabled={working}
+            />
           ) : (
             <button className="danger" onClick={() => setConfirming(true)} disabled={working}>
               Delete

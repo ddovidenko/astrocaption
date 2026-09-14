@@ -129,6 +129,9 @@ body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
 .tab-body .meta { gap: 0.5rem; }
 .tab-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .tab-actions button { font-size: 0.85rem; }
+/* The side panel is narrow: the Reset confirmation takes a row of its own rather than
+   squeezing its question in beside Auto-arrange. */
+.tab-actions .confirm { flex: 1 1 100%; font-size: 0.85rem; }
 .chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .chip { background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 0.2rem 0.6rem; font-size: 0.8rem; font-weight: 500; }
 .chip:hover { color: var(--text); }
