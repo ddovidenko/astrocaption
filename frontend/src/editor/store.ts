@@ -154,7 +154,10 @@ export const useEditor = create<EditorState>()((set) => ({
   moveLabel: (id, x, y) =>
     set((s) => {
       const label = s.labels.get(id)
-      if (!label) return {}
+      // A move to where the label already is changes nothing: saying so would only mark the
+      // document dirty and clear the placer's `collided` verdict (Konva fires dragmove/dragend
+      // at the start position for a gesture that never moved).
+      if (!label || (label.x === x && label.y === y)) return {}
       const labels = new Map(s.labels)
       labels.set(id, { ...label, x, y, collided: false })
       return changed(s, labels)
