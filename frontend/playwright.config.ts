@@ -16,6 +16,10 @@ const novaHost = process.env.FAKE_NOVA_HOST ?? '127.0.0.1'
 // stray E2E_BASE_URL pointing at a dev server would otherwise pass readiness and be driven
 // through setup and uploads against real data.
 const baseURL = startApp ? `http://127.0.0.1:${appPort}` : process.env.E2E_BASE_URL?.trim() || `http://127.0.0.1:${appPort}`
+// The Vite dev server the dev-proxy project drives. Its own port, never 5173: the owner's
+// `make dev` may be running, and the suite must never drive (or displace) that one.
+const devPort = 5799
+const devURL = `http://127.0.0.1:${devPort}`
 // Only mint a scratch data dir when this config is the one starting the app: CI supplies
 // E2E_BASE_URL for an already-running container and never touches E2E_DATA_DIR, so creating
 // one here (e.g. for `--list`) would just leak a directory nothing ever cleans up.
@@ -51,8 +55,13 @@ export default defineConfig({
   // could hide a real flake. Retries stay 0 so a failure is reported, not buried.
   retries: 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
-  use: { baseURL, trace: 'retain-on-failure' },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  use: { trace: 'retain-on-failure' },
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], baseURL }, testIgnore: /dev-proxy\.spec\.ts/ },
+    // #52: the Vite dev server with its /api proxy, against the same app. Guards the blank-page
+    // regression a lost proxy causes; never touches :5173 or :8000.
+    { name: 'dev-proxy', use: { ...devices['Desktop Chrome'], baseURL: devURL }, testMatch: /dev-proxy\.spec\.ts/ },
+  ],
   webServer: [
     {
       command: 'node e2e/fake-nova.mjs',
@@ -90,5 +99,14 @@ export default defineConfig({
           },
         ]
       : []),
+    {
+      // Started for every run, CI included: there it proxies to the container at E2E_BASE_URL.
+      // Vite needs only node_modules, so this works in the Docker job's Node-only environment.
+      command: `npx vite --port ${devPort} --strictPort --host 127.0.0.1`,
+      env: { ASTROCAPTION_API_URL: baseURL },
+      url: `${devURL}/`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+    },
   ],
 })

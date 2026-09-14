@@ -163,7 +163,7 @@ make install        # backend venv + frontend packages (needs python3 ≥ 3.13 a
 make dev            # API on :8000, Vite on :5173 with /api and /fonts proxied
 make test           # pytest + vitest
 make lint           # ruff + mypy + eslint + tsc
-make e2e            # browser smoke test
+make e2e            # browser smoke test, plus the Vite dev server through its /api proxy
 ```
 
 The browser test runs against a fake nova that replays recorded responses, so it never contacts
