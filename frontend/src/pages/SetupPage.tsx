@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, Navigate } from 'react-router'
-import { api, describeError, type HealthOut } from '../api'
+import { api, describeError, MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, type HealthOut } from '../api'
 
 export default function SetupPage({
   health,
@@ -73,11 +73,27 @@ export default function SetupPage({
       <form className="auth" onSubmit={submit}>
         <label>
           Password (at least 8 characters)
-          <input type="password" value={password} minLength={8} required autoComplete="new-password" onChange={(e) => setPassword(e.target.value)} />
+          <input
+            type="password"
+            value={password}
+            minLength={MIN_PASSWORD_LENGTH}
+            maxLength={MAX_PASSWORD_LENGTH}
+            required
+            autoComplete="new-password"
+            onChange={(e) => setPassword(e.target.value)}
+          />
         </label>
         <label>
           Password again
-          <input type="password" value={confirm} required autoComplete="new-password" onChange={(e) => setConfirm(e.target.value)} />
+          <input
+            type="password"
+            value={confirm}
+            minLength={MIN_PASSWORD_LENGTH}
+            maxLength={MAX_PASSWORD_LENGTH}
+            required
+            autoComplete="new-password"
+            onChange={(e) => setConfirm(e.target.value)}
+          />
         </label>
         <label>
           nova.astrometry.net API key (optional)

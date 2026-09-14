@@ -5,6 +5,7 @@ import EditorPage from './editor/EditorPage'
 import ConfigPage from './pages/ConfigPage'
 import ImagesPage from './pages/ImagesPage'
 import LoginPage from './pages/LoginPage'
+import PasswordPanel from './pages/PasswordPanel'
 import SetupPage from './pages/SetupPage'
 
 export default function App() {
@@ -122,7 +123,10 @@ export default function App() {
               path="/config"
               element={
                 <Guard health={health}>
+                  {/* Two independent forms, side by side in `main`'s grid: a failed
+                      /api/config must not take the password form down with it. */}
                   <ConfigPage refreshHealth={refreshHealth} />
+                  <PasswordPanel />
                 </Guard>
               }
             />

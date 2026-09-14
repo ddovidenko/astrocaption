@@ -122,16 +122,24 @@ test('first run: setup, sign in, solve, export, edit, config, sign out', async (
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Renamed sky')
 
   // Password change (#43): the changing session stays signed in, and the change is reverted so
-  // the next run of this suite on the same data dir can still sign in.
+  // the next run of this suite on the same data dir can still sign in. This round trip relies on
+  // `workers: 1` and one data dir (playwright.config.ts): the change re-keys every other session,
+  // so a spec running in parallel would be signed out mid-flight.
   const changePassword = async (from: string, to: string) => {
     await page.getByLabel('Current password').fill(from)
     await page.getByLabel('New password', { exact: true }).fill(to)
     await page.getByLabel('New password again').fill(to)
     await page.getByRole('button', { name: 'Change password' }).click()
+    // The fields clear only on success, and typing into them cleared the previous call's
+    // message, so both assertions are about this call and nothing else.
+    await expect(page.getByLabel('Current password')).toHaveValue('')
     await expect(page.getByText('Password changed.')).toBeVisible()
   }
   await changePassword(PASSWORD, `${PASSWORD}-2`)
-  await expect(page.getByRole('heading', { level: 1 })).toBeVisible() // still signed in, still on the page
+  // Still signed in on the same page: the nav (and the Config link in it) renders only when
+  // /api/health says authenticated, so the re-issued cookie really was accepted.
+  await expect(page).toHaveURL(/\/config$/)
+  await expect(page.getByRole('link', { name: 'Config' })).toBeVisible()
   await changePassword(`${PASSWORD}-2`, PASSWORD)
 
   await page.getByRole('button', { name: 'Log out' }).click()

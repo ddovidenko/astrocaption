@@ -68,6 +68,7 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
 .field input, .field select { width: 100%; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem 1.25rem; }
 .row2-action { grid-template-columns: 1fr auto; align-items: end; }
+.row2 + .row2 { margin-top: 1.1rem; } /* stacked rows in one panel keep .grid3's rhythm */
 .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.1rem 1.25rem; margin-top: 1rem; align-items: end; }
 .grid3 .span2 { grid-column: span 2; }
 .status-line { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 1rem; }
