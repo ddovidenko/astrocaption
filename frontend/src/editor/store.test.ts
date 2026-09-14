@@ -134,6 +134,22 @@ describe('document actions', () => {
     expect(out.version).toBe(doc.annotations.version)
     expect(out.style).toEqual(doc.annotations.style)
   })
+  it('documentForSave omits labels for objects the image no longer has (the server would reject them)', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const state = useEditor.getState()
+    const orphan = { ...state.labels.get(1)!, object_id: 99 }
+    useEditor.setState({ labels: new Map([...state.labels, [99, orphan]]) })
+    const out = documentForSave(useEditor.getState())
+    expect(out.labels.map((l) => l.object_id)).toEqual([1, 2])
+  })
+  it('applyLabels never inserts a label for an id the store does not have', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const label = useEditor.getState().labels.get(1)!
+    s.applyLabels([{ ...label, object_id: 42 }])
+    expect(useEditor.getState().labels.has(42)).toBe(false)
+  })
   it('save state: dirty → saving → saved, but stays dirty if a change landed during the save', () => {
     const s = useEditor.getState()
     s.load(doc)

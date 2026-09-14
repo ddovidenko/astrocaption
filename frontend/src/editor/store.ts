@@ -150,7 +150,10 @@ export const useEditor = create<EditorState>()((set) => ({
   applyLabels: (updated) =>
     set((s) => {
       const labels = new Map(s.labels)
-      for (const label of updated) labels.set(label.object_id, label)
+      for (const label of updated) {
+        if (!labels.has(label.object_id)) continue
+        labels.set(label.object_id, label)
+      }
       return changed(s, labels)
     }),
   markDirty: () => set((s) => (s.save.status === 'conflict' ? {} : { save: { status: 'dirty', message: null } })),
@@ -191,22 +194,17 @@ export function fontFor(state: EditorState): FontOut {
   return font
 }
 
-/** Every stored label, ordered by `objectOrder` (§ hard rule: the two renderers must see labels
- *  in the same order they were built in) with any orphaned label (its object no longer exists,
- *  so it is hidden but never dropped) appended after, in the order it was loaded. */
+/** Every stored label for an object the image still has, ordered by `objectOrder` (§ hard rule:
+ *  the two renderers must see labels in the same order they were built in). Labels for objects the
+ *  server no longer has are kept locally and never sent: the server would reject them
+ *  (`_validate_document` in `backend/app/api/images.py`); the canvas keeps showing its
+ *  "hidden, not dropped" notice for them regardless. */
 export function documentForSave(state: EditorState): AnnotationsUpdate {
   if (!state.style) throw new Error('documentForSave called before a document was loaded.')
-  const seen = new Set<number>()
   const labels: Label[] = []
   for (const id of state.objectOrder) {
     const label = state.labels.get(id)
-    if (label) {
-      labels.push(label)
-      seen.add(id)
-    }
-  }
-  for (const [id, label] of state.labels) {
-    if (!seen.has(id)) labels.push(label)
+    if (label) labels.push(label)
   }
   return { style: state.style, labels, version: state.version }
 }
