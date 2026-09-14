@@ -19,6 +19,7 @@ from ..auth import (
 )
 from ..config import ConfigError, Settings
 from ..models import LoginRequest, PasswordChangeRequest, SetupRequest
+from .config import CONFIG_SAVED_BUT_UNREADABLE
 from .deps import SettingsDep, is_authenticated, require_owner
 from .errors import config_write_error
 
@@ -151,7 +152,9 @@ async def change_password(
         settings: Settings = request.app.state.settings_source.current()
         if settings.config_error is not None:
             raise HTTPException(status.HTTP_409_CONFLICT, settings.config_error)
-        assert settings.password_hash and settings.session_secret
+        if not settings.auth_ready:
+            raise HTTPException(status.HTTP_409_CONFLICT, "The site is not configured.")
+        assert settings.password_hash and settings.session_secret  # auth_ready guarantees both
         limiter = get_limiter(request)
         cooldown = _cooldown_response(limiter)
         if cooldown is not None:
@@ -176,8 +179,14 @@ async def change_password(
             if isinstance(exc, OSError):
                 log.exception("password change could not write config.json")
             raise config_write_error(exc, "The password") from exc
-        fresh: Settings = request.app.state.settings_source.current()
-        assert fresh.password_hash and fresh.session_secret
+        fresh: Settings = request.app.state.settings_source.reload()
+        if not fresh.auth_ready:
+            # set_owner_password already wrote the new hash - the password IS changed - but
+            # the reload can't see a full pair to build a cookie from. Same wording as the
+            # config page's saved-but-unreadable case (api/config.py).
+            log.error("password changed but config.json could not be read back afterward")
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, CONFIG_SAVED_BUT_UNREADABLE)
+        assert fresh.password_hash and fresh.session_secret  # auth_ready guarantees both
         log.info("owner password changed")
     response.set_cookie(
         COOKIE_NAME,

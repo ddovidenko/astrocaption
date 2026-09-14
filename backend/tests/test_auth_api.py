@@ -333,8 +333,12 @@ def test_password_change_keeps_this_session_and_signs_out_the_others(
         assert "set-cookie" in resp.headers
         # This client now carries the re-issued cookie and stays signed in.
         assert client.get("/api/images").status_code == 200
-        # The old token is re-keyed away (SPEC § 10).
-        assert client.get("/api/images", cookies={COOKIE_NAME: old_cookie}).status_code == 401
+        # The old token is re-keyed away (SPEC § 10). A second client on the same app stands
+        # in for the second browser: per-request `cookies=` is deprecated on the installed
+        # Starlette TestClient.
+        other = TestClient(client.app)
+        other.cookies.set(COOKIE_NAME, old_cookie)
+        assert other.get("/api/images").status_code == 401
         # Old password no longer signs in; the new one does.
         assert client.post("/api/login", json={"password": "hunter2hunter2"}).status_code == 401
         client.cookies.clear()
@@ -342,17 +346,21 @@ def test_password_change_keeps_this_session_and_signs_out_the_others(
 
 
 def test_password_change_refuses_a_wrong_current_password(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     with env_app_client(tmp_path, monkeypatch) as client:
         client.post("/api/setup", json={"password": "hunter2hunter2"})
         login(client, "hunter2hunter2")
-        resp = client.post(
-            "/api/password",
-            json={"current_password": "nope-nope-nope", "new_password": "new-password-1"},
-        )
+        with caplog.at_level(logging.WARNING, logger="app.api.auth"):
+            resp = client.post(
+                "/api/password",
+                json={"current_password": "nope-nope-nope", "new_password": "new-password-1"},
+            )
         assert resp.status_code == 403
         assert resp.json()["detail"] == WRONG_CURRENT_MESSAGE
+        assert "failed password change: wrong current password" in caplog.text
+        assert "nope-nope-nope" not in caplog.text
+        assert "new-password-1" not in caplog.text
         # Still signed in, nothing written.
         assert client.get("/api/images").status_code == 200
         client.cookies.clear()
