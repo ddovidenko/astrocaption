@@ -83,10 +83,16 @@ the ascender line. Marker rings: Pillow's outline grows inward, so the canvas dr
 `frontend/src/editor/` holds the canvas: `store.ts` (zustand document state), `load.ts` (fetches
 an image's objects/annotations and builds the editor document), `fonts.ts` (strict bundled-font
 loader), `view.ts` (zoom/pan view-transform math), `metrics.ts` (the TypeScript port of the parity
-contract above), `LabelTextShape.tsx` (the Konva text node for a label) and `EditorCanvas.tsx`
-(the Konva stage: preview image, markers, leaders, labels, hover ring and tooltip, wheel zoom
-about the cursor, drag/middle-mouse/space pan, `F` fit and `1` 100 %), mounted by `EditorPage.tsx`
-at `/images/:id`. The canvas exposes `window.__astrocaptionEditor = { stage, imageWidth, labelCount,
-renderAt(scale) }` — published only once the preview bitmap has loaded — so
-`frontend/e2e/parity.spec.ts` can force a render at a fixed scale for the pixel diff and read how
-many labels were drawn (the width test measures on its own canvas).
+contract above), `placement.ts` (the TypeScript port of the auto-placer, SPEC § 6.4, pinned by the
+same vectors as `backend/app/placement.py`), `editing.ts` (whether the document is editable, the
+shared measuring context, and `toggleWithPlacement`), `autosave.ts` (debounces document changes
+into `PUT annotations`, tracks the toolbar's save state, and exposes `flushSave`/`retrySave` for
+actions that must not race a pending save), `LabelTextShape.tsx` (the Konva text node for a label)
+and `EditorCanvas.tsx` (the Konva stage: preview image, markers, leaders, labels, hover ring and
+tooltip, wheel zoom about the cursor, drag/middle-mouse/space pan, `F` fit and `1` 100 %, click to
+toggle or select a label, left-drag to move one), mounted by `EditorPage.tsx` at `/images/:id`
+alongside `SidePanel.tsx` (the Objects/Layout/Image tabs, SPEC § 6.3). The canvas exposes
+`window.__astrocaptionEditor = { stage, imageWidth, labelCount, labelPositions(), renderAt(scale) }`
+— published only once the preview bitmap has loaded — so `frontend/e2e/parity.spec.ts` can force a
+render at a fixed scale for the pixel diff and read how many labels were drawn (the width test
+measures on its own canvas), and `frontend/e2e/smoke.spec.ts` can locate a label on screen to drag it.

@@ -1,11 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { Circle, Group, Image as KImage, Layer, Line, Rect, Stage, Text } from 'react-konva'
-import type Konva from 'konva'
+import Konva from 'konva'
 import { useShallow } from 'zustand/react/shallow'
 import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
 import { LabelTextShape } from './LabelTextShape'
+import { getMeasurer, isEditable, toggleWithPlacement } from './editing'
 import {
-  canvasMeasurer,
   labelText,
   leaderSegment,
   leaderVisible,
@@ -16,9 +16,10 @@ import {
   type LabelBox,
   type LabelLines,
   type LeaderSegment,
+  type TextMeasurer,
 } from './metrics'
 import { enabledLabels, fontFor, useEditor } from './store'
-import { actualSize, fitView, toScreen, zoomAt } from './view'
+import { toScreen, zoomAt } from './view'
 
 /** What the parity spec (PR 4's Playwright test) drives the canvas with. `renderAt` returns a PNG
  *  data URL of the annotated image alone — no hover overlay, no collided badges — at `scale`
@@ -33,6 +34,8 @@ export interface EditorTestHook {
   imageWidth: number
   /** How many enabled labels the canvas actually drew (orphaned ones are not counted). */
   labelCount: number
+  /** Where the drawn labels sit, in original image pixels — what a drag has to move. */
+  labelPositions(): { id: number; x: number; y: number }[]
   renderAt(scale: number): string
 }
 
@@ -42,66 +45,160 @@ declare global {
   }
 }
 
-/** Fit and 100 % are driven from the page's toolbar as well as from the keyboard, and only the
- *  canvas knows the viewport size, so it publishes the two actions through this ref. */
-export interface CanvasControls {
-  fit(): void
-  actual(): void
-}
-
 interface Entry {
   label: Label
   obj: ObjectOut
   box: LabelBox
   text: LabelLines
-  radius: number
   seg: LeaderSegment | null
   leader: boolean
 }
 
 const HOVER_COLOR = '#8ab4ff'
 
+// Only the left button ever drags a label: the middle button is a pan gesture everywhere on the
+// canvas (SPEC § 6.1), and Konva would otherwise start a drag with it.
+Konva.dragButtons = [0]
+
+/** Layout numbers per label, memoised on the label's identity. A drag replaces one `Label` object
+ *  per frame (the store never mutates them), so without this every other label would be measured
+ *  again 60 times a second. A hit is only reused while the style and the object behind it are the
+ *  same objects; the maps are weak, so a replaced label or style needs no eviction. */
+const entryCache = new WeakMap<StyleConfig, WeakMap<Label, Entry>>()
+
+function entryFor(style: StyleConfig, label: Label, obj: ObjectOut, measure: TextMeasurer, unit: number): Entry {
+  let byLabel = entryCache.get(style)
+  if (!byLabel) {
+    byLabel = new WeakMap<Label, Entry>()
+    entryCache.set(style, byLabel)
+  }
+  const hit = byLabel.get(label)
+  if (hit && hit.obj === obj) return hit
+  const box = measureLabel(measure, style, label, obj)
+  const seg = leaderSegment(obj.x, obj.y, markerRadius(obj, style), {
+    left: label.x,
+    top: label.y,
+    right: label.x + box.width,
+    bottom: label.y + box.height,
+  })
+  const entry: Entry = {
+    label,
+    obj,
+    box,
+    text: labelText(obj, label, style),
+    seg,
+    leader: seg !== null && leaderVisible(label, seg.gap, unit),
+  }
+  byLabel.set(label, entry)
+  return entry
+}
+
+interface EntryProps {
+  entry: Entry
+  style: StyleConfig
+  font: FontOut
+  editable: boolean
+  select: (id: number | null) => void
+  moveLabel: (id: number, x: number, y: number) => void
+  /** Whether Space is held: a pan gesture, which wins over selecting or dragging a label. */
+  spaceRef: RefObject<boolean>
+  onDrawError: (message: string) => void
+}
+
+/** One object's marker, leader and draggable label. Memoised on the cached `Entry`, so a drag
+ *  frame re-renders the dragged label only, not every label on the layer. */
+const LabelEntry = memo(function LabelEntry({
+  entry: { label, obj, box, text, seg, leader },
+  style,
+  font,
+  editable,
+  select,
+  moveLabel,
+  spaceRef,
+  onDrawError,
+}: EntryProps) {
+  // Konva still fires dragmove/dragend after a stopDrag() in dragstart; those must not reach the
+  // store. (A dragend at the label's own position is already a no-op in `moveLabel`.)
+  const suppressDragRef = useRef(false)
+
+  return (
+    <Group>
+      {/* Not the stored radius: the stroke sits half a marker width inside it so Konva's
+          centred stroke lands where Pillow's inward outline does (see markerStrokeRadius). */}
+      <Circle
+        x={obj.x}
+        y={obj.y}
+        radius={markerStrokeRadius(obj, style)}
+        stroke={style.marker_color}
+        strokeWidth={style.marker_width}
+        listening={false}
+      />
+      {seg && leader && (
+        <Line
+          points={[seg.from[0], seg.from[1], seg.to[0], seg.to[1]]}
+          stroke={style.leader_color}
+          strokeWidth={style.marker_width}
+          listening={false}
+        />
+      )}
+      {/* The group carries the position, so a drag is `e.target.x()/y()` in original pixels
+          (neither this layer nor the parent group has a transform of its own). */}
+      <Group
+        x={label.x}
+        y={label.y}
+        draggable={editable}
+        onMouseDown={(e) => {
+          // Space-drag and the middle button pan anywhere on the canvas, labels included, so
+          // those presses are left to bubble to the stage untouched.
+          if (spaceRef.current || e.evt.button === 1) return
+          // Without this the stage would read the press as the start of a pan.
+          e.cancelBubble = true
+          select(label.object_id)
+        }}
+        onDragStart={(e) => {
+          // Belt and braces with Konva.dragButtons: a drag begun while Space is held, or with
+          // any button but the left one, is a pan.
+          if (spaceRef.current || e.evt.button !== 0) {
+            suppressDragRef.current = true
+            e.target.stopDrag()
+            return
+          }
+          suppressDragRef.current = false
+          select(label.object_id)
+        }}
+        onDragMove={(e) => {
+          if (suppressDragRef.current) return
+          moveLabel(label.object_id, e.target.x(), e.target.y())
+        }}
+        onDragEnd={(e) => {
+          const suppressed = suppressDragRef.current
+          suppressDragRef.current = false
+          if (suppressed) return
+          moveLabel(label.object_id, e.target.x(), e.target.y())
+        }}
+      >
+        <LabelTextShape label={label} style={style} font={font} box={box} text={text} onDrawError={onDrawError} />
+      </Group>
+    </Group>
+  )
+})
+
 /** The layer that draws exactly what the export draws. It is memoised and deliberately blind to
  *  the view transform (the Stage carries zoom and pan), so panning and zooming never rebuild it. */
 const AnnotationLayer = memo(function AnnotationLayer({
   entries,
-  style,
-  font,
-  onDrawError,
   badgesRef,
-}: {
+  ...entryProps
+}: Omit<EntryProps, 'entry'> & {
   entries: Entry[]
-  style: StyleConfig
-  font: FontOut
-  onDrawError: (message: string) => void
   badgesRef: RefObject<Konva.Group | null>
 }) {
   return (
-    // Hover is served by the overlay's hit circles, so nothing here has to listen.
-    // PR 5: drag/select will turn this on.
-    <Layer listening={false}>
-      {entries.map(({ label, obj, box, text, seg, leader }) => (
-        <Group key={label.object_id}>
-          {/* Not the stored radius: the stroke sits half a marker width inside it so Konva's
-              centred stroke lands where Pillow's inward outline does (see markerStrokeRadius). */}
-          <Circle
-            x={obj.x}
-            y={obj.y}
-            radius={markerStrokeRadius(obj, style)}
-            stroke={style.marker_color}
-            strokeWidth={style.marker_width}
-            listening={false}
-          />
-          {seg && leader && (
-            <Line
-              points={[seg.from[0], seg.from[1], seg.to[0], seg.to[1]]}
-              stroke={style.leader_color}
-              strokeWidth={style.marker_width}
-              listening={false}
-            />
-          )}
-          <LabelTextShape label={label} style={style} font={font} box={box} text={text} onDrawError={onDrawError} />
-        </Group>
+    // Only the label groups listen, and only while the document may be edited: markers and leaders
+    // are drawn output, and hover is served by the hit-circle layer underneath.
+    <Layer listening={entryProps.editable}>
+      {entries.map((entry) => (
+        <LabelEntry key={entry.label.object_id} entry={entry} {...entryProps} />
       ))}
       {/* UI chrome, not part of the export: hidden by renderAt. */}
       <Group ref={badgesRef}>
@@ -123,16 +220,21 @@ const AnnotationLayer = memo(function AnnotationLayer({
   )
 })
 
-export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<CanvasControls | null> }) {
+export default function EditorCanvas() {
   const image = useEditor((s) => s.image)
   const style = useEditor((s) => s.style)
   const objects = useEditor((s) => s.objects)
   const objectOrder = useEditor((s) => s.objectOrder)
   const view = useEditor((s) => s.view)
+  const viewport = useEditor((s) => s.viewport)
   const hoveredId = useEditor((s) => s.hoveredId)
   const selectedId = useEditor((s) => s.selectedId)
   const setView = useEditor((s) => s.setView)
   const hover = useEditor((s) => s.hover)
+  const select = useEditor((s) => s.select)
+  const moveLabel = useEditor((s) => s.moveLabel)
+  // A conflict keeps editing local (design § 5): only the saves stop, not the page.
+  const editable = useEditor(isEditable)
   // A stale document (a font the server no longer lists) must throw, not draw in a fallback face.
   const font = useEditor((s) => (s.style ? fontFor(s) : null))
   // useShallow keeps the array identity while the labels themselves are unchanged, so the
@@ -144,10 +246,17 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
   const overlayRef = useRef<Konva.Layer>(null)
   const badgesRef = useRef<Konva.Group>(null)
   const panRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null)
+  // Where the last mousedown that reached the stage landed, in screen pixels. A press on a label
+  // stops at the label (its own handler cancels the bubble), and that is harmless: Konva fires
+  // `click` only when the press and the release are on the same shape, so a gesture begun on a
+  // label can never end as a click on a marker.
+  const downRef = useRef<{ x: number; y: number } | null>(null)
+  // Whether the pointer travelled far enough between that mousedown and the click Konva fires
+  // after mouseup for the gesture to be a drag: a pan, or a label drag that happened to end over
+  // a marker, is not the click that deselects or toggles.
+  const movedRef = useRef(false)
   const spaceRef = useRef(false)
-  const fittedRef = useRef(false)
 
-  const [viewport, setViewport] = useState({ w: 0, h: 0 })
   // Keyed by the URL it was loaded from, so a second image opened without unmounting can never
   // show the first bitmap (or the first failure) — resetting the state in the effect below would
   // paint the stale bitmap for one frame, and lint forbids the synchronous reset anyway.
@@ -168,11 +277,7 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
     const apply = (w: number, h: number) => {
       measured = true
       setSizeError(null)
-      setViewport((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))
-      if (!fittedRef.current && image) {
-        fittedRef.current = true
-        setView(fitView(image.width, image.height, w, h))
-      }
+      useEditor.getState().setViewport(w, h)
     }
     const ro = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect
@@ -197,7 +302,7 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
       window.clearTimeout(fallback)
       ro.disconnect()
     }
-  }, [image, setView])
+  }, [])
 
   const current = loadedPreview && image && loadedPreview.src === image.preview_url ? loadedPreview : null
   const preview = current?.el ?? null
@@ -206,8 +311,6 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
   // 2. The preview bitmap; until it has loaded the stage draws nothing but the background.
   useEffect(() => {
     if (!image) return
-    // A new image has to be fitted again; the view of the previous one means nothing here.
-    fittedRef.current = false
     const src = image.preview_url
     let cancelled = false
     const el = new window.Image()
@@ -230,43 +333,23 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
     }
   }, [image])
 
-  // 3. One offscreen context for every width the canvas measures (design § 3).
-  const measure = useMemo(() => {
-    const ctx = document.createElement('canvas').getContext('2d')
-    if (!ctx) throw new Error('This browser could not open a canvas to measure text with.')
-    return canvasMeasurer(ctx)
-  }, [])
+  // 3. The one offscreen context the editor measures with (design § 3); shared with the placer.
+  const measure = getMeasurer()
 
   // 4. Every layout number for the enabled labels, recomputed only when the document changes.
   const { entries, orphans } = useMemo<{ entries: Entry[]; orphans: number }>(() => {
     if (!image || !style) return { entries: [], orphans: 0 }
     const out: Entry[] = []
     let orphans = 0
-    const s = scaleUnit(image.width, image.height)
+    const unit = scaleUnit(image.width, image.height)
     for (const label of labels) {
       const obj = objects.get(label.object_id)
-      // PR 5: these labels are hidden, not dropped — the save path must write them back.
+      // Hidden, not dropped: the save path writes these labels back untouched.
       if (!obj) {
         orphans++
         continue
       }
-      const box = measureLabel(measure, style, label, obj)
-      const radius = markerRadius(obj, style)
-      const seg = leaderSegment(obj.x, obj.y, radius, {
-        left: label.x,
-        top: label.y,
-        right: label.x + box.width,
-        bottom: label.y + box.height,
-      })
-      out.push({
-        label,
-        obj,
-        box,
-        text: labelText(obj, label, style),
-        radius,
-        seg,
-        leader: seg !== null && leaderVisible(label, seg.gap, s),
-      })
+      out.push(entryFor(style, label, obj, measure, unit))
     }
     return { entries: out, orphans }
   }, [image, style, labels, objects, measure])
@@ -275,26 +358,6 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
   const onDrawError = useCallback((message: string) => {
     setDrawError((prev) => prev ?? message)
   }, [])
-
-  const fit = useCallback(() => {
-    const { image: img, setView: apply } = useEditor.getState()
-    if (!img || viewport.w <= 0) return
-    apply(fitView(img.width, img.height, viewport.w, viewport.h))
-  }, [viewport])
-
-  const actual = useCallback(() => {
-    const { view: current, setView: apply } = useEditor.getState()
-    if (viewport.w <= 0) return
-    apply(actualSize(current, viewport.w, viewport.h))
-  }, [viewport])
-
-  useEffect(() => {
-    if (!controlsRef) return
-    controlsRef.current = { fit, actual }
-    return () => {
-      controlsRef.current = null
-    }
-  }, [controlsRef, fit, actual])
 
   // 5. Keys, ignored while a form field has the focus.
   useEffect(() => {
@@ -314,8 +377,18 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
         return
       }
       if (inField() || e.ctrlKey || e.metaKey || e.altKey) return
-      if (e.key === 'f' || e.key === 'F') fit()
-      else if (e.key === '1') actual()
+      if (e.key === 'f' || e.key === 'F') useEditor.getState().fit()
+      else if (e.key === '1') useEditor.getState().actual()
+      else if (e.key === 'Escape') useEditor.getState().select(null)
+      else if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Backspace is still "back" in some browsers when nothing has the focus, so it is
+        // swallowed here whether or not there is a selection to disable.
+        e.preventDefault()
+        const s = useEditor.getState()
+        if (s.selectedId === null || !isEditable(s)) return
+        toggleWithPlacement(s.selectedId)
+        s.select(null)
+      }
     }
     const up = (e: KeyboardEvent) => {
       if (e.code === 'Space') spaceRef.current = false
@@ -332,7 +405,7 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
       window.removeEventListener('keyup', up)
       window.removeEventListener('blur', blur)
     }
-  }, [fit, actual])
+  }, [])
 
   // 6. The test hook, live only while the canvas is mounted.
   const renderAt = useCallback(
@@ -370,26 +443,42 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
     [image],
   )
 
+  // The hook reads the entries through a ref so it is not republished on every drag frame.
+  const entriesRef = useRef(entries)
+  useEffect(() => {
+    entriesRef.current = entries
+  }, [entries])
   useEffect(() => {
     const stage = stageRef.current
     // Published only once there is something to diff: no preview bitmap (or a failed one) means
     // the stage would render the annotations over an empty background.
     if (!stage || !image || !preview || previewError) return
-    window.__astrocaptionEditor = { stage, imageWidth: image.width, labelCount: entries.length, renderAt }
+    window.__astrocaptionEditor = {
+      stage,
+      imageWidth: image.width,
+      get labelCount() {
+        return entriesRef.current.length
+      },
+      labelPositions: () =>
+        entriesRef.current.map((e) => ({ id: e.label.object_id, x: e.label.x, y: e.label.y })),
+      renderAt,
+    }
     return () => {
       delete window.__astrocaptionEditor
     }
     // `viewport`: the Stage is only mounted once the container has a size, so the hook has to be
     // published again when that first measurement arrives.
-  }, [image, renderAt, viewport, preview, previewError, entries])
+  }, [image, renderAt, viewport, preview, previewError])
 
   const selected = useMemo(
     () => entries.find((e) => e.label.object_id === selectedId) ?? null,
     [entries, selectedId],
   )
 
-  // The hit targets for hover: one transparent circle per object, rebuilt only when the objects,
-  // the marker sizes or the zoom (the 8 px floor is in screen pixels) change — not on every pan.
+  // The hit targets for hover and the toggle: one transparent circle per object, rebuilt only when
+  // the objects, the marker sizes or the zoom (the 8 px floor is in screen pixels) change — not on
+  // every pan. They sit on their own layer *below* the labels, so a label drawn inside a big
+  // marker (M 42 swallows the Trapezium stars) is still the thing a click on it hits.
   const hitCircles = useMemo(
     () =>
       objectOrder.map((id) => {
@@ -406,11 +495,22 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
             fill="transparent"
             onMouseEnter={() => hover(id)}
             onMouseLeave={() => hover(null)}
+            // Left button only, and not after a pan or a label drag that happened to end over
+            // this marker: the click Konva fires then is not a toggle.
+            onClick={(e) => {
+              if (e.evt.button === 0 && !movedRef.current) toggleWithPlacement(id)
+            }}
           />
         )
       }),
     [objectOrder, objects, style, view.scale, hover],
   )
+
+  // A click on the empty background (never on a label or a marker) clears the selection; a click
+  // that ended a pan does not.
+  const onStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (e.target === stageRef.current && !movedRef.current) select(null)
+  }
 
   // 7. Wheel zoom about the cursor.
   const onWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
@@ -425,18 +525,28 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
   const onMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
     const stage = stageRef.current
     if (!stage) return
-    if (!(e.target === stage || e.evt.button === 1 || spaceRef.current)) return
+    movedRef.current = false
     const pointer = stage.getPointerPosition()
+    // Recorded for every press that reaches the stage, pan or not: a Space-pan begun on a marker
+    // ends with a click on that marker, and only the displacement below tells the two apart.
+    downRef.current = pointer ? { x: pointer.x, y: pointer.y } : null
+    if (!(e.target === stage || e.evt.button === 1 || spaceRef.current)) return
     if (!pointer) return
     e.evt.preventDefault()
     panRef.current = { sx: pointer.x, sy: pointer.y, vx: view.x, vy: view.y }
     setPanning(true)
   }
 
-  const onMouseMove = () => {
-    const start = panRef.current
+  const onMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
     const pointer = stageRef.current?.getPointerPosition()
-    if (!start || !pointer) return
+    if (!pointer) return
+    // 3 screen pixels of slack, so a hand that shifts while clicking still counts as a click.
+    const down = downRef.current
+    if (down && e.evt.buttons !== 0 && Math.hypot(pointer.x - down.x, pointer.y - down.y) > 3) {
+      movedRef.current = true
+    }
+    const start = panRef.current
+    if (!start) return
     setView({ scale: view.scale, x: start.vx + (pointer.x - start.sx), y: start.vy + (pointer.y - start.sy) })
   }
 
@@ -491,6 +601,7 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
             y={view.y}
             onWheel={onWheel}
             onMouseDown={onMouseDown}
+            onClick={onStageClick}
             onMouseMove={onMouseMove}
             onMouseUp={stopPan}
             onMouseLeave={stopPan}
@@ -498,15 +609,24 @@ export default function EditorCanvas({ controlsRef }: { controlsRef?: RefObject<
             <Layer listening={false}>
               {preview && <KImage image={preview} width={image.width} height={image.height} />}
             </Layer>
+            {/* Below the labels on purpose (see hitCircles). It keeps listening while the document
+                is read-only: hover and the tooltip are not edits, and the toggle itself is gated
+                by `toggleWithPlacement`. */}
+            <Layer>{hitCircles}</Layer>
             <AnnotationLayer
               entries={entries}
               style={style}
               font={font}
+              editable={editable}
+              select={select}
+              moveLabel={moveLabel}
+              spaceRef={spaceRef}
               onDrawError={onDrawError}
               badgesRef={badgesRef}
             />
-            <Layer ref={overlayRef}>
-              {hitCircles}
+            {/* Chrome only, and none of it listens: `renderAt` hides this layer to diff the
+                canvas against the server's render. */}
+            <Layer ref={overlayRef} listening={false}>
               {selected && (
                 <Rect
                   x={selected.label.x}

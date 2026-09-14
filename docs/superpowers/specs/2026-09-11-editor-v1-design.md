@@ -98,8 +98,8 @@ autoarrange / reset), `markSaved`, `markConflict`. Canvas nodes subscribe per la
   written.
 - `POST /api/images/{id}/autoarrange` body = the same document; runs `autoplace` on every enabled
   label with no fixed labels; returns the placed document (same version, not stored). The editor
-  applies it and autosaves. "Reset positions" is the client putting every enabled label at its object's
-  `(x, y)` with `collided = false`, then calling autoarrange: the initial layout, reproduced.
+  applies it and autosaves. "Reset positions" is the same call behind a confirmation: `autoplace`
+  ignores the position of every label it places, so there is nothing for the client to move first.
 - Export from the editor: flush the pending save (await the PUT), then `POST /export` as today; the
   Image tab shows the result and the download link.
 - 422 handler (#45): messages are built from `error["type"]` through a table for the types the models
@@ -126,13 +126,15 @@ autoarrange / reset), `markSaved`, `markConflict`. Canvas nodes subscribe per la
   flight defers the next one until it returns. Status in the top bar: "Saved", "Saving…", or the
   failure sentence with Retry. 409 → `conflict`: "This image was changed elsewhere" with a Reload
   button; editing continues locally but no further saves are attempted until reload.
-  `beforeunload` warns while dirty or saving.
-- **Objects tab.** Search box; type filter chips (galaxy, nebula, cluster, star, other, hd) with `hd`
+  `beforeunload` warns while dirty, saving or in error — not on a conflict, whose edits cannot be
+  saved at all.
+- **Objects tab.** Search box; type filter chips (NGC, IC, bright stars, HD stars, other — nova's
+  types; morphological types arrive with M4's names catalog) with `hd`
   off by default (#37; both HD-twin rows stay); list rows: checkbox, primary name, type, radius in px.
   Bulk: "Enable shown", "Disable shown". Row hover highlights on canvas; clicking the name pans to the
   object. Tested against `nova-narrow` (8 objects, 5 `hd`, 3 enabled by default).
-- **Layout tab.** "Auto-arrange" (all enabled labels) and "Reset positions" (confirm, then the reset
-  flow above). Shows the count of collided labels.
+- **Layout tab.** "Auto-arrange" (all enabled labels) and "Reset positions" (the same call behind a
+  confirmation, per the autoarrange note above). Shows the count of collided labels.
 - **Image tab** (read-only in M3): field centre, size, rotation from `calibration`; nova status link
   (#1); export button result with download link. Publish, re-solve and delete stay on the image card.
 - **Deferred to M4**: Style tab, per-label toolbar, double-click text edit, multi-select,

@@ -94,6 +94,51 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
 .editor-toolbar a { text-decoration: none; }
 .editor-main > .notice { margin: 0.75rem 1rem 0; }
 .editor-main > .error, .editor-main > .meta { padding: 1.5rem; }
+.save-status { margin-left: auto; display: flex; gap: 0.5rem; align-items: center; color: var(--muted); font-size: 0.9rem; }
+.save-status.error { color: var(--danger); }
+.save-status button { padding: 0.2rem 0.6rem; font-size: 0.85rem; }
 .editor-canvas { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #000; cursor: grab; }
 .editor-canvas.panning { cursor: grabbing; }
 .editor-tooltip { position: absolute; pointer-events: none; padding: 0.15rem 0.5rem; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; white-space: nowrap; }
+
+/* Editor side panel (milestone 3 PR 5): a fixed column beside the canvas, or a strip when closed. */
+/* The editor is the one page that must not scroll, and it is now the one page with a column whose
+   content is taller than the window (the object list). Without a definite height here the shell is
+   sized by that list: the grid row grows to the full list, the canvas grows with it, and the page
+   scrolls instead of the list. It has to be `body`: `#root` is a flex item with `flex: 1 1 0`, so
+   its own `height` is ignored in favour of the flex basis. Only the editor route is touched, so
+   every other page keeps its ordinary document scrolling. */
+body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
+.editor-body { display: grid; grid-template-columns: 1fr 320px; flex: 1; min-height: 0; }
+.editor-body.collapsed { grid-template-columns: 1fr 32px; }
+.editor-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.editor-pane > .notice { margin: 0.75rem 1rem 0; }
+.side-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--border); background: var(--panel); }
+.side-panel-head { display: flex; align-items: center; gap: 0.25rem; padding: 0.4rem; border-bottom: 1px solid var(--border); }
+.side-panel.collapsed .side-panel-head { padding: 0.4rem 0.1rem; justify-content: center; }
+.panel-toggle { padding: 0.25rem 0.35rem; font-size: 1rem; line-height: 1.2; }
+.tabs { display: flex; gap: 0.25rem; }
+.tab { background: transparent; color: var(--muted); border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 0.35rem 0.6rem; font-size: 0.9rem; }
+.tab:hover { color: var(--text); }
+.tab[aria-selected='true'] { color: var(--text); border-bottom-color: var(--accent); }
+.side-panel-body { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 0.9rem; }
+.tab-body { display: grid; gap: 0.75rem; align-content: start; min-width: 0; }
+.tab-body input[type='text'] { width: 100%; }
+.tab-body .meta { gap: 0.5rem; }
+.tab-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.tab-actions button { font-size: 0.85rem; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.chip { background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 0.2rem 0.6rem; font-size: 0.8rem; font-weight: 500; }
+.chip:hover { color: var(--text); }
+.chip[aria-pressed='true'] { background: rgba(255, 213, 74, 0.12); border-color: var(--accent); color: var(--text); }
+.object-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.1rem; }
+.object-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 0.5rem; align-items: center; padding: 0.3rem 0.4rem; border-radius: 4px; font-size: 0.9rem; }
+.object-row:hover, .object-row.hovered { background: rgba(138, 180, 255, 0.12); }
+.object-row input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
+.link-button { background: transparent; border: 0; padding: 0; color: var(--text); font: inherit; font-weight: 500; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-button:hover { color: var(--accent); }
+.object-type, .object-radius { color: var(--muted); font-size: 0.8rem; }
+.object-radius { font-variant-numeric: tabular-nums; }
+.facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.35rem 0.75rem; margin: 0; font-size: 0.9rem; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; }

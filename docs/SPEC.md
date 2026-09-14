@@ -131,15 +131,17 @@ The editor is a full-viewport canvas with a collapsible side panel.
 
 ### 6.1 Canvas
 
-Milestone 3 PR 4 delivers the canvas itself: preview, markers, leaders, labels, zoom/pan,
-hover, and the `F`/`1` keyboard shortcuts below. The rest of § 6.1–6.3 (click-to-toggle,
-drag, autosave, the side panel) arrives with PR 5.
+Milestone 3 PR 4 delivered the canvas itself: preview, markers, leaders, labels, zoom/pan,
+hover, and the `F`/`1` keyboard shortcuts below. PR 5 (this milestone) adds click-to-toggle,
+select/drag, the autosave and the side panel (§ 6.3).
 
 - Shows the 2048-px preview scaled to fit. All geometry stored in original-image pixel coordinates.
 - **Mouse wheel**: zoom, centred on cursor. **Drag on empty canvas / middle mouse / space+drag**: pan.
 - Hovering an object's position highlights it (subtle ring + name tooltip), whether or not it is enabled.
 - **Click** a hovered object: toggles it enabled. Its label appears at its default position.
-- Keyboard: `Esc` deselect, `Delete` disable selected, `Ctrl+Z / Ctrl+Y` undo/redo, `F` fit to view, `1` 100 %.
+- **Click** a label: selects it (shows a selection outline). Clicking empty canvas deselects.
+- Keyboard: `Esc` deselect, `Delete`/`Backspace` disable the selected label, `F` fit to view, `1` 100 %.
+  *M3 note:* `Ctrl+Z` / `Ctrl+Y` undo/redo ship with milestone 4 (§ 13).
 
 ### 6.2 Labels (call-outs)
 
@@ -160,18 +162,41 @@ Interactions:
 - Selected label shows a small toolbar: font size, colour override, hide aliases, reset position.
 - Shift-click to multi-select; dragging moves the group; panel edits apply to all.
 
+*M3 note:* this milestone ships single select (click) and left-drag move only. Wheel-to-resize,
+double-click text edit, the per-label toolbar and shift-click multi-select arrive with milestone 4
+(§ 13), alongside per-label overrides.
+
 ### 6.3 Side panel
+
+Milestone 3 PR 5 delivers three of the four tabs below — **Style** ships with milestone 4. Edits
+are held locally and flushed to `PUT annotations` on a debounce (autosave); the toolbar's status
+reads `Saving…` while a save is in flight, `Saved` once it lands, and `Unsaved changes` for an edit
+still waiting out the debounce. A failed save reads the server's sentence, or "The last change
+could not be saved." when there is none, with a Retry button; a 409 from someone else's more recent
+save reads "This image was changed elsewhere. Reload to continue editing." with a Reload button —
+editing itself stays live, only saving stops (design § 5). Closing or reloading the tab prompts for
+confirmation while the document is dirty, saving or in error; a conflict does not prompt, because
+those edits cannot be saved at all and Reload is the documented way out. Leaving the editor inside
+the app instead flushes the pending save first. While a solve is running (`pending` or `solving`)
+the toolbar reads "Read-only while solving" and the panel's actions are disabled; a *failed*
+re-solve leaves the previous layout editable (§ 5), and the page says so above the canvas.
 
 Tabs:
 
-1. **Objects** — searchable list of every object nova returned. Columns: checkbox (enabled), name, type (galaxy/nebula/cluster/star), radius. Hovering a row highlights on canvas; clicking scrolls/pans to it. Bulk: enable all / none / by type / by min size slider.
+1. **Objects** — searchable list of every object nova returned. Columns: checkbox (enabled), name, type, radius. Hovering a row highlights on canvas; clicking pans to it. Bulk actions are "Enable shown" / "Disable shown" (both act on the rows the search and type filter currently show). *M3 note:* the type filter uses nova's own annotation types — `NGC`, `IC`, `Bright stars`, `HD stars`, `Other` — rather than the galaxy/nebula/cluster/star buckets above; the richer OpenNGC types arrive in milestone 4. `HD stars` starts unchecked (#37): a narrow field can return dozens of duplicate HD rows, most of them a brighter object's twin. The min-size slider is not built.
 2. **Style** — global defaults: font (dropdown of bundled fonts, live preview), font size, text colour, marker colour, leader colour, halo (stroke) on/off + colour, marker line width, alias line on/off, **name preference** (`popular`: Messier/Caldwell/Sharpless/Barnard, then NGC, then IC, then other catalogues, then common names; `ngc_ic`: NGC/IC designations first; stars: proper name, then Bayer, then Flamsteed). Per-label overrides win over globals. `config.default_style` seeds these for new images.
-3. **Layout** — "Auto-arrange" button: runs the collision-avoidance placer on all enabled labels (same algorithm as the initial placement); "Reset all positions".
-4. **Image** — nova job link, solved field centre/size/rotation, re-solve, publish toggle, delete.
+3. **Layout** — "Auto-arrange" button: flushes any pending save, then runs the collision-avoidance placer on all enabled labels (same algorithm as the initial placement); "Reset positions" asks for confirmation, then does the same. In M3 no label is pinned, so the two differ only by the confirmation — M4's pinned labels will make Reset discard pins. Neither touches the document until the placed labels come back; both then mark it dirty for the autosave to pick up. A 409 shows as the toolbar's Reload state, with one line in the tab saying the layout was not arranged; a label dragged while the request was in flight drops the answer rather than undoing the drag.
+4. **Image** — read-only solve facts (nova job link, field centre/size/rotation, pixel scale, image size) and the **Export** button (full resolution, matching the original JPEG's encoding). *M3 note:* re-solve, publish toggle and delete stay on the image card, not this tab.
 
 ### 6.4 Auto-placement algorithm (initial and on demand)
 
-Deterministic, identical in TS and Python (shared test vectors in `tests/fixtures/placement/`):
+Deterministic, identical in TS and Python (shared test vectors in `tests/fixtures/placement/`).
+The TypeScript port ships in `frontend/src/editor/placement.ts`: toggling a label on (§ 6.1) calls
+it in the browser for an immediate placement, ahead of the next autosave; the Layout tab's
+"Auto-arrange" and "Reset positions" instead call `POST autoarrange` and place server-side, since
+they re-place every enabled label at once (the placer ignores the current position of every label
+it places, so neither needs to move anything first). The same vectors that pin `backend/app/placement.py`
+pin this port (`placement.test.ts`), so the two cannot drift:
 
 1. Sort enabled objects by radius descending.
 2. For each: try anchors right, left, below, above, then four diagonals, at gap `g = 6·s` where `s = max(W,H)/1000`.
