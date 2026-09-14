@@ -72,6 +72,7 @@ No multi-user, no roles, no invites in v1.
 ### 5.2 Upload & solve
 
 1. Owner uploads a JPG (also accept PNG/TIFF; convert to RGB internally). Max size configurable, default 60 MB.
+   The page shows upload progress (bytes sent) and then "Processing…" while the server writes the derivatives.
 2. Backend stores the original untouched at `data/uploads/<id>/original.<ext>`, generates a
    2048-px preview JPG and a 400-px thumbnail.
 3. Backend submits to nova (async job). Status page polls. Typical 30–120 s.
@@ -101,9 +102,12 @@ No multi-user, no roles, no invites in v1.
    (focal length / pixel size passed as nova's `scale_units` etc.). When the row still holds nova
    ids (a timed-out or interrupted poll), **Check again** resumes polling the stored submission
    and job without uploading again (#10); the worker's restart-resume path serves both.
+   The card shows the nova status link with a note that the upload stays in the owner's nova account
+   and must be deleted there (#1).
 
 Optional resolve later: "Re-solve" button re-runs step 3 without deleting the annotation layout;
-objects are re-matched by catalogue name.
+objects are re-matched by catalogue name. Delete asks for confirmation in the page, not in a browser
+dialog.
 
 ### 5.3 Edit (see § 6)
 

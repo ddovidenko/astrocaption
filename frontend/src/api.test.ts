@@ -158,4 +158,10 @@ describe('uploadForm', () => {
     FakeXHR.last!.onerror!()
     await expect(p).rejects.toThrow('The upload did not reach the server. Check the connection and try again.')
   })
+
+  it('says so plainly when the upload is aborted', async () => {
+    const p = uploadForm('/api/images', new FormData(), undefined, XHR)
+    FakeXHR.last!.onabort!()
+    await expect(p).rejects.toThrow('The upload was cancelled.')
+  })
 })

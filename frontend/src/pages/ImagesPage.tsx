@@ -98,6 +98,7 @@ function UploadPanel({ onUploaded }: { onUploaded: () => Promise<void> }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [title, setTitle] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function submit(e: React.FormEvent) {
@@ -105,9 +106,10 @@ function UploadPanel({ onUploaded }: { onUploaded: () => Promise<void> }) {
     const file = fileRef.current?.files?.[0]
     if (!file) return
     setUploading(true)
+    setProgress(null)
     setError(null)
     try {
-      await api.upload(file, title)
+      await api.upload(file, title, (sent, total) => setProgress({ sent, total }))
       setTitle('')
       if (fileRef.current) fileRef.current.value = ''
       await onUploaded()
@@ -115,8 +117,18 @@ function UploadPanel({ onUploaded }: { onUploaded: () => Promise<void> }) {
       setError(pageError(err))
     } finally {
       setUploading(false)
+      setProgress(null)
     }
   }
+
+  // The bytes are all sent well before the server answers: it still has to write the file and
+  // build the preview and thumbnail, hence "Processing…".
+  const sent = progress !== null && progress.total > 0 && progress.sent >= progress.total
+  const label = !uploading
+    ? 'Upload & solve'
+    : progress === null || sent
+      ? 'Processing…'
+      : `Uploading… ${Math.floor((progress.sent / progress.total) * 100)} %`
 
   return (
     <section className="panel">
@@ -130,9 +142,17 @@ function UploadPanel({ onUploaded }: { onUploaded: () => Promise<void> }) {
           onChange={(e) => setTitle(e.target.value)}
         />
         <button type="submit" disabled={uploading}>
-          {uploading ? 'Uploading…' : 'Upload & solve'}
+          {label}
         </button>
       </form>
+      {uploading && (
+        <progress
+          className="upload-progress"
+          aria-label="Upload progress"
+          value={progress?.sent ?? 0}
+          max={progress?.total ?? 1}
+        />
+      )}
       {error && <p className="error">{error}</p>}
     </section>
   )
@@ -146,6 +166,7 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
   const [quality, setQuality] = useState<number | null>(null)
   const [scale, setScale] = useState(1)
   const [lastExport, setLastExport] = useState<ExportOut | null>(null)
+  const [confirming, setConfirming] = useState(false)
 
   async function run(action: () => Promise<unknown>) {
     setWorking(true)
@@ -166,12 +187,13 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
     const hints = f > 0 && p > 0 ? { focal_length_mm: f, pixel_size_um: p } : undefined
     return run(() => api.resolve(image.id, hints))
   }
+  const checkAgain = () => run(() => api.checkSolve(image.id))
   const exportNow = () =>
     run(async () => {
       setLastExport(await api.exportImage(image.id, quality, scale))
     })
   const remove = () => {
-    if (!window.confirm(`Delete "${image.title}" and its export?`)) return
+    setConfirming(false)
     return run(() => api.deleteImage(image.id))
   }
 
@@ -206,6 +228,12 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
             </a>
           )}
         </div>
+        {image.nova_status_url && (
+          <p className="field-note">
+            The upload stays in your nova.astrometry.net account (not publicly listed). To remove it,
+            open the nova status page and delete it there — AstroCaption cannot delete it for you.
+          </p>
+        )}
         {image.solve_error && <p className="error">{image.solve_error}</p>}
         {error && <p className="error">{error}</p>}
         <div className="actions">
@@ -261,14 +289,43 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
                   />
                 </span>
               )}
+              {image.solve_status === 'failed' && image.nova_submission_id !== null && (
+                <button
+                  className="secondary"
+                  onClick={checkAgain}
+                  disabled={working}
+                  title="Resumes the stored nova job; nothing is uploaded again"
+                >
+                  Check again
+                </button>
+              )}
               <button className="secondary" onClick={resolve} disabled={working}>
                 Re-solve
               </button>
             </>
           )}
-          <button className="danger" onClick={remove} disabled={working}>
-            Delete
-          </button>
+          {confirming ? (
+            <span
+              className="confirm"
+              role="group"
+              aria-label="Confirm delete"
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setConfirming(false)
+              }}
+            >
+              Delete “{image.title}” and its export?
+              <button className="danger" onClick={remove} disabled={working} autoFocus>
+                Delete
+              </button>
+              <button className="secondary" onClick={() => setConfirming(false)} disabled={working}>
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button className="danger" onClick={() => setConfirming(true)} disabled={working}>
+              Delete
+            </button>
+          )}
         </div>
         {image.annotated_preview_url && image.export_url && (
           <div className="export">
