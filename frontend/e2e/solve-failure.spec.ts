@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import type { ImageOut } from '../src/api'
 import {
   deleteImageIfPresent,
   ensureSetUpAndSignedIn,
@@ -12,7 +13,7 @@ import {
 // its own scratch image and deletes it again, so a second run on the same data dir starts clean.
 //
 // The deadline the timeout step waits for is the app's, not Playwright's: uvicorn is started
-// with ASTROCAPTION_SOLVE_TIMEOUT_SECONDS=8 (playwright.config.ts; the CI container gets the
+// with ASTROCAPTION_SOLVE_TIMEOUT_SECONDS=12 (playwright.config.ts; the CI container gets the
 // same through `docker run -e`).
 const TITLE = 'Doomed'
 
@@ -36,7 +37,7 @@ test('a failed solve, a timed-out re-solve, and Check again back to solved', asy
     await expect(card.getByRole('link', { name: 'nova job log' })).toBeVisible()
     await expect(card.getByRole('button', { name: 'Check again' })).toHaveCount(0)
 
-    // 2. Re-solve while nova never finishes: the deadline (8 s in this stack) passes → timed out,
+    // 2. Re-solve while nova never finishes: the deadline (12 s in this stack) passes → timed out,
     // and that is the one failure the row offers to resume.
     await setFakeNovaMode(page, 'timeout')
     await card.getByRole('button', { name: 'Re-solve' }).click()
@@ -55,7 +56,7 @@ test('a failed solve, a timed-out re-solve, and Check again back to solved', asy
     const submissionId = async (): Promise<number | null | undefined> => {
       const res = await page.request.get('/api/images')
       expect(res.status()).toBe(200)
-      const images = (await res.json()) as { title: string; nova_submission_id: number | null }[]
+      const images = (await res.json()) as ImageOut[]
       return images.find((i) => i.title === TITLE)?.nova_submission_id
     }
     const before = await submissionId()
@@ -68,8 +69,10 @@ test('a failed solve, a timed-out re-solve, and Check again back to solved', asy
     expect(await submissionId()).toBe(before)
     expect(await fakeNovaUploads(page)).toBe(uploadsBefore)
   } finally {
-    await setFakeNovaMode(page, 'success')
+    // The image goes first: a fake-nova hiccup while resetting the mode must not skip the
+    // cleanup that lets a second run on the same data dir start clean.
     await deleteImageIfPresent(page, TITLE)
+    await setFakeNovaMode(page, 'success')
   }
   expect(errors).toEqual([])
 })
