@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router'
 import { pageError } from '../api'
 import { flushSave, retrySave, startAutosave } from './autosave'
 import EditorCanvas from './EditorCanvas'
+import { isEditable } from './editing'
 import { loadEditor } from './load'
 import SidePanel from './SidePanel'
 import { useEditor } from './store'
@@ -10,9 +11,10 @@ import { useEditor } from './store'
 /** The toolbar's save state (design § 5). Editing stays local after a conflict; only saving
  *  stops, so the sentence offers a reload rather than a retry. */
 function SaveStatus() {
-  const solved = useEditor((s) => s.image?.solve_status === 'solved')
+  // `isEditable`, not `solved`: a failed re-solve still edits and still saves (SPEC § 5).
+  const editable = useEditor(isEditable)
   const save = useEditor((s) => s.save)
-  if (!solved) return <span className="save-status">Read-only while solving</span>
+  if (!editable) return <span className="save-status">Read-only while solving</span>
   switch (save.status) {
     case 'saving':
       return <span className="save-status">Saving…</span>
@@ -122,7 +124,10 @@ export default function EditorPage() {
         </button>
         <SaveStatus />
       </div>
-      {image.solve_status !== 'solved' && (
+      {image.solve_status === 'failed' && (
+        <div className="notice">The last re-solve failed; you are editing the previous layout.</div>
+      )}
+      {(image.solve_status === 'pending' || image.solve_status === 'solving') && (
         <div className="notice">
           This image is being re-solved; the layout shown is the previous one and cannot be edited
           until it finishes.

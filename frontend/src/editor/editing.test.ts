@@ -57,4 +57,32 @@ describe('toggleWithPlacement', () => {
     expect(useEditor.getState().labels.get(2)?.enabled).toBe(false)
     expect(useEditor.getState().changeSeq).toBe(0)
   })
+
+  // SPEC § 5: a failed re-solve leaves the previous layout editable, and the server accepts
+  // PUT/autoarrange for it.
+  it('still edits after a failed re-solve', () => {
+    const failed = makeDoc()
+    failed.image = { ...failed.image, solve_status: 'failed' }
+    useEditor.getState().load(failed)
+    expect(isEditable(useEditor.getState())).toBe(true)
+    toggleWithPlacement(2, measure)
+    expect(useEditor.getState().labels.get(2)?.enabled).toBe(true)
+  })
+})
+
+describe('isEditable', () => {
+  it('is true only when no solve is running', () => {
+    const state = (status: string) => {
+      const doc = makeDoc()
+      doc.image = { ...doc.image, solve_status: status as typeof doc.image.solve_status }
+      useEditor.getState().load(doc)
+      return useEditor.getState()
+    }
+    expect(isEditable(state('solved'))).toBe(true)
+    expect(isEditable(state('failed'))).toBe(true)
+    expect(isEditable(state('pending'))).toBe(false)
+    expect(isEditable(state('solving'))).toBe(false)
+    useEditor.getState().reset()
+    expect(isEditable(useEditor.getState())).toBe(false)
+  })
 })

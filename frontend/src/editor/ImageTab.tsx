@@ -1,16 +1,16 @@
 import { useState } from 'react'
 import { api, formatBytes, pageError, type ExportOut } from '../api'
 import { flushSave } from './autosave'
-import { isEditable } from './editing'
 import { useEditor } from './store'
 
 /** Read-only solve facts plus the export button (design § 5). Publish, re-solve and delete stay
  *  on the image card. */
 export default function ImageTab() {
   const image = useEditor((s) => s.image)
-  // The server refuses an export while a solve is running ("Image is not solved yet."); the
-  // button says so by being disabled rather than by failing.
-  const editable = useEditor(isEditable)
+  // Not `isEditable`: that also allows a failed re-solve, which the editor may still edit and save
+  // but the export endpoint refuses ("Image is not solved yet."). The button says so by being
+  // disabled rather than by failing.
+  const solved = useEditor((s) => s.image?.solve_status === 'solved')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ExportOut | null>(null)
@@ -19,9 +19,11 @@ export default function ImageTab() {
   const cal = image.calibration
 
   async function exportNow(id: string): Promise<void> {
-    if (!editable) return
+    if (!solved) return
     setBusy(true)
     setError(null)
+    // A failed export must not leave the previous run's download link on screen to be clicked.
+    setResult(null)
     try {
       // The export renders what the server has stored, so anything still queued has to land
       // first; a save that fails or conflicts stops the export rather than exporting stale work.
@@ -73,7 +75,7 @@ export default function ImageTab() {
       )}
       <div className="tab-actions">
         <button
-          disabled={busy || !editable}
+          disabled={busy || !solved}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => void exportNow(image.id)}
         >
