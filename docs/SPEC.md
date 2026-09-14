@@ -279,7 +279,9 @@ Owner (cookie session):
   Logged-out calls to any owner route get 401 with a plain message.
 - `POST /password` {current_password, new_password} → 204 with a fresh cookie; 403 on a wrong current
   password; 429 with `Retry-After` during the cooldown (shared with `POST /login`); 422 on a rule violation
-  (new password out of the 8–1024 range, or the same as the current one).
+  (new password out of the 8–1024 range, or the same as the current one); 409 when `config.json` cannot be
+  read or no longer holds a usable password; 500 when the new password was written but the file could not
+  be read back afterwards (the password did change; the browser is not re-signed-in).
 - `GET/PUT /config` → {site_title, max_upload_mb, nova_api_key_set, default_style, style_defaults, locked,
   locked_by}. `PUT` is partial: absent fields are kept, `nova_api_key: null` clears the key, and
   `default_style` replaces the owner's whole override set — a save from the page therefore stores exactly the
@@ -362,7 +364,9 @@ until the editor next saves it.
   the issue time and a fingerprint of the password hash, so a password reset invalidates every session
   without a session table. SameSite=Lax plus JSON request bodies is the CSRF protection; there is no token.
 - Rate limit login: 5 failures → 60 s cooldown, in-memory and global (one owner; per-IP is meaningless
-  behind a proxy). A failed sign-in and the start of a cooldown are logged (never the password).
+  behind a proxy). A failed sign-in and the start of a cooldown are logged (never the password). The
+  cooldown is shared with the password change, so a captured session can hold sign-in in cooldown;
+  restarting the app (or the CLI reset) clears it. That is the trade for throttling both with one counter.
 - `POST /logout` is client-side only: the design is stateless, so it clears the cookie and nothing more.
   It clears it only for a request that carries a valid session (a cross-site POST cannot, under
   SameSite=Lax, so a third-party page cannot force a logout); otherwise it is a 204 with no `Set-Cookie`.
@@ -376,7 +380,7 @@ until the editor next saves it.
   through the sign-in limiter, new one through the same 8–1024 rule, every other session re-keyed, the
   changing session's cookie re-issued); the CLI is the lockout path.
 - A new password is 8 to 1024 characters wherever it is chosen (setup page, `ASTROCAPTION_PASSWORD`,
-  CLI); the CLI refuses to write a `config.json` owned by another user and says which command to run
+  CLI, config page); the CLI refuses to write a `config.json` owned by another user and says which command to run
   as whom, so a reset can never leave the app unable to read its own config.
 
 ## 11. Docker & distribution
