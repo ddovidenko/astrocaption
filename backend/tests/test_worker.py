@@ -12,7 +12,7 @@ from app.db import Database
 from app.models import SolveHints, SolveStatus
 from app.solver import JobState, SolveRequest, SolverError, SolveResult, TransientSolverError
 from app.storage import image_dir
-from app.worker import NO_KEY_MESSAGE, UNEXPECTED_MESSAGE, SolveWorker
+from app.worker import NO_KEY_MESSAGE, UNEXPECTED_MESSAGE, SolveWorker, _span
 from tests.conftest import FakeSolver, load_fixture, make_worker, nova_result, seed_image
 
 ENABLED_BY_DEFAULT = {  # 3000 px test image: radius ≥ 12 px in the solve copy or no size known (#9), plus bright stars
@@ -407,6 +407,22 @@ def test_stale_transient_error_is_not_reported_after_a_good_poll(settings: Setti
     assert "Last error" not in got.solve_error
 
 
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [
+        (0.4, "1 second"),
+        (1, "1 second"),
+        (12, "12 seconds"),
+        (60, "1 minute"),
+        (90, "2 minutes"),
+        (900, "15 minutes"),
+    ],
+)
+def test_span_reads_as_a_whole_span(seconds: float, expected: str) -> None:
+    """What the owner is told the deadline was: never "0 seconds", never a fraction."""
+    assert _span(seconds) == expected
+
+
 def test_timeout_sentence_uses_seconds_under_a_minute(settings: Settings) -> None:
     db = Database(settings.db_path)
     rec = seed_image(settings, db)
@@ -414,7 +430,7 @@ def test_timeout_sentence_uses_seconds_under_a_minute(settings: Settings) -> Non
     asyncio.run(make_worker(settings, db, solver, timeout=0.05).process(rec.id))
     got = db.get_image(rec.id)
     assert got is not None and got.solve_error
-    assert got.solve_error.startswith("Timed out after 0 seconds waiting for nova.astrometry.net.")
+    assert got.solve_error.startswith("Timed out after 1 second waiting for nova.astrometry.net.")
     assert "https://nova.example.test/status/12345678" in got.solve_error
 
 

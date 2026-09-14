@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 import mimetypes
 import os
 from collections.abc import AsyncIterator, Callable
@@ -38,10 +37,14 @@ def create_app(
     settings: Settings | None = None,
     *,
     solver_factory: Callable[[], Solver | None] | None = None,
-    poll_interval: float = 5.0,
-    solve_timeout: float = 15 * 60,
+    poll_interval: float | None = None,
+    solve_timeout: float | None = None,
     setup_password: str | None = None,
 ) -> FastAPI:
+    """``poll_interval`` and ``solve_timeout`` in seconds; ``None`` takes the settings' values
+    (the two environment knobs, see config.py). Tests pass them explicitly."""
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     source = SettingsSource(settings)  # config.json values stay live; paths are fixed
     cfg = source.current()
     db = Database(cfg.db_path)
@@ -59,8 +62,8 @@ def create_app(
         db,
         source,
         solver_factory or default_solver_factory,
-        poll_interval=poll_interval,
-        timeout=solve_timeout,
+        poll_interval=cfg.solve_poll_seconds if poll_interval is None else poll_interval,
+        timeout=cfg.solve_timeout_seconds if solve_timeout is None else solve_timeout,
     )
 
     @asynccontextmanager
@@ -84,9 +87,6 @@ def create_app(
         finally:
             await worker.stop()
             await http_client.aclose()
-
-    if not logging.getLogger().handlers:
-        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     app = FastAPI(
         title="AstroCaption",
@@ -224,32 +224,9 @@ def _mount_spa(app: FastAPI, static_dir: Path) -> None:
         return FileResponse(index)
 
 
-def _env_seconds(name: str, default: float) -> float:
-    """A positive number of seconds from the environment.
-
-    Unset or blank falls back to ``default`` silently (not configured); a value that is not
-    a positive finite number falls back to ``default`` with one warning line (misconfigured).
-    """
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        value = 0.0
-    if not math.isfinite(value) or value <= 0:
-        log.warning("%s=%r is not a positive number of seconds; using %s", name, raw, default)
-        return default
-    return value
-
-
 def build_app_from_env() -> FastAPI:
     """The process entry point's app: every knob a self-hoster can set comes from the environment."""
-    return create_app(
-        setup_password=os.environ.get("ASTROCAPTION_PASSWORD"),
-        poll_interval=_env_seconds("ASTROCAPTION_SOLVE_POLL_SECONDS", 5.0),
-        solve_timeout=_env_seconds("ASTROCAPTION_SOLVE_TIMEOUT_SECONDS", 15 * 60),
-    )
+    return create_app(setup_password=os.environ.get("ASTROCAPTION_PASSWORD"))
 
 
 app = build_app_from_env()

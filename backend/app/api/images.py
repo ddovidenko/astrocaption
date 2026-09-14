@@ -307,10 +307,11 @@ async def check_solve(
     image_id: str, settings: SettingsDep, db: DbDep, worker: WorkerDep
 ) -> ImageOut:
     """Check again (#10): resume polling the stored nova submission/job of a row that timed
-    out, instead of uploading the image again — the 15-minute deadline may have passed while
-    nova was still working. The worker's resume branch does the polling; a stored job id skips
-    the submission poll. Nothing about the row changes except the status and the cleared error,
-    so the stored scale hints and ``solve_scale`` keep describing the attempt being resumed.
+    out, instead of uploading the image again — the solve deadline (15 minutes by default) may
+    have passed while nova was still working. The worker's resume branch does the polling; a
+    stored job id skips the submission poll. Nothing about the row changes except the status
+    and the cleared error, so the stored scale hints and ``solve_scale`` keep describing the
+    attempt being resumed.
     Any other failure is refused (``ImageRecord.check_available``)."""
     rec = _get_or_404(db, image_id)
     _require_idle(rec)

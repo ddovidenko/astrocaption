@@ -144,8 +144,8 @@ class NovaSolver:
 
         An error payload or one without a ``status`` key is nova saying it cannot look this job
         up any more (dropped, or belonging to another account). That is permanent, so it fails
-        now instead of letting Check again poll to the 15-minute deadline. ``joblog`` rather
-        than the status page: only the job id is known here.
+        now instead of letting Check again poll to the solve deadline (15 minutes by default).
+        ``joblog`` rather than the status page: only the job id is known here.
         """
         payload = await self._json("GET", f"/api/jobs/{job_id}")
         raw = payload.get("status")

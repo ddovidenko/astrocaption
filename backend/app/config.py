@@ -2,10 +2,10 @@
 
 Sources, in order of precedence: environment variables, then ``data/config.json`` (written by
 the setup flow and the config page), then built-in defaults. Environment-derived values (the
-paths, the nova base URL) are fixed for the life of the process; everything in config.json is
-live: ``SettingsSource`` re-reads the file whenever its size or mtime changes. Secrets are
-read here and nowhere else; nothing in this module is ever logged or returned by an API
-endpoint.
+paths, the nova base URL, the two solve knobs) are fixed for the life of the process;
+everything in config.json is live: ``SettingsSource`` re-reads the file whenever its size or
+mtime changes. Secrets are read here and nowhere else; nothing in this module is ever logged
+or returned by an API endpoint.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import errno
 import fcntl
 import json
 import logging
+import math
 import os
 import tempfile
 from collections.abc import Callable, Iterator, Mapping
@@ -32,6 +33,10 @@ CONFIG_FILE_NAME = "config.json"
 DEFAULT_MAX_UPLOAD_MB = 60
 DEFAULT_SITE_TITLE = "AstroCaption"
 DEFAULT_NOVA_BASE_URL = "https://nova.astrometry.net"
+# The solve queue's two timings. They live here (rather than in worker.py, which imports this
+# module) so that the env parsing below has one home; ``SolveWorker`` imports them back.
+DEFAULT_POLL_SECONDS = 5.0
+DEFAULT_SOLVE_TIMEOUT_SECONDS = 15.0 * 60
 
 LOCKABLE: dict[str, tuple[str, ...]] = {
     "nova_api_key": ("NOVA_API_KEY", "ASTROMETRY_API_KEY"),
@@ -91,6 +96,10 @@ class Settings:
     max_upload_mb: int
     site_title: str
     nova_base_url: str = DEFAULT_NOVA_BASE_URL
+    # The two solve knobs are process-level: read once at start from the environment, never
+    # lockable and never on the config page (changing them means restarting the app).
+    solve_poll_seconds: float = DEFAULT_POLL_SECONDS
+    solve_timeout_seconds: float = DEFAULT_SOLVE_TIMEOUT_SECONDS
     default_style: dict[str, object] = field(default_factory=dict)
     config_error: str | None = None  # why config.json was ignored, if it was
     password_hash: str | None = field(default=None, repr=False)
@@ -179,6 +188,28 @@ def _upload_mb(raw: object) -> int:
     return clamped
 
 
+def _positive_seconds(raw: object, *, default: float, name: str, lo: float, hi: float) -> float:
+    """A number of seconds from the environment, bounded by ``lo``-``hi``.
+
+    Unset or blank falls back to ``default`` silently (not configured); anything that is not a
+    finite number in range falls back with one warning line naming the variable and the bounds
+    (misconfigured). The value itself is never echoed, like every other line in this module.
+    """
+    text = str(raw).strip() if raw is not None else ""
+    if not text:
+        return default
+    try:
+        value = float(text)
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or not lo <= value <= hi:
+        log.warning(
+            "%s is not a number of seconds between %g and %g; using %g", name, lo, hi, default
+        )
+        return default
+    return value
+
+
 def _first_message(exc: ValidationError) -> str:
     """Pydantic's reason for a rejected field, without the value it rejected."""
     return "; ".join(validation_message(e) for e in exc.errors()) or "is not valid"
@@ -233,6 +264,20 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     max_mb = _upload_mb(from_env["max_upload_mb"][0] or cfg.get("max_upload_mb"))
     title = from_env["site_title"][0] or cfg.get("site_title") or DEFAULT_SITE_TITLE
     default_style = _normalise_style(cfg.get("default_style"))
+    poll_seconds = _positive_seconds(
+        e.get("ASTROCAPTION_SOLVE_POLL_SECONDS"),
+        default=DEFAULT_POLL_SECONDS,
+        name="ASTROCAPTION_SOLVE_POLL_SECONDS",
+        lo=0.1,
+        hi=3600,
+    )
+    solve_timeout = _positive_seconds(
+        e.get("ASTROCAPTION_SOLVE_TIMEOUT_SECONDS"),
+        default=DEFAULT_SOLVE_TIMEOUT_SECONDS,
+        name="ASTROCAPTION_SOLVE_TIMEOUT_SECONDS",
+        lo=1,
+        hi=86400,
+    )
     raw_hash = cfg.get("password_hash")
     raw_secret = cfg.get("session_secret")
     password_hash = raw_hash if isinstance(raw_hash, str) and raw_hash else None
@@ -251,6 +296,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         max_upload_mb=max_mb,
         site_title=str(title),
         nova_base_url=e.get("NOVA_BASE_URL", DEFAULT_NOVA_BASE_URL).rstrip("/"),
+        solve_poll_seconds=poll_seconds,
+        solve_timeout_seconds=solve_timeout,
         default_style=default_style,
         config_error=config_error,
         password_hash=password_hash,
