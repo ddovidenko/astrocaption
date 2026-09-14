@@ -252,6 +252,40 @@ const json = (method: string, body?: unknown): RequestInit => ({
   body: body === undefined ? undefined : JSON.stringify(body),
 })
 
+export type UploadProgress = (sent: number, total: number) => void
+
+/** Multipart POST over XMLHttpRequest — the one browser transport that reports upload
+ *  progress — with the same session and error handling as `request()`: a 401 sends the shell to
+ *  /login, every body goes through `parseBody`. `XHR` is injectable for tests. */
+export function uploadForm<T>(
+  url: string,
+  form: FormData,
+  onProgress?: UploadProgress,
+  XHR: typeof XMLHttpRequest = XMLHttpRequest,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XHR()
+    xhr.open('POST', url)
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(e.loaded, e.total)
+    }
+    xhr.onerror = () =>
+      reject(new Error('The upload did not reach the server. Check the connection and try again.'))
+    xhr.onabort = () => reject(new Error('The upload was cancelled.'))
+    xhr.onload = () => {
+      const lost = xhr.status === 401
+      if (lost) onUnauthorized?.()
+      try {
+        const ok = xhr.status >= 200 && xhr.status < 300
+        resolve(parseBody(xhr.status, ok, xhr.responseText, lost) as T)
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)))
+      }
+    }
+    xhr.send(form)
+  })
+}
+
 export const api = {
   health: () => request<HealthOut>('/api/health'),
   setup: (body: SetupRequest) => request<void>('/api/setup', json('POST', body)),
@@ -263,14 +297,16 @@ export const api = {
   updateConfig: (body: ConfigUpdate) => request<ConfigOut>('/api/config', json('PUT', body)),
   listImages: () => request<ImageOut[]>('/api/images'),
   image: (id: string) => request<ImageOut>(`/api/images/${id}`),
-  upload(file: File, title: string): Promise<ImageOut> {
+  upload(file: File, title: string, onProgress?: UploadProgress): Promise<ImageOut> {
     const form = new FormData()
     form.append('file', file)
     if (title.trim()) form.append('title', title.trim())
-    return request<ImageOut>('/api/images', { method: 'POST', body: form })
+    return uploadForm<ImageOut>('/api/images', form, onProgress)
   },
   resolve: (id: string, hints?: SolveHints) =>
     request<ImageOut>(`/api/images/${id}/solve`, json('POST', hints)),
+  /** Check again (#10): resumes the stored nova job of a failed row; a 409 says why it cannot. */
+  checkSolve: (id: string) => request<ImageOut>(`/api/images/${id}/check`, json('POST')),
   objects: (id: string) => request<ObjectOut[]>(`/api/images/${id}/objects`),
   annotations: (id: string) => request<Annotations>(`/api/images/${id}/annotations`),
   /** A 409 (ApiError.status) means the save was refused; show err.message: either the stored

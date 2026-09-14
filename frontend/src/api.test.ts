@@ -8,8 +8,40 @@ import {
   isSessionLossError,
   pageError,
   parseBody,
+  setUnauthorizedHandler,
   statusLabel,
+  uploadForm,
 } from './api'
+
+/** Enough of XMLHttpRequest for uploadForm: records the request, lets a test drive the events. */
+class FakeXHR {
+  static last: FakeXHR | null = null
+  method = ''
+  url = ''
+  body: unknown = null
+  status = 0
+  responseText = ''
+  upload = { onprogress: null as ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null }
+  onload: (() => void) | null = null
+  onerror: (() => void) | null = null
+  onabort: (() => void) | null = null
+  constructor() {
+    FakeXHR.last = this
+  }
+  open(method: string, url: string) {
+    this.method = method
+    this.url = url
+  }
+  send(body: unknown) {
+    this.body = body
+  }
+  respond(status: number, text: string) {
+    this.status = status
+    this.responseText = text
+    this.onload?.()
+  }
+}
+const XHR = FakeXHR as unknown as typeof XMLHttpRequest
 
 describe('api helpers', () => {
   it('labels every solve status', () => {
@@ -83,5 +115,47 @@ describe('api helpers', () => {
     } catch (err) {
       expect(isSessionLossError(err)).toBe(false)
     }
+  })
+})
+
+describe('uploadForm', () => {
+  it('posts the form, forwards progress and parses the body', async () => {
+    const form = new FormData()
+    const seen: Array<[number, number]> = []
+    const p = uploadForm<{ id: string }>('/api/images', form, (s, t) => seen.push([s, t]), XHR)
+    const xhr = FakeXHR.last!
+    expect(xhr.method).toBe('POST')
+    expect(xhr.url).toBe('/api/images')
+    expect(xhr.body).toBe(form)
+    xhr.upload.onprogress!({ lengthComputable: true, loaded: 5, total: 10 })
+    xhr.upload.onprogress!({ lengthComputable: false, loaded: 0, total: 0 })
+    xhr.respond(201, JSON.stringify({ id: 'img' }))
+    await expect(p).resolves.toEqual({ id: 'img' })
+    expect(seen).toEqual([[5, 10]])
+  })
+
+  it('turns an error status into an ApiError with the server sentence', async () => {
+    const p = uploadForm('/api/images', new FormData(), undefined, XHR)
+    FakeXHR.last!.respond(413, JSON.stringify({ detail: 'The file is larger than 60 MB.' }))
+    await expect(p).rejects.toMatchObject({ status: 413, message: 'The file is larger than 60 MB.' })
+  })
+
+  it('reports a lost session on 401 like request() does', async () => {
+    let called = 0
+    setUnauthorizedHandler(() => {
+      called++
+    })
+    const p = uploadForm('/api/images', new FormData(), undefined, XHR)
+    FakeXHR.last!.respond(401, JSON.stringify({ detail: 'Not signed in.' }))
+    await expect(p).rejects.toBeInstanceOf(ApiError)
+    await expect(p).rejects.toMatchObject({ sessionLost: true })
+    expect(called).toBe(1)
+    setUnauthorizedHandler(null)
+  })
+
+  it('fails in plain language when the server cannot be reached', async () => {
+    const p = uploadForm('/api/images', new FormData(), undefined, XHR)
+    FakeXHR.last!.onerror!()
+    await expect(p).rejects.toThrow('The upload did not reach the server. Check the connection and try again.')
   })
 })
