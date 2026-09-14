@@ -22,7 +22,7 @@ from app.config import CONFIG_FIX_HINT, Settings
 from app.db import Database
 from app.fonts import FontNotFoundError, load_font
 from app.layout import SIZE_RELATIVE
-from app.main import create_app, font_not_found_error
+from app.main import build_app_from_env, create_app, font_not_found_error
 from app.models import MAX_FONT_SIZE, MIN_FONT_SIZE, StyleConfig
 from tests.conftest import (
     FONTS_DIR,
@@ -632,3 +632,25 @@ def test_health_reports_a_broken_config_file(env_client: tuple[TestClient, Path]
     )
     body = client.get("/api/health").json()
     assert body["setup_required"] is False and body["config_error"] is None
+
+
+def test_solve_knobs_come_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("ASTROCAPTION_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ASTROCAPTION_SOLVE_TIMEOUT_SECONDS", "8")
+    monkeypatch.setenv("ASTROCAPTION_SOLVE_POLL_SECONDS", "0.5")
+    app = build_app_from_env()
+    worker = app.state.worker
+    assert worker.timeout == 8.0 and worker.poll_interval == 0.5
+
+
+def test_bad_solve_knobs_fall_back_to_defaults(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("ASTROCAPTION_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ASTROCAPTION_SOLVE_TIMEOUT_SECONDS", "soon")
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        app = build_app_from_env()
+    assert app.state.worker.timeout == 15 * 60
+    assert "ASTROCAPTION_SOLVE_TIMEOUT_SECONDS" in caplog.text

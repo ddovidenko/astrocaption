@@ -58,6 +58,12 @@ a new one inside the running container and logs every browser out; on a source c
 | Default label style | `"default_style"` object in `data/config.json`, or the config page | built-in defaults (size-relative for the four size fields) |
 | Owner password | setup page, or `ASTROCAPTION_PASSWORD` env at first start, or the Config page later | required |
 | Secure cookies | `TRUST_PROXY=1` env when the app is served over HTTPS by a proxy | off |
+| Solve timeout | `ASTROCAPTION_SOLVE_TIMEOUT_SECONDS` env | 900 |
+| Solve poll interval | `ASTROCAPTION_SOLVE_POLL_SECONDS` env | 5 |
+
+Solve timeout and poll interval are not exposed on the config page; they are set once at
+process start. An unset, blank, or non-positive value falls back to the default with a log
+line. The browser test suite sets them low so a timed-out solve can be exercised in seconds.
 
 Values set by environment variables win over `data/config.json`; the config page shows
 them read-only and names the variable that pinned each one. `max_upload_mb` outside 1-1024 is

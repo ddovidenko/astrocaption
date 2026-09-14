@@ -407,6 +407,17 @@ def test_stale_transient_error_is_not_reported_after_a_good_poll(settings: Setti
     assert "Last error" not in got.solve_error
 
 
+def test_timeout_sentence_uses_seconds_under_a_minute(settings: Settings) -> None:
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    solver = FakeSolver(job_polls=10_000)
+    asyncio.run(make_worker(settings, db, solver, timeout=0.05).process(rec.id))
+    got = db.get_image(rec.id)
+    assert got is not None and got.solve_error
+    assert got.solve_error.startswith("Timed out after 0 seconds waiting for nova.astrometry.net.")
+    assert "https://nova.example.test/status/12345678" in got.solve_error
+
+
 def test_delete_during_unexpected_error_is_logged_quietly(
     settings: Settings, caplog: pytest.LogCaptureFixture
 ) -> None:

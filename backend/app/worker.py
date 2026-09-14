@@ -283,11 +283,15 @@ class SolveWorker:
     ) -> None:
         if now < deadline:
             return
-        minutes = round(self.timeout / 60)
+        span = (
+            f"{round(self.timeout)} seconds"
+            if self.timeout < 60
+            else f"{round(self.timeout / 60)} minutes"
+        )
         url = status_url(self.settings.nova_base_url, submission_id)
         detail = f" Last error: {last_error}" if last_error else ""
         raise SolveTimeoutError(
-            f"Timed out after {minutes} minutes waiting for nova.astrometry.net."
+            f"Timed out after {span} waiting for nova.astrometry.net."
             f" Check {url}: if the job finished there, use Check again; otherwise Re-solve.{detail}"
         )
 

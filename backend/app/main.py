@@ -223,4 +223,28 @@ def _mount_spa(app: FastAPI, static_dir: Path) -> None:
         return FileResponse(index)
 
 
-app = create_app(setup_password=os.environ.get("ASTROCAPTION_PASSWORD"))
+def _env_seconds(name: str, default: float) -> float:
+    """A positive number of seconds from the environment, or the default (with one log line)."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 0.0
+    if value <= 0:
+        log.warning("%s=%r is not a positive number of seconds; using %s", name, raw, default)
+        return default
+    return value
+
+
+def build_app_from_env() -> FastAPI:
+    """The process entry point's app: every knob a self-hoster can set comes from the environment."""
+    return create_app(
+        setup_password=os.environ.get("ASTROCAPTION_PASSWORD"),
+        poll_interval=_env_seconds("ASTROCAPTION_SOLVE_POLL_SECONDS", 5.0),
+        solve_timeout=_env_seconds("ASTROCAPTION_SOLVE_TIMEOUT_SECONDS", 15 * 60),
+    )
+
+
+app = build_app_from_env()
