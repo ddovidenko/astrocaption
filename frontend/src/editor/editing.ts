@@ -46,8 +46,10 @@ export function toggleWithPlacement(id: number, measure?: TextMeasurer): void {
 }
 
 /** "Enable shown": every disabled id in `ids` is enabled in one store change. Labels never
- *  moved off their object are placed, each around the ones placed before it, so the whole batch
- *  is one undo entry and a measurement that throws leaves the document untouched. */
+ *  moved off their object are placed, each around the ones placed before it and around the
+ *  batch's other labels that keep a stored position (a previous drag, then disabled) — SPEC
+ *  § 6.3 — so the whole batch is one undo entry and a measurement that throws leaves the
+ *  document untouched. */
 export function enableWithPlacement(ids: number[], measure?: TextMeasurer): void {
   const state = useEditor.getState()
   if (!isEditable(state)) return
@@ -61,7 +63,8 @@ export function enableWithPlacement(ids: number[], measure?: TextMeasurer): void
     if (label.x === obj.x && label.y === obj.y) toPlace.push(id)
   }
   if (toEnable.length === 0) return
-  const placed = placeNewLabels(state, measure ?? getMeasurer(), toPlace)
+  const alsoFixed = toEnable.filter((id) => !toPlace.includes(id))
+  const placed = placeNewLabels(state, measure ?? getMeasurer(), toPlace, alsoFixed)
   const updated: Label[] = toEnable.map((id) => {
     const label = state.labels.get(id)!
     const p = placed.get(id)

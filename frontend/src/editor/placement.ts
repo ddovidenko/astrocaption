@@ -132,11 +132,15 @@ export function placeLabels(
 
 /** Places the labels for `ids`, in that order, each against every other enabled label's box and
  *  marker *and* the ids placed before it in this call: what "Enable shown" needs so the whole
- *  batch is one change. Ids without an object or a label are skipped. */
+ *  batch is one change. `alsoFixed` are ids that are obstacles too but are not placed here —
+ *  labels in the same batch that keep a stored position (SPEC § 6.3: "around the ones before
+ *  it" covers those too, not just the freshly placed ones). Ids without an object or a label are
+ *  skipped, in `ids` and in `alsoFixed` alike. */
 export function placeNewLabels(
   state: EditorState,
   measure: TextMeasurer,
   ids: number[],
+  alsoFixed: number[] = [],
 ): Map<number, { x: number; y: number; collided: boolean }> {
   const out = new Map<number, { x: number; y: number; collided: boolean }>()
   const { image, style } = state
@@ -151,6 +155,14 @@ export function placeNewLabels(
     const b = measureLabel(measure, style, other, o)
     fixedBoxes.push({ left: other.x, top: other.y, right: other.x + b.width, bottom: other.y + b.height })
     fixedCircles.push({ x: o.x, y: o.y, r: markerRadius(o, style) })
+  }
+  for (const id of alsoFixed) {
+    const obj = state.objects.get(id)
+    const label = state.labels.get(id)
+    if (!obj || !label) continue
+    const b = measureLabel(measure, style, label, obj)
+    fixedBoxes.push({ left: label.x, top: label.y, right: label.x + b.width, bottom: label.y + b.height })
+    fixedCircles.push({ x: obj.x, y: obj.y, r: markerRadius(obj, style) })
   }
   for (const id of ids) {
     const obj = state.objects.get(id)

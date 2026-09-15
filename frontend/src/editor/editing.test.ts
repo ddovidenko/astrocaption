@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { disableAll, enableWithPlacement, isEditable, toggleWithPlacement } from './editing'
+import { placeNewLabel } from './placement'
 import { useEditor, type LoadedDocument } from './store'
 import { makeDoc } from './testDoc'
 
@@ -97,6 +98,32 @@ describe('enableWithPlacement / disableAll', () => {
     useEditor.getState().load({ ...doc, image: { ...doc.image, solve_status: 'solving' } })
     enableWithPlacement([2], measure)
     expect(useEditor.getState().labels.get(2)?.enabled).toBe(false)
+  })
+
+  it('a kept-position label in the same batch is an obstacle for the ones being placed', () => {
+    const withThird = makeDoc()
+    withThird.objects.push({ id: 3, catalog_names: ['X'], primary_name: 'X', type: 'ngc', x: 2500, y: 1800, radius: 0 })
+    withThird.annotations.labels.push({ ...withThird.annotations.labels[1]!, object_id: 3 })
+    useEditor.getState().load(withThird)
+
+    // Where 2 would land with nothing else in the way. placeNewLabel reads the store but does not
+    // write it, so label 2 is still sitting on its object afterwards, exactly as enableWithPlacement
+    // will find it below.
+    const state = useEditor.getState()
+    const label2 = state.labels.get(2)!
+    const obj2 = state.objects.get(2)!
+    const unblocked = placeNewLabel(state, measure, 2)!
+    expect([label2.x, label2.y]).toEqual([obj2.x, obj2.y])
+
+    // 3 was dragged off its object (disabled) to exactly where 2 would otherwise land.
+    useEditor.getState().moveLabel(3, unblocked.x, unblocked.y)
+
+    enableWithPlacement([2, 3], measure)
+    const placed2 = useEditor.getState().labels.get(2)!
+    expect(placed2.enabled).toBe(true)
+    expect([placed2.x, placed2.y]).not.toEqual([unblocked.x, unblocked.y])
+    const placed3 = useEditor.getState().labels.get(3)!
+    expect(placed3).toMatchObject({ enabled: true, x: unblocked.x, y: unblocked.y })
   })
 })
 
