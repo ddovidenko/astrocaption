@@ -130,6 +130,49 @@ export function placeLabels(
   return items.map((it) => result.get(it.id)!)
 }
 
+/** Places the labels for `ids`, in that order, each against every other enabled label's box and
+ *  marker *and* the ids placed before it in this call: what "Enable shown" needs so the whole
+ *  batch is one change. Ids without an object or a label are skipped. */
+export function placeNewLabels(
+  state: EditorState,
+  measure: TextMeasurer,
+  ids: number[],
+): Map<number, { x: number; y: number; collided: boolean }> {
+  const out = new Map<number, { x: number; y: number; collided: boolean }>()
+  const { image, style } = state
+  if (!image || !style) return out
+  const wanted = new Set(ids)
+  const fixedBoxes: Box[] = []
+  const fixedCircles: Circle[] = []
+  for (const other of enabledLabels(state)) {
+    if (wanted.has(other.object_id)) continue
+    const o = state.objects.get(other.object_id)
+    if (!o) continue
+    const b = measureLabel(measure, style, other, o)
+    fixedBoxes.push({ left: other.x, top: other.y, right: other.x + b.width, bottom: other.y + b.height })
+    fixedCircles.push({ x: o.x, y: o.y, r: markerRadius(o, style) })
+  }
+  for (const id of ids) {
+    const obj = state.objects.get(id)
+    const label = state.labels.get(id)
+    if (!obj || !label) continue
+    const box = measureLabel(measure, style, label, obj)
+    const r = markerRadius(obj, style)
+    const [p] = placeLabels(
+      image.width,
+      image.height,
+      [{ id, x: obj.x, y: obj.y, radius: r, w: box.width, h: box.height }],
+      fixedBoxes,
+      fixedCircles,
+    )
+    if (!p) continue
+    out.set(id, { x: p.x, y: p.y, collided: p.collided })
+    fixedBoxes.push({ left: p.x, top: p.y, right: p.x + box.width, bottom: p.y + box.height })
+    fixedCircles.push({ x: obj.x, y: obj.y, r })
+  }
+  return out
+}
+
 /** The object's label measured with the current style, placed against every other enabled
  *  label's box and marker; null when the object or style is missing. */
 export function placeNewLabel(
@@ -137,27 +180,5 @@ export function placeNewLabel(
   measure: TextMeasurer,
   id: number,
 ): { x: number; y: number; collided: boolean } | null {
-  const { image, style } = state
-  const obj = state.objects.get(id)
-  const label = state.labels.get(id)
-  if (!image || !style || !obj || !label) return null
-  const box = measureLabel(measure, style, label, obj)
-  const fixedBoxes: Box[] = []
-  const fixedCircles: Circle[] = []
-  for (const other of enabledLabels(state)) {
-    if (other.object_id === id) continue
-    const o = state.objects.get(other.object_id)
-    if (!o) continue
-    const b = measureLabel(measure, style, other, o)
-    fixedBoxes.push({ left: other.x, top: other.y, right: other.x + b.width, bottom: other.y + b.height })
-    fixedCircles.push({ x: o.x, y: o.y, r: markerRadius(o, style) })
-  }
-  const [p] = placeLabels(
-    image.width,
-    image.height,
-    [{ id, x: obj.x, y: obj.y, radius: markerRadius(obj, style), w: box.width, h: box.height }],
-    fixedBoxes,
-    fixedCircles,
-  )
-  return p ? { x: p.x, y: p.y, collided: p.collided } : null
+  return placeNewLabels(state, measure, [id]).get(id) ?? null
 }

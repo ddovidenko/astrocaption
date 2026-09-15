@@ -255,10 +255,16 @@ export const useEditor = create<EditorState>()((set) => ({
     set((s) => {
       const labels = new Map(s.labels)
       for (const label of updated) {
-        if (!labels.has(label.object_id)) continue
+        // Unreachable from the server (one label per object), so a mismatch is a bug: say so.
+        if (!labels.has(label.object_id)) throw new Error(`applyLabels: no label for object ${label.object_id}`)
         labels.set(label.object_id, label)
       }
-      return changedDoc(s, { labels })
+      const patch = changedDoc(s, { labels })
+      // As in toggleObject: a label disabled by this change has nothing on the canvas to select.
+      if ('labels' in patch && s.selectedId !== null && labels.get(s.selectedId)?.enabled === false) {
+        patch.selectedId = null
+      }
+      return patch
     }),
   markSaving: () => set({ pendingChanges: 0, save: { status: 'saving', message: null } }),
   markSaved: (version, updatedAt) =>

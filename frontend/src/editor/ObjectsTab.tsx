@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ObjectOut } from '../api'
-import { isEditable, toggleWithPlacement } from './editing'
+import { disableAll, enableWithPlacement, isEditable, toggleWithPlacement } from './editing'
 import { CHIPS, CHIP_LABELS, DEFAULT_CHIPS, filterObjects, type Chip } from './objectsFilter'
 import { useEditor } from './store'
 
@@ -36,22 +36,16 @@ export default function ObjectsTab() {
       return next
     })
 
-  // Only the rows that would change are touched, so "Enable shown" never disables anything and
-  // a second click is a no-op. Each toggle reads the store afresh, so the placer sees the labels
-  // enabled by the previous iteration and fits the next one around them. A throw part-way through
-  // (the measurer, or a stale font) leaves the rows before it changed: say how far it got instead
-  // of leaving the list half-changed with no explanation.
+  // One store change for the whole batch: one undo entry, one autosave, and a measurement that
+  // throws (a stale font) leaves the list exactly as it was — the error says so.
   const bulk = (enable: boolean) => {
     setError(null)
-    const targets = rows.filter((obj) => (labels.get(obj.id)?.enabled ?? enable) !== enable)
-    let done = 0
+    const ids = rows.map((obj) => obj.id)
     try {
-      for (const obj of targets) {
-        toggleWithPlacement(obj.id)
-        done++
-      }
+      if (enable) enableWithPlacement(ids)
+      else disableAll(ids)
     } catch {
-      setError(`Only ${done} of ${targets.length} labels could be changed.`)
+      setError('The labels could not be changed; nothing was altered.')
     }
   }
 

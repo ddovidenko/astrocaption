@@ -158,7 +158,7 @@ describe('document actions', () => {
   it('moveLabel sets the position and clears collided', () => {
     const s = useEditor.getState()
     s.load(doc)
-    s.applyLabels([{ ...s.labels.get(1)!, collided: true }])
+    s.applyLabels([{ ...useEditor.getState().labels.get(1)!, collided: true }])
     s.moveLabel(1, 10, 20)
     expect(useEditor.getState().labels.get(1)).toMatchObject({ x: 10, y: 20, collided: false })
   })
@@ -190,11 +190,11 @@ describe('document actions', () => {
     const out = documentForSave(useEditor.getState())
     expect(out.labels.map((l) => l.object_id)).toEqual([1, 2])
   })
-  it('applyLabels never inserts a label for an id the store does not have', () => {
+  it('applyLabels throws on an id the store does not have', () => {
     const s = useEditor.getState()
     s.load(doc)
     const label = useEditor.getState().labels.get(1)!
-    s.applyLabels([{ ...label, object_id: 42 }])
+    expect(() => s.applyLabels([{ ...label, object_id: 42 }])).toThrow('applyLabels: no label for object 42')
     expect(useEditor.getState().labels.has(42)).toBe(false)
   })
   it('save state: dirty → saving → saved, but stays dirty if a change landed during the save', () => {

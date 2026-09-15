@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { isEditable, toggleWithPlacement } from './editing'
+import { disableAll, enableWithPlacement, isEditable, toggleWithPlacement } from './editing'
 import { useEditor, type LoadedDocument } from './store'
 import { makeDoc } from './testDoc'
 
@@ -67,6 +67,36 @@ describe('toggleWithPlacement', () => {
     expect(isEditable(useEditor.getState())).toBe(true)
     toggleWithPlacement(2, measure)
     expect(useEditor.getState().labels.get(2)?.enabled).toBe(true)
+  })
+})
+
+describe('enableWithPlacement / disableAll', () => {
+  it('enables every id in one change (one undo entry) and places the unplaced ones', () => {
+    useEditor.getState().load(doc)
+    const seq = useEditor.getState().changeSeq
+    enableWithPlacement([2], measure)
+    const s = useEditor.getState()
+    expect(s.labels.get(2)?.enabled).toBe(true)
+    expect(s.changeSeq).toBe(seq + 1)
+    expect(s.undo).toHaveLength(1)
+  })
+  it('keeps the stored position of a label placed before', () => {
+    useEditor.getState().load(doc)
+    useEditor.getState().moveLabel(2, 100, 200)
+    enableWithPlacement([2], measure)
+    expect(useEditor.getState().labels.get(2)).toMatchObject({ enabled: true, x: 100, y: 200 })
+  })
+  it('disableAll disables in one change and leaves positions alone', () => {
+    useEditor.getState().load(doc)
+    const { x, y } = useEditor.getState().labels.get(1)!
+    disableAll([1, 2])
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ enabled: false, x, y })
+    expect(useEditor.getState().undo).toHaveLength(1)
+  })
+  it('does nothing while a solve is running', () => {
+    useEditor.getState().load({ ...doc, image: { ...doc.image, solve_status: 'solving' } })
+    enableWithPlacement([2], measure)
+    expect(useEditor.getState().labels.get(2)?.enabled).toBe(false)
   })
 })
 
