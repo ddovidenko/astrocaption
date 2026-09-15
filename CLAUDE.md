@@ -96,6 +96,10 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
 - Review ritual before a milestone PR: `/code-review high`, then a silent-failure pass
   (pr-review-toolkit agent) on the diff, then `/simplify`; fix, re-run `make lint test`, and let the
   owner smoke-test on `make dev` before committing.
+- `make install` refuses to run `npm ci` while the `astrocaption-dev` unit is active (Vite would keep serving
+  stale bundle hashes: 504 "Outdated Optimize Dep", blank page, no error). Stop the unit first, or
+  `make install FORCE=1` to have it restarted afterwards. Same fix if you ever see those 504s:
+  `sudo systemctl restart astrocaption-dev`.
 - Don't switch git branches that add or remove `frontend/vite.config.ts` while `make dev` runs: Vite
   restarts without the `/api` proxy and the page goes blank (`make e2e`'s dev-proxy project catches a
   `vite.config.ts` that lost the proxy; it cannot see a live-restart). Stop the servers first (kill by

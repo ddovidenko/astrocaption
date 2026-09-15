@@ -5,6 +5,8 @@ SHELL := /bin/bash
 VENV      := backend/.venv
 PY        := $(VENV)/bin/python
 NPM       := npm --prefix frontend
+# True when the `make dev-service` systemd unit is serving (false where systemd is absent).
+DEV_UNIT_ACTIVE := command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet astrocaption-dev
 
 .PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors render-vectors names-catalog fonts record-fixtures favicons e2e-fixture e2e clean
 
@@ -19,9 +21,19 @@ $(VENV)/.installed: backend/pyproject.toml
 	$(VENV)/bin/pip install --quiet -e "backend[dev]"
 	touch $@
 
+# `npm ci` wipes node_modules, including Vite's pre-bundle cache (node_modules/.vite/deps).
+# A Vite that is already serving keeps handing out the old bundle hashes and every React
+# import answers 504 "Outdated Optimize Dep" (issue #61). Refuse while the dev unit runs,
+# unless FORCE=1, in which case the unit is restarted afterwards.
 frontend/node_modules: frontend/package.json frontend/package-lock.json
+	@if $(DEV_UNIT_ACTIVE) && [ "$(FORCE)" != "1" ]; then \
+	  echo "error: astrocaption-dev is running; npm ci would break its Vite instance." >&2; \
+	  echo "       Stop it first (sudo systemctl stop astrocaption-dev) or run: make install FORCE=1  (restarts the unit afterwards)" >&2; \
+	  exit 1; \
+	fi
 	$(NPM) ci --no-audit --no-fund
 	touch $@
+	@if $(DEV_UNIT_ACTIVE); then echo "restarting astrocaption-dev (node_modules were replaced)"; sudo systemctl restart astrocaption-dev; fi
 
 dev: install ## Backend on :8000 (uvicorn --reload) + Vite on :5173 with proxy
 	$(MAKE) -j2 dev-backend dev-frontend
