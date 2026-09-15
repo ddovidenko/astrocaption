@@ -43,16 +43,22 @@ export default function StyleTab() {
   // and reschedule it.
   const numberTimers = useRef<Partial<Record<NumberKey, PendingNumberCommit>>>({})
 
-  // Any still-pending debounced number commit is stale the moment `style` moves to a new object —
-  // from elsewhere (undo/redo/reset) or from its own commit landing — so every pending timer is
-  // cancelled whenever that happens, and on unmount. An effect, not the render body below: refs
-  // may be read and written only outside render (react-hooks/refs).
+  // Whenever `style` moves to a new object — from its own commit landing, from elsewhere
+  // (undo/redo/reset), or from the component unmounting (switching tabs never blurs the input
+  // first, so discarding here would silently drop a still-in-flight, already-valid edit) — every
+  // still-pending debounced commit is flushed, not discarded: its captured patch commits now
+  // rather than waiting out the rest of its 400ms. An effect, not the render body below: refs may
+  // be read and written only outside render (react-hooks/refs).
   useEffect(() => {
     return () => {
-      for (const entry of Object.values(numberTimers.current)) if (entry) clearTimeout(entry.timer)
+      for (const entry of Object.values(numberTimers.current)) {
+        if (!entry) continue
+        clearTimeout(entry.timer)
+        setStyle(entry.patch)
+      }
       numberTimers.current = {}
     }
-  }, [style])
+  }, [style, setStyle])
 
   // The store is the source of truth: undo/redo, a reset and every commit re-derive the draft.
   // Adjusted during render rather than in an effect (react-hooks/set-state-in-effect; the React

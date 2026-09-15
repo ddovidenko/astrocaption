@@ -211,7 +211,9 @@ describe('document actions', () => {
       fontFallback: { stored: 'Gone.ttf', used: 'Inter-Regular.ttf' },
     })
     const styleBefore = useEditor.getState().style
-    useEditor.getState().setStyle({ font_file: 'Inter-Regular.ttf' })
+    // A genuine change again (not a same-value patch): otherwise the no-op guard above would
+    // refuse it for that reason, not for the not-editable reason this block means to test.
+    useEditor.getState().setStyle({ font_file: 'Lato-Regular.ttf' })
     expect(useEditor.getState().fontFallback).toEqual({ stored: 'Gone.ttf', used: 'Inter-Regular.ttf' })
     expect(useEditor.getState().style).toBe(styleBefore)
   })

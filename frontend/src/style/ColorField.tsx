@@ -2,6 +2,10 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { HexColorInput, HexColorPicker } from 'react-colorful'
 import { normalizeHex } from './styleForm'
 
+/** The popover's width (styles.css: `.popover { min-width: ... }`), used to decide at open time
+ *  whether it would run off the right edge of its container. */
+export const POPOVER_WIDTH = 232
+
 /** A colour override: a swatch that opens an in-page picker, never the OS dialog. */
 export default function ColorField({
   label,
@@ -26,6 +30,12 @@ export default function ColorField({
   onCommit?: () => void
 }) {
   const [open, setOpen] = useState(false)
+  // Whether the popover would run off the right edge of its container (the side panel, a config
+  // page panel, or the viewport) if opened left-aligned under the swatch — decided by measurement
+  // at open time, not by which grid column the field happens to land in: a `.span2` row ahead of
+  // it can shift every field after it into the other column, so column parity does not track
+  // which side has room (#94 IMPORTANT 4).
+  const [alignRight, setAlignRight] = useState(false)
   // Guards against a close reaching us twice for one interaction (mousedown fires on the
   // document before a blur's focusout bubbles), so onCommit fires exactly once per close.
   const openRef = useRef(false)
@@ -50,6 +60,12 @@ export default function ColorField({
   const openPicker = () => {
     openRef.current = true
     setOpen(true)
+    const wrapEl = wrap.current
+    if (wrapEl) {
+      const wrapRect = wrapEl.getBoundingClientRect()
+      const bound = (wrapEl.closest('.side-panel-body, .panel') ?? document.documentElement).getBoundingClientRect()
+      setAlignRight(wrapRect.left + POPOVER_WIDTH > bound.right)
+    }
   }
   /** Every way out of the picker: once per close, whichever event gets there first. */
   const closePicker = (refocus: boolean) => {
@@ -107,7 +123,7 @@ export default function ColorField({
         </span>
       </button>
       {open && (
-        <div className="popover" role="dialog" aria-label={`${label} picker`}>
+        <div className={alignRight ? 'popover popover-right' : 'popover'} role="dialog" aria-label={`${label} picker`}>
           <HexColorPicker color={shown} onChange={pick} />
           <div className="popover-row">
             <HexColorInput color={shown} onChange={typed} prefixed />

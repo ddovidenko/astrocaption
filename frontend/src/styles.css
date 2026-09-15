@@ -82,11 +82,10 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
 .swatch-note { color: var(--muted); font-size: 0.8rem; font-weight: 400; }
 .popover { position: absolute; z-index: 10; top: calc(100% + 0.4rem); left: 0; min-width: 232px; display: grid; gap: 0.6rem; padding: 0.75rem; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); }
 .popover .react-colorful { width: 200px; height: 160px; }
-.grid3 > :nth-child(3n) .popover { left: auto; right: 0; } /* the last column opens leftwards, so it stays on screen */
-/* The side panel's .grid3 is two columns wide (below), not three: undo the three-column flip and
-   redo it for two columns. Must come after the rule above — same specificity, later wins. */
-.side-panel .grid3 > :nth-child(3n) .popover { left: 0; right: auto; }
-.side-panel .grid3 > :nth-child(2n) .popover { left: auto; right: 0; }
+/* Which side a popover opens on is decided by ColorField at open time, by measuring against its
+   container (POPOVER_WIDTH there matches this rule's min-width, above) — not by grid column
+   parity, which a `.span2` row ahead of a field can throw off. */
+.popover-right { left: auto; right: 0; }
 .popover-row { display: flex; gap: 0.5rem; align-items: center; }
 .popover-row button { white-space: nowrap; }
 .popover-row input { width: 6.5rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 0.35rem 0.5rem; font: inherit; font-variant-numeric: tabular-nums; }

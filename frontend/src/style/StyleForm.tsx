@@ -67,9 +67,11 @@ export default function StyleForm({
           onChange={(e) => onChange(key, e.target.value)}
           onBlur={() => onNumberFlush?.(key)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
+            // Only the Style tab passes onNumberFlush; the config page's number inputs have no
+            // debounce to flush, and Enter there must still submit the form as it always has.
+            if (e.key === 'Enter' && onNumberFlush) {
               e.preventDefault()
-              onNumberFlush?.(key)
+              onNumberFlush(key)
             }
           }}
         />
