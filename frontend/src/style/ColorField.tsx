@@ -3,10 +3,11 @@ import { HexColorInput, HexColorPicker } from 'react-colorful'
 import { normalizeHex } from './styleForm'
 
 /** The popover's width (styles.css: `.popover { min-width: ... }`), used to decide at open time
- *  whether it would run off the right edge of its container. Overrides mode (`allowDefault`)
- *  renders an extra "Use default" button beside the hex input, so `openPicker` below measures
- *  against a wider figure there instead of this one. */
+ *  whether it would run off the right edge of its container. */
 export const POPOVER_WIDTH = 232
+/** Overrides mode (`allowDefault`) renders an extra "Use default" button beside the hex input, so
+ *  `openPicker` below measures against this wider figure there instead of `POPOVER_WIDTH`. */
+export const POPOVER_WIDTH_WITH_DEFAULT = 248
 
 /** A colour override: a swatch that opens an in-page picker, never the OS dialog. */
 export default function ColorField({
@@ -28,8 +29,11 @@ export default function ColorField({
   allowDefault?: boolean
   disabled?: boolean
   onChange: (hex: string) => void
-  /** A colour picker closed or a hex was typed — commit the current value. */
-  onCommit?: () => void
+  /** A colour picker closed or a hex was typed — commit the current value. A typed commit carries
+   *  the just-typed hex, since the draft `onChange` set a moment earlier has not necessarily
+   *  reached the caller's own state yet (StyleTab reads `draft` a render behind a keystroke); a
+   *  close carries nothing, so the caller commits whatever it already has. */
+  onCommit?: (hex?: string) => void
 }) {
   const [open, setOpen] = useState(false)
   // Whether the popover would run off the right edge of its container (the side panel, a config
@@ -57,7 +61,7 @@ export default function ColorField({
   const pick = (hex: string) => onChange(normalizeHex(hex))
   const typed = (hex: string) => {
     pick(hex)
-    onCommitRef.current?.()
+    onCommitRef.current?.(normalizeHex(hex))
   }
   const openPicker = () => {
     openRef.current = true
@@ -66,7 +70,7 @@ export default function ColorField({
     if (wrapEl) {
       const wrapRect = wrapEl.getBoundingClientRect()
       const bound = (wrapEl.closest('.side-panel-body, .panel') ?? document.documentElement).getBoundingClientRect()
-      const width = allowDefault ? 248 : POPOVER_WIDTH
+      const width = allowDefault ? POPOVER_WIDTH_WITH_DEFAULT : POPOVER_WIDTH
       setAlignRight(wrapRect.left + width > bound.right)
     }
   }

@@ -144,8 +144,11 @@ export default function StyleTab() {
     if (patch) setStyle(patch)
   }
 
-  const onColorCommit = (key: ColorKey) => {
-    const patch = patchForField(key, draft[key])
+  const onColorCommit = (key: ColorKey, hex?: string) => {
+    // A typed commit carries the just-typed hex, since `draft` here is whatever the last render
+    // captured — a keystroke's onChange and its onCommit both fire before this closure's own
+    // component re-renders, so `draft[key]` can still be the pre-keystroke value (#B).
+    const patch = patchForField(key, hex ?? draft[key])
     if (patch) setStyle(patch)
   }
 
@@ -161,8 +164,10 @@ export default function StyleTab() {
       useEditor.getState().setStyle({ font_file: file })
     } catch (err) {
       setFontError(pageError(err))
+      // Restore only the font field: the rest of the draft may hold edits (a number mid-debounce,
+      // say) that a failed font load must not discard.
       const current = useEditor.getState().style
-      if (current) setDraft(styleFormFromConfig(current))
+      if (current) setDraft((d) => (d ? { ...d, font_file: current.font_file } : d))
     } finally {
       setFontLoading(null)
     }

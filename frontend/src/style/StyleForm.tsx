@@ -26,8 +26,10 @@ export interface StyleFormProps {
   /** Shown under the font select (a fallback notice, "Loading…", or a load error). */
   fontNote?: string | null
   onChange: <K extends keyof StyleFormValues>(key: K, value: StyleFormValues[K]) => void
-  /** values mode only: a colour picker closed or a hex was typed — commit the current value. */
-  onColorCommit?: (key: ColorKey) => void
+  /** values mode only: a colour picker closed or a hex was typed — commit the current value.
+   *  `hex` is set for a typed commit (the just-typed value); undefined for a close, where the
+   *  caller commits whatever it already has for `key`. */
+  onColorCommit?: (key: ColorKey, hex?: string) => void
   /** values mode only: a number field lost focus, or Enter was pressed in it — commit its
    *  currently-debounced value at once rather than waiting out the debounce. */
   onNumberFlush?: (key: NumberKey) => void
@@ -97,7 +99,7 @@ export default function StyleForm({
       allowDefault={overrides}
       disabled={disabled}
       onChange={(hex) => onChange(key, hex)}
-      onCommit={() => onColorCommit?.(key)}
+      onCommit={(hex) => onColorCommit?.(key, hex)}
     />
   )
   const fontMissing = values.font_file !== '' && !fontList.some((f) => f.file === values.font_file)
