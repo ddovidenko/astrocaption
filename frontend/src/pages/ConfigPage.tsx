@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { api, pageError, type ConfigOut, type FontOut, type HealthOut } from '../api'
 import ColorField from './ColorField'
+import { MAX_ALIASES } from '../editor/names'
 import { buildUpdate, otherPreference, PREFERENCE_LABELS, styleFormFromOverrides, type StyleForm, type Tri } from './configForm'
 import LabelPreview from './LabelPreview'
 
 type ColorKey = 'text_color' | 'marker_color' | 'leader_color' | 'halo_color'
-type SizeKey = 'font_size' | 'halo_width' | 'marker_width' | 'marker_min_radius' | 'max_aliases'
+type NumberKey = 'font_size' | 'halo_width' | 'marker_width' | 'marker_min_radius' | 'max_aliases'
 
 const FONTS_UNAVAILABLE = 'The font list could not be loaded; the saved font is kept.'
 const HEADER_NOT_REFRESHED = 'Saved, but the page header could not be refreshed; reload to see the new title.'
@@ -99,14 +100,14 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
   }
 
   const d = config.style_defaults
-  const sizeField = (label: string, key: SizeKey, min: number, max: number) => (
+  const sizeField = (label: string, key: NumberKey, min: number, max: number, placeholder = 'auto') => (
     <label className="field" key={key}>
       <span className="field-label">{label}</span>
       <input
         type="number"
         min={min}
         max={max}
-        placeholder="auto"
+        placeholder={placeholder}
         value={style[key]}
         onChange={(e) => setField(key, e.target.value)}
       />
@@ -224,7 +225,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
             </select>
           </label>
           {triField('Alias line', 'show_aliases')}
-          {sizeField('Aliases shown (max)', 'max_aliases', 0, 5)}
+          {sizeField('Aliases shown (max)', 'max_aliases', 0, MAX_ALIASES, `Default (${d.max_aliases})`)}
           {colorField('Text colour', 'text_color')}
           {colorField('Marker colour', 'marker_color')}
           {colorField('Leader colour', 'leader_color')}
