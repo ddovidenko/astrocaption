@@ -1,5 +1,5 @@
 import type { NamePreference, StyleDefaults } from '../api'
-import { aliasNames, primaryName } from '../editor/names'
+import { MAX_ALIASES, aliasNames, primaryName } from '../editor/names'
 import { ALIAS_SCALE, ALIAS_SEP, LINE_HEIGHT } from '../editor/metrics'
 import type { StyleForm } from './configForm'
 
@@ -15,6 +15,15 @@ const SAMPLE = ['NGC 1976', 'M 42', 'LBN 974', 'Great Orion Nebula', 'Orion Nebu
 export function previewLines(preference: '' | NamePreference, fallback: NamePreference, maxAliases: number) {
   const p = preference || fallback
   return { primary: primaryName(SAMPLE, p), aliases: aliasNames(SAMPLE, p, maxAliases).join(ALIAS_SEP) }
+}
+
+/** Clamp the raw max-aliases field to what the API accepts: blank or unparseable falls back to
+ *  `fallback`, everything else is truncated and clamped to 0..MAX_ALIASES. */
+export function previewCap(raw: string, fallback: number): number {
+  if (raw.trim() === '') return fallback
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(MAX_ALIASES, Math.max(0, Math.trunc(n)))
 }
 
 export interface PreviewGeometry {

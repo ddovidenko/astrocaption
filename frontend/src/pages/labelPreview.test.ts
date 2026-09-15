@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { StyleDefaults } from '../api'
 import { fontFamilyFor } from '../editor/metrics'
 import { styleFormFromOverrides } from './configForm'
-import { previewGeometry, previewLines } from './labelPreview'
+import { previewCap, previewGeometry, previewLines } from './labelPreview'
 
 const defaults: StyleDefaults = {
   font_file: 'Inter-Regular.ttf',
@@ -39,5 +39,13 @@ describe('label preview', () => {
     const bigger = previewGeometry(styleFormFromOverrides({ font_size: 48, marker_width: 4 }), defaults)
     expect(bigger.markerWidth).toBeCloseTo(base.markerWidth) // same ratio to the font, same look
     expect(previewGeometry(styleFormFromOverrides({ halo: false }), defaults).haloWidth).toBe(0)
+  })
+
+  it('clamps the max-aliases field to 0..MAX_ALIASES, falling back on blank or unparseable input', () => {
+    expect(previewCap('', 2)).toBe(2)
+    expect(previewCap('3', 2)).toBe(3)
+    expect(previewCap('-1', 2)).toBe(0)
+    expect(previewCap('9', 2)).toBe(5)
+    expect(previewCap('abc', 2)).toBe(2)
   })
 })
