@@ -103,6 +103,8 @@ test('first run: setup, sign in, solve, export, edit, config, sign out', async (
   await expect
     .poll(async () => (await storedLabel(label!.id))?.x ?? Number.NEGATIVE_INFINITY, { timeout: 3_000 })
     .toBeGreaterThan(label!.x)
+  // Same horizontal-only move as the original drag: redo did not touch y either.
+  expect((await storedLabel(label!.id))!.y).toBeCloseTo(label!.y, 0)
 
   // Layout tab: Auto-arrange flushes the pending drag save, re-places every enabled label, and the
   // result is itself autosaved back to "Saved" — a new stored version is the proof it ran.

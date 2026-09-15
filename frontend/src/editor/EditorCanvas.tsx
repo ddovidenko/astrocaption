@@ -107,7 +107,9 @@ interface EntryProps {
 }
 
 /** One object's marker, leader and draggable label. Memoised on the cached `Entry`, so a drag
- *  frame re-renders the dragged label only, not every label on the layer. */
+ *  frame re-renders the dragged label only, not every label on the layer. `spacePan` is a plain
+ *  prop, not part of `Entry`, so a Space press or release still re-renders every label once (it
+ *  flips `draggable` on each of them). */
 const LabelEntry = memo(function LabelEntry({
   entry: { label, obj, box, text, seg, leader },
   style,

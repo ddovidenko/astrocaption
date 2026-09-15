@@ -44,7 +44,8 @@ export default function ObjectsTab() {
     try {
       if (enable) enableWithPlacement(ids)
       else disableAll(ids)
-    } catch {
+    } catch (err) {
+      console.error('bulk change failed', err)
       setError('The labels could not be changed; nothing was altered.')
     }
   }
