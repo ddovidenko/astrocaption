@@ -376,6 +376,20 @@ export default function EditorCanvas() {
         spaceRef.current = true
         return
       }
+      // Undo/redo: Ctrl (Cmd on macOS) + Z / Y / Shift+Z. Fields keep their own undo.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !inField()) {
+        const key = e.key.toLowerCase()
+        if (key === 'z' && !e.shiftKey) {
+          e.preventDefault()
+          useEditor.getState().undoLast()
+          return
+        }
+        if (key === 'y' || (key === 'z' && e.shiftKey)) {
+          e.preventDefault()
+          useEditor.getState().redoLast()
+          return
+        }
+      }
       if (inField() || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === 'f' || e.key === 'F') useEditor.getState().fit()
       else if (e.key === '1') useEditor.getState().actual()
