@@ -15,6 +15,7 @@ export interface StyleForm {
   marker_width: string
   marker_min_radius: string
   show_aliases: Tri
+  max_aliases: string
   name_preference: '' | NamePreference
 }
 
@@ -34,6 +35,7 @@ export function styleFormFromOverrides(o: StyleOverrides): StyleForm {
     marker_width: str(o.marker_width),
     marker_min_radius: str(o.marker_min_radius),
     show_aliases: tri(o.show_aliases),
+    max_aliases: str(o.max_aliases),
     name_preference: o.name_preference ?? '',
   }
 }
@@ -61,9 +63,21 @@ export function overridesFromStyleForm(f: StyleForm): StyleOverrides {
     marker_width: num(f.marker_width),
     marker_min_radius: num(f.marker_min_radius),
     show_aliases: bool(f.show_aliases),
+    max_aliases: num(f.max_aliases),
     name_preference: f.name_preference === '' ? undefined : f.name_preference,
   }
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as StyleOverrides
+}
+
+/** The dropdown wording for each name preference (SPEC § 6.3). */
+export const PREFERENCE_LABELS: Record<NamePreference, string> = {
+  popular: 'Messier, Caldwell, Sharpless, Barnard first',
+  ngc_ic: 'NGC and IC first',
+}
+
+/** The one value that differs from `p`: the only explicit choice the config page offers (#73). */
+export function otherPreference(p: NamePreference): NamePreference {
+  return p === 'popular' ? 'ngc_ic' : 'popular'
 }
 
 /** True when two override sets carry the same fields and values, whatever their key order.

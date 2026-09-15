@@ -17,10 +17,12 @@ const defaults: StyleDefaults = {
 }
 
 describe('label preview', () => {
-  it('puts the preferred catalogue first', () => {
-    expect(previewLines('', 'popular').primary).toBe('M 42')
-    expect(previewLines('', 'ngc_ic').primary).toBe('NGC 1976')
-    expect(previewLines('ngc_ic', 'popular')).toEqual({ primary: 'NGC 1976', aliases: 'M 42 · Orion Nebula' })
+  it('builds the sample lines from the alias policy and the cap', () => {
+    expect(previewLines('', 'popular', 2)).toEqual({ primary: 'M 42', aliases: 'Great Orion Nebula · NGC 1976' })
+    expect(previewLines('', 'ngc_ic', 2)).toEqual({ primary: 'NGC 1976', aliases: 'Great Orion Nebula · M 42' })
+    expect(previewLines('ngc_ic', 'popular', 5).aliases).toBe('Great Orion Nebula · M 42 · LBN 974')
+    expect(previewLines('popular', 'popular', 1).aliases).toBe('Great Orion Nebula')
+    expect(previewLines('popular', 'popular', 0).aliases).toBe('')
   })
 
   it('names the font family after the file stem', () => {
