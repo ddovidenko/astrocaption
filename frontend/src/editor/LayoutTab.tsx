@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ApiError, api, pageError } from '../api'
+import { ApiError, api } from '../api'
 import ConfirmInline from '../ConfirmInline'
 import { flushSave } from './autosave'
 import { isEditable } from './editing'
@@ -46,6 +46,10 @@ export default function LayoutTab() {
         setError('Labels moved while the layout was being arranged; nothing was changed. Try again.')
         return
       }
+      // The owner may have opened a different image while the request was in flight (`load()`
+      // resets `changeSeq` to 0, so the guard above would not catch that); applying image A's
+      // labels to image B would be silently wrong, so just walk away.
+      if (useEditor.getState().image?.id !== imageId) return
       useEditor.getState().applyLabels(res.labels)
     } catch (err) {
       // A 409 is the same stale-document story the autosave tells, so the sentence with the
@@ -53,7 +57,12 @@ export default function LayoutTab() {
       if (err instanceof ApiError && err.status === 409) {
         useEditor.getState().markConflict(err.message)
         setError('The layout was not arranged; see the message in the toolbar.')
-      } else setError(pageError(err))
+      } else {
+        // Anything else (including applyLabels' "no label for object N" bug guard) must not reach
+        // the page as raw exception text (CLAUDE.md hard rule).
+        console.error('autoarrange apply failed', err)
+        setError('The arranged layout could not be applied; reload the editor.')
+      }
     } finally {
       setBusy(null)
     }
