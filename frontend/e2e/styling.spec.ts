@@ -1,4 +1,5 @@
 import { expect, test } from './fixtures'
+import type { Annotations, StyleConfig } from '../src/api'
 import { ensureSetUpAndSignedIn, ensureSolvedImage } from './helpers'
 
 // Style tab (SPEC § 6.3): a number field commits its debounced value and autosaves it, Ctrl+Z
@@ -14,10 +15,10 @@ test('the Style tab changes the font size live, autosaves it, and Ctrl+Z takes i
 
   const imageId = /\/images\/([^/?#]+)/.exec(page.url())?.[1]
   expect(imageId, `no image id in ${page.url()}`).toBeTruthy()
-  const stored = async (): Promise<{ style: { font_size: number; font_file: string }; version: number }> => {
+  const stored = async (): Promise<Annotations> => {
     const res = await page.request.get(`/api/images/${imageId}/annotations`)
     expect(res.status()).toBe(200)
-    return (await res.json()) as { style: { font_size: number; font_file: string }; version: number }
+    return (await res.json()) as Annotations
   }
   const before = await stored()
 
@@ -39,16 +40,12 @@ test('the Style tab changes the font size live, autosaves it, and Ctrl+Z takes i
   await page.keyboard.press('Control+z')
   await expect.poll(async () => (await stored()).style.font_size, { timeout: 5_000 }).toBe(before.style.font_size)
 
-  // Picking another bundled font swaps it only after the browser has loaded that face.
-  // getByLabel('Font') doesn't work here: the <select> is wrapped in its <label> rather than
-  // referenced by it, so the browser folds the select's own selected-option text into the
-  // label's accessible name (e.g. "Font" + "Fira Sans Bold") — never just "Font", exact or not,
-  // and loosely it also matches "Font size (px)". Find the field by its field-label text
-  // instead, then take the <select> inside the same wrapper.
-  const font = page
-    .locator('label.field')
-    .filter({ has: page.locator('.field-label', { hasText: /^Font$/ }) })
-    .locator('select')
+  // Picking another bundled font swaps it only after the browser has loaded that face. The select
+  // has its own id/htmlFor now (#E), so getByLabel resolves it directly — it used to fold the
+  // selected option's own text into the label's accessible name (e.g. "Font" + "Fira Sans Bold"),
+  // so plain "Font" never matched; that workaround (locate by field-label text, then the <select>
+  // inside the same wrapper) is gone.
+  const font = page.getByLabel('Font', { exact: true })
   const optionLabels = await font.locator('option').allTextContents()
   const other = optionLabels.find((t) => t.includes('Roboto') && !t.includes('Condensed'))
   expect(other, `no plain Roboto option among: ${optionLabels.join(', ')}`).toBeTruthy()
@@ -63,4 +60,30 @@ test('the Style tab changes the font size live, autosaves it, and Ctrl+Z takes i
   await font.selectOption(before.style.font_file)
   await expect.poll(async () => (await stored()).style.font_file, { timeout: 10_000 }).toBe(before.style.font_file)
   await expect(page.locator('.save-status')).toHaveText('Saved')
+
+  // Colour override: typing a hex into the picker commits it once the popover closes (Escape),
+  // carrying the just-typed value rather than a render-behind draft (#B). react-colorful's hex
+  // input strips the leading '#' and normalizeHex lower-cases nothing it is given, so the stored
+  // value keeps whatever case the input round-trips — compare case-insensitively.
+  await page.getByRole('button', { name: /Text colour/ }).click()
+  await page.locator('.popover input').fill('ff8800')
+  await page.keyboard.press('Escape')
+  await expect.poll(async () => (await stored()).style.text_color, { timeout: 5_000 }).toMatch(/^#ff8800$/i)
+  await expect(page.locator('.save-status')).toHaveText('Saved')
+
+  // Reset to site defaults: every field in the stored style matches what the server itself would
+  // hand back for a blank override set.
+  const defaultStyle = (await (await page.request.get(`/api/images/${imageId}/default-style`)).json()) as StyleConfig
+  await page.getByRole('button', { name: 'Reset to site defaults' }).click()
+  await expect.poll(async () => (await stored()).style, { timeout: 5_000 }).toEqual(defaultStyle)
+  await expect(page.locator('.save-status')).toHaveText('Saved')
+
+  // The reset restores the size-relative defaults on its own; only the font can still differ from
+  // the fixture image's original (the site default need not be the same font), and leaving it
+  // swapped would affect later specs sharing this image the same way the font-swap above avoids.
+  if (defaultStyle.font_file !== before.style.font_file) {
+    await font.selectOption(before.style.font_file)
+    await expect.poll(async () => (await stored()).style.font_file, { timeout: 10_000 }).toBe(before.style.font_file)
+    await expect(page.locator('.save-status')).toHaveText('Saved')
+  }
 })
