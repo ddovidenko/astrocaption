@@ -33,8 +33,8 @@ test('the Style tab changes the font size live, autosaves it, and Ctrl+Z takes i
   await expect.poll(async () => (await stored()).style.font_size, { timeout: 5_000 }).toBe(target)
   await expect(page.locator('.save-status')).toHaveText('Saved')
 
-  // Undo from the canvas: focus must leave the input first (the key handler ignores fields), and
-  // clicking the canvas is itself a blur that would flush any still-pending debounce too.
+  // Undo from the canvas: focus must leave the input first, since the key handler ignores it
+  // while a field is focused (the debounced commit itself was already proven flushed above).
   await page.locator('.editor-canvas').click({ position: { x: 5, y: 5 } })
   await page.keyboard.press('Control+z')
   await expect.poll(async () => (await stored()).style.font_size, { timeout: 5_000 }).toBe(before.style.font_size)
@@ -55,4 +55,12 @@ test('the Style tab changes the font size live, autosaves it, and Ctrl+Z takes i
   await font.selectOption({ label: other! })
   await expect.poll(async () => (await stored()).style.font_file, { timeout: 10_000 }).toMatch(/^Roboto-/)
   await expect(page.locator('.side-panel .error')).toHaveCount(0)
+
+  // Restore the fixture image's original font: this spec shares the 'Orion' image (and its
+  // cached export) with the rest of the suite, so leaving it on Roboto could make a later spec
+  // compare a stale export against a canvas drawn in the wrong font (smoke.spec.ts sets the
+  // precedent of reverting its own password change for the same reason).
+  await font.selectOption(before.style.font_file)
+  await expect.poll(async () => (await stored()).style.font_file, { timeout: 10_000 }).toBe(before.style.font_file)
+  await expect(page.locator('.save-status')).toHaveText('Saved')
 })
