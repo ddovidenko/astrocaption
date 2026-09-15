@@ -123,15 +123,21 @@ ranked under the stored preference as today.
 
 Both renderers, identically:
 
-1. Aliases are the object's names minus the primary, ordered by the same ranking as the primary.
+1. Aliases are the object's names minus the primary.
 2. Names in the `star` category (HD, HIP, SAO, …) and the `designation` category (unknown
    abbreviations) are dropped when at least one alias of any other category exists.
-3. The first `style.max_aliases` survive. `max_aliases: int = Field(2, ge=0, le=5)` joins
+3. A `common` name whose text is contained in another `common` name of the same object
+   (case-insensitive, whole string) is dropped: "Orion Nebula" inside "Great Orion Nebula".
+4. Order: `common` names first, in nova's order; then every other category in the primary-name
+   ranking order for the current preference, ties in nova's order.
+5. The first `style.max_aliases` survive. `max_aliases: int = Field(2, ge=0, le=5)` joins
    `StyleConfig`, the config page's `default_style` and the Style tab; `show_aliases=False` or
    `max_aliases=0` both mean no alias line.
 
-M 42 under `popular` therefore reads "NGC 1976 · Orion Nebula". Render vectors are regenerated and
-`test_render_parity.py` / `metrics.test.ts` / `parity.spec.ts` pin it.
+M 42 under `popular` therefore reads "M 42" over "Great Orion Nebula · NGC 1976"; M 45 reads
+"M 45" over "Pleiades · Mel 22". Decided 2026-09-14: the primary line already carries a catalogue
+id, so the common name is worth more on the alias line than the NGC cross-reference. Render vectors
+are regenerated and `test_render_parity.py` / `metrics.test.ts` / `parity.spec.ts` pin it.
 
 ### Name preference on the config page (#73)
 
