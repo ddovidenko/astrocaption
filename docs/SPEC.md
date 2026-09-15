@@ -186,7 +186,7 @@ double-click text edit, the per-label toolbar and shift-click multi-select arriv
 
 ### 6.3 Side panel
 
-Milestone 3 PR 5 delivers three of the four tabs below — **Style** ships with milestone 4. Edits
+The four tabs below; **Style** arrived with milestone 4. Edits
 are held locally and flushed to `PUT annotations` on a debounce (autosave); the toolbar's status
 reads `Saving…` while a save is in flight, `Saved` once it lands, and `Unsaved changes` for an edit
 still waiting out the debounce. A failed save reads the server's sentence, or "The last change
@@ -204,7 +204,7 @@ Tabs:
 1. **Objects** — searchable list of every object nova returned. Columns: checkbox (enabled), name, type, radius. Hovering a row highlights on canvas; clicking pans to it. Bulk actions are "Enable shown" / "Disable shown" (both act on the rows the search and type filter currently show).
    Each is one change: the labels being enabled are placed one after another, each around the ones before it, and applied together, so a batch is one undo entry and one save.
 *M3 note:* the type filter uses nova's own annotation types — `NGC`, `IC`, `Bright stars`, `HD stars`, `Other` — rather than the galaxy/nebula/cluster/star buckets above; the richer OpenNGC types arrive in milestone 4. `HD stars` starts unchecked (#37): a narrow field can return dozens of duplicate HD rows, most of them a brighter object's twin. The min-size slider is not built.
-2. **Style** — global defaults: font (dropdown of bundled fonts, live preview), font size, text colour, marker colour, leader colour, halo (stroke) on/off + colour, marker line width, alias line on/off, max aliases (0–5), **name preference** (`popular`: Messier/Caldwell/Sharpless/Barnard, then NGC, then IC, then other catalogues, then common names; `ngc_ic`: NGC/IC designations first; stars: proper name, then Bayer, then Flamsteed). Per-label overrides win over globals. `config.default_style` seeds these for new images. The config page's name-preference dropdown offers "Default (…)" and the one other value; the Style tab lists both values by name.
+2. **Style** — global defaults: font (dropdown of bundled fonts, live preview), font size, text colour, marker colour, leader colour, halo (stroke) on/off + colour, marker line width, alias line on/off, max aliases (0–5), **name preference** (`popular`: Messier/Caldwell/Sharpless/Barnard, then NGC, then IC, then other catalogues, then common names; `ngc_ic`: NGC/IC designations first; stars: proper name, then Bayer, then Flamsteed). Every edit is one change (one undo entry, autosaved); a font is applied once the browser has loaded it; colours apply when the picker closes. 'Reset to site defaults' applies the size-relative built-ins with `config.default_style` on top (`GET /images/{id}/default-style`). When the stored font is no longer bundled, the tab and the Image tab say so and the default is used until a font is picked.
 3. **Layout** — "Auto-arrange" button: flushes any pending save, then runs the collision-avoidance placer on all enabled labels (same algorithm as the initial placement); "Reset positions" asks for confirmation, then does the same. In M3 no label is pinned, so the two differ only by the confirmation — M4's pinned labels will make Reset discard pins. Neither touches the document until the placed labels come back; both then mark it dirty for the autosave to pick up. A 409 shows as the toolbar's Reload state, with one line in the tab saying the layout was not arranged; a label dragged while the request was in flight drops the answer rather than undoing the drag.
 4. **Image** — read-only solve facts (nova job link, field centre/size/rotation, pixel scale, image size) and the **Export** button (full resolution, matching the original JPEG's encoding). *M3 note:* re-solve, publish toggle and delete stay on the image card, not this tab.
 
@@ -318,6 +318,8 @@ Owner (cookie session):
   the database, so two editors cannot both win). 404 before the first solve, 409 while a solve is running. A failed
   re-solve leaves the previous layout editable. A stored style whose font is no longer bundled is served by GET with
   the built-in default (§ 9), so the editor's next autosave stores the resolved name.
+  `font_fallback`: the stored `font_file` when the served style's font was replaced by the default, else null
+- `GET /images/{id}/default-style` → StyleConfig
 - `POST /images/{id}/autoarrange` → the same document with every enabled label re-placed by the placer (§ 6.4, no
   fixed labels), same version, not stored; the editor applies it and autosaves. Validated like `PUT`, including the
   version check (409).
@@ -359,8 +361,7 @@ Box widths are rounded up to whole pixels, so a difference under 0.5 px can stil
 with it a leader endpoint, by one pixel; the pixel budget allows for it.
 A stored per-image
 style whose `font_file` is no longer bundled renders, places and is served by `GET /annotations`
-with the built-in default and a server-log warning naming the file; the stored row is left alone
-until the editor next saves it.
+with the built-in default and a server-log warning naming the file; `GET /annotations` names the stored file in `font_fallback`; the editor shows it and the next save stores the resolved font. `resolve_font_file` and `GET /fonts` use the same predicate (`list_fonts`).
 
 ## 10. Auth & lockout
 
