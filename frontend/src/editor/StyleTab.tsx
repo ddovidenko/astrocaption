@@ -43,22 +43,41 @@ export default function StyleTab() {
   // and reschedule it.
   const numberTimers = useRef<Partial<Record<NumberKey, PendingNumberCommit>>>({})
 
-  // Whenever `style` moves to a new object — from its own commit landing, from elsewhere
-  // (undo/redo/reset), or from the component unmounting (switching tabs never blurs the input
-  // first, so discarding here would silently drop a still-in-flight, already-valid edit) — every
-  // still-pending debounced commit is flushed, not discarded: its captured patch commits now
-  // rather than waiting out the rest of its 400ms. An effect, not the render body below: refs may
-  // be read and written only outside render (react-hooks/refs).
+  // Every style change — its own field's timer landing, undo/redo/reset, a colour/font commit, a
+  // reset-to-defaults — cancels whatever is still pending: past this point it can only be stale.
+  // Every one of those is reached by a click, and every one of those controls blurs the input
+  // first except Undo/Redo/Reset-to-defaults (all `onMouseDown`-preventDefault, on purpose, so
+  // clicking them doesn't steal focus from the canvas) — re-committing a half-typed value on top
+  // of what Undo just restored would look like Undo failed for that field, and add a spurious
+  // history entry on top. A timer that itself just fired has already deleted its own entry before
+  // calling `setStyle` (`scheduleNumberCommit`'s timeout below runs `delete` synchronously ahead
+  // of `setStyle`, and `setStyle` is what causes this same effect to run), so this pass never
+  // re-touches the very commit that triggered it — only a sibling field's still-pending, now-stale
+  // one. An effect, not the render body below: refs may be read and written only outside render
+  // (react-hooks/refs).
+  useEffect(() => {
+    for (const entry of Object.values(numberTimers.current)) if (entry) clearTimeout(entry.timer)
+    numberTimers.current = {}
+  }, [style])
+
+  // Unmount only (switching tabs, leaving the editor): nothing above ever runs for this, since a
+  // dependency-less effect's cleanup fires only when the component goes away, never on a `[style]`
+  // change. The tab buttons are the same `onMouseDown`-preventDefault controls noted above, so
+  // switching away never blurs a focused number input either — cancelling here would silently
+  // drop a still-in-flight, already-valid edit, so this commits it instead. (StrictMode's extra
+  // mount+unmount pass runs this once more too, against a map that's still empty at that point —
+  // harmless.)
   useEffect(() => {
     return () => {
-      for (const entry of Object.values(numberTimers.current)) {
+      for (const key of Object.keys(numberTimers.current) as NumberKey[]) {
+        const entry = numberTimers.current[key]
         if (!entry) continue
         clearTimeout(entry.timer)
-        setStyle(entry.patch)
+        delete numberTimers.current[key]
+        useEditor.getState().setStyle(entry.patch)
       }
-      numberTimers.current = {}
     }
-  }, [style, setStyle])
+  }, [])
 
   // The store is the source of truth: undo/redo, a reset and every commit re-derive the draft.
   // Adjusted during render rather than in an effect (react-hooks/set-state-in-effect; the React

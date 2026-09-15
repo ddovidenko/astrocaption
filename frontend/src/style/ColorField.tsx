@@ -3,7 +3,9 @@ import { HexColorInput, HexColorPicker } from 'react-colorful'
 import { normalizeHex } from './styleForm'
 
 /** The popover's width (styles.css: `.popover { min-width: ... }`), used to decide at open time
- *  whether it would run off the right edge of its container. */
+ *  whether it would run off the right edge of its container. Overrides mode (`allowDefault`)
+ *  renders an extra "Use default" button beside the hex input, so `openPicker` below measures
+ *  against a wider figure there instead of this one. */
 export const POPOVER_WIDTH = 232
 
 /** A colour override: a swatch that opens an in-page picker, never the OS dialog. */
@@ -64,7 +66,8 @@ export default function ColorField({
     if (wrapEl) {
       const wrapRect = wrapEl.getBoundingClientRect()
       const bound = (wrapEl.closest('.side-panel-body, .panel') ?? document.documentElement).getBoundingClientRect()
-      setAlignRight(wrapRect.left + POPOVER_WIDTH > bound.right)
+      const width = allowDefault ? 248 : POPOVER_WIDTH
+      setAlignRight(wrapRect.left + width > bound.right)
     }
   }
   /** Every way out of the picker: once per close, whichever event gets there first. */
