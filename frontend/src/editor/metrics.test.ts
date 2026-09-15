@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import raw from '../../../tests/fixtures/render/vectors.json'
 import type { FontOut, Label, LeaderMode, ObjectOut, StyleConfig } from '../api'
+import { DEFAULT_FONT_FILE } from './fonts'
 import {
   ANCHORS,
   MAX_FONT_SIZE,
@@ -107,6 +108,10 @@ describe('render vectors', () => {
     expect(vectors.max_font_size).toBe(MAX_FONT_SIZE)
     expect(vectors.fonts.length).toBeGreaterThan(0)
     expect(vectors.labels.length).toBeGreaterThan(0)
+  })
+
+  it('lists DEFAULT_FONT_FILE among the bundled fonts', () => {
+    expect(vectors.fonts.some((f) => f.file === DEFAULT_FONT_FILE)).toBe(true)
   })
 
   it('rounds halves to even like Python', () => {

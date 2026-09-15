@@ -189,6 +189,20 @@ describe('document actions', () => {
     const out = documentForSave(useEditor.getState())
     expect(out.labels.map((l) => l.object_id)).toEqual([1, 2])
   })
+  it('carries the font fallback and clears it on save or on a font change', () => {
+    const s = useEditor.getState()
+    s.load({ ...doc, fontFallback: { stored: 'Gone.ttf', used: 'Inter-Regular.ttf' } })
+    expect(useEditor.getState().fontFallback).toEqual({ stored: 'Gone.ttf', used: 'Inter-Regular.ttf' })
+    s.markSaving()
+    s.markSaved(2, 't')
+    expect(useEditor.getState().fontFallback).toBeNull()
+    useEditor.getState().load({ ...doc, fontFallback: { stored: 'Gone.ttf', used: 'Inter-Regular.ttf' } })
+    useEditor.getState().setStyle({ font_size: 30 })
+    expect(useEditor.getState().fontFallback).not.toBeNull()
+    useEditor.getState().setStyle({ font_file: 'Inter-Regular.ttf' })
+    expect(useEditor.getState().fontFallback).toBeNull()
+  })
+
   it('applyLabels throws on an id the store does not have', () => {
     const s = useEditor.getState()
     s.load(doc)

@@ -1,5 +1,7 @@
 import { fontFamilyFor } from './metrics'
 
+export const DEFAULT_FONT_FILE = 'Inter-Regular.ttf' // StyleConfig().font_file; pinned against the render vectors' font list in the tests
+
 /** One load per file for the life of the page. Strict on purpose (#62): a font that cannot be
  *  loaded must surface as an error, because `measureText` on an unloaded family silently uses a
  *  fallback and the preview would no longer match the export. */
