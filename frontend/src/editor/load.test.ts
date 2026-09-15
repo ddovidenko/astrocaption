@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
+import { loadFonts } from './fonts'
 import { loadEditor } from './load'
 import type { LoadedDocument } from './store'
 import { makeDoc } from './testDoc'
@@ -47,6 +48,7 @@ describe('loadEditor', () => {
     const loaded = await loadEditor('img-1')
     expect(loaded.annotations.style.font_file).toBe('Inter-Regular.ttf')
     expect(loaded.fontFallback).toEqual({ stored: 'Gone.ttf', used: 'Inter-Regular.ttf' })
+    expect(loadFonts).toHaveBeenCalledWith(['Inter-Regular.ttf'])
   })
 
   it('passes the server-reported fallback through', async () => {

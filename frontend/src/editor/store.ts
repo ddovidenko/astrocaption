@@ -268,14 +268,12 @@ export const useEditor = create<EditorState>()((set) => ({
       return changedDoc(s, { labels }) ?? {}
     }),
   setStyle: (patch) =>
-    set((s) =>
-      s.style
-        ? {
-            ...(changedDoc(s, { style: { ...s.style, ...patch } }) ?? {}),
-            ...('font_file' in patch ? { fontFallback: null } : {}),
-          }
-        : {},
-    ),
+    set((s) => {
+      if (!s.style) return {}
+      const next = changedDoc(s, { style: { ...s.style, ...patch } })
+      if (!next) return {}
+      return { ...next, ...('font_file' in patch ? { fontFallback: null } : {}) }
+    }),
   markSaving: () => set({ pendingChanges: 0, save: { status: 'saving', message: null } }),
   markSaved: (version, updatedAt) =>
     set((s) => ({

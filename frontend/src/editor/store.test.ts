@@ -201,6 +201,17 @@ describe('document actions', () => {
     expect(useEditor.getState().fontFallback).not.toBeNull()
     useEditor.getState().setStyle({ font_file: 'Inter-Regular.ttf' })
     expect(useEditor.getState().fontFallback).toBeNull()
+
+    // A refused change (document not editable) must not clear the notice either.
+    useEditor.getState().load({
+      ...doc,
+      image: { ...doc.image, solve_status: 'solving' },
+      fontFallback: { stored: 'Gone.ttf', used: 'Inter-Regular.ttf' },
+    })
+    const styleBefore = useEditor.getState().style
+    useEditor.getState().setStyle({ font_file: 'Inter-Regular.ttf' })
+    expect(useEditor.getState().fontFallback).toEqual({ stored: 'Gone.ttf', used: 'Inter-Regular.ttf' })
+    expect(useEditor.getState().style).toBe(styleBefore)
   })
 
   it('applyLabels throws on an id the store does not have', () => {
