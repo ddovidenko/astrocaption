@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { StyleDefaults } from '../api'
 import { loadBundledFont } from '../editor/fonts'
 import { fontFamilyFor } from '../editor/metrics'
-import type { StyleForm } from './configForm'
+import type { StyleForm } from './styleForm'
 import { PREVIEW_SIZE, previewCap, previewGeometry, previewLines } from './labelPreview'
 
 /** Fixed stars so the preview is the same every time. */

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { StyleDefaults } from '../api'
 import { fontFamilyFor } from '../editor/metrics'
-import { styleFormFromOverrides } from './configForm'
+import { styleFormFromOverrides } from './styleForm'
 import { previewCap, previewGeometry, previewLines } from './labelPreview'
 
 const defaults: StyleDefaults = {

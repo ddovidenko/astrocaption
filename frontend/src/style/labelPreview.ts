@@ -1,7 +1,7 @@
 import type { NamePreference, StyleDefaults } from '../api'
 import { MAX_ALIASES, aliasNames, primaryName } from '../editor/names'
 import { ALIAS_SCALE, ALIAS_SEP, LINE_HEIGHT } from '../editor/metrics'
-import type { StyleForm } from './configForm'
+import type { StyleForm } from './styleForm'
 
 /** The preview draws at a fixed text size; every other length keeps its ratio to the font size. */
 export const PREVIEW_SIZE = 22
