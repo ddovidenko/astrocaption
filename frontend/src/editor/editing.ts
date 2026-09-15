@@ -3,17 +3,8 @@
 
 import { canvasMeasurer, type TextMeasurer } from './metrics'
 import { placeNewLabel } from './placement'
-import { useEditor, type EditorState } from './store'
-
-/** The one place the read-only rule lives: the canvas, the side panel, the toolbar and the
- *  autosave all ask this. Only a solve in progress stops editing — a *failed* re-solve leaves the
- *  previous layout editable (SPEC § 5), and the server accepts PUT/autoarrange for it. A conflict
- *  stops further *saves* (the autosave and the toolbar own that), not the owner's work in the
- *  page. Export is gated separately, on `solved` alone: the export endpoint requires it. */
-export function isEditable(state: EditorState): boolean {
-  const status = state.image?.solve_status
-  return status === 'solved' || status === 'failed'
-}
+import { isEditable, useEditor } from './store'
+export { isEditable } from './store'
 
 let measurer: TextMeasurer | null = null
 

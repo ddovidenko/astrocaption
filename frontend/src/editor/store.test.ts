@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { documentForSave, enabledLabels, fontFor, labelFor, useEditor, type LoadedDocument } from './store'
+import { documentForSave, enabledLabels, fontFor, isEditable, labelFor, useEditor, type LoadedDocument } from './store'
 import { makeDoc } from './testDoc'
 
 let doc: LoadedDocument
@@ -210,5 +210,35 @@ describe('document actions', () => {
     expect(useEditor.getState().save).toEqual({ status: 'conflict', message: 'This image was changed elsewhere. Reload to continue editing.' })
     s.markSaveError('boom')
     expect(useEditor.getState().save.status).toBe('error')
+  })
+
+  it('refuses every document change while a solve is running', () => {
+    const s = useEditor.getState()
+    s.load({ ...doc, image: { ...doc.image, solve_status: 'solving' } })
+    const before = useEditor.getState().labels
+    s.toggleObject(1)
+    s.moveLabel(1, 10, 20)
+    s.applyLabels([{ ...before.get(1)!, x: 5 }])
+    expect(useEditor.getState().labels).toBe(before)
+    expect(useEditor.getState().changeSeq).toBe(0)
+    expect(useEditor.getState().save.status).toBe('saved')
+  })
+
+  it('keeps editing live after a conflict (only saving stops)', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.markConflict('changed elsewhere')
+    s.toggleObject(1)
+    expect(useEditor.getState().labels.get(1)?.enabled).toBe(false)
+    expect(useEditor.getState().save.status).toBe('conflict')
+  })
+})
+
+describe('isEditable', () => {
+  it('is true for solved and failed, false while pending or solving', () => {
+    for (const [status, want] of [['solved', true], ['failed', true], ['pending', false], ['solving', false]] as const) {
+      useEditor.getState().load({ ...doc, image: { ...doc.image, solve_status: status } })
+      expect(isEditable(useEditor.getState())).toBe(want)
+    }
   })
 })

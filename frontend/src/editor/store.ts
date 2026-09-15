@@ -66,16 +66,37 @@ const initial = {
   save: { status: 'saved' as SaveStatus, message: null as string | null },
 }
 
-/** Every document action shares this: bump `changeSeq`/`pendingChanges`, replace `labels` with a
- *  new `Map` (never mutate the stored `Label` objects — `useShallow(enabledLabels)` in the canvas
- *  relies on identity), and mark the document dirty unless a conflict is already sticky. */
-function changed(s: EditorState, labels: Map<number, Label>): Partial<EditorState> {
-  return {
-    labels,
-    changeSeq: s.changeSeq + 1,
-    pendingChanges: s.pendingChanges + 1,
-    save: s.save.status === 'conflict' ? s.save : { status: 'dirty' as const, message: null },
-  }
+/** The one place the read-only rule lives: the canvas, the side panel, the toolbar and the
+ *  autosave all ask this. Only a solve in progress stops editing — a *failed* re-solve leaves the
+ *  previous layout editable (SPEC § 5), and the server accepts PUT/autoarrange for it. A conflict
+ *  stops further *saves* (the autosave and the toolbar own that), not the owner's work in the
+ *  page. Export is gated separately, on `solved` alone: the export endpoint requires it. */
+export function isEditable(state: EditorState): boolean {
+  const status = state.image?.solve_status
+  return status === 'solved' || status === 'failed'
+}
+
+/** What a document change replaces: the labels map, the style, or both. */
+interface DocPatch {
+  labels?: Map<number, Label>
+  style?: StyleConfig
+}
+
+/** Every document action goes through this. It refuses (returns `{}`) while the document may not
+ *  be edited, so no tab can slip a change past the read-only rule. A commit bumps
+ *  `changeSeq`/`pendingChanges` (the autosave keys on `changeSeq`) and marks the document dirty
+ *  unless a conflict is already sticky. Callers hand in *new* maps and never mutate the stored
+ *  `Label` objects — `useShallow(enabledLabels)` in the canvas relies on identity. */
+function changedDoc(s: EditorState, patch: DocPatch, commit = true): Partial<EditorState> {
+  if (!isEditable(s)) return {}
+  const next: Partial<EditorState> = {}
+  if (patch.labels) next.labels = patch.labels
+  if (patch.style) next.style = patch.style
+  if (!commit) return next
+  next.changeSeq = s.changeSeq + 1
+  next.pendingChanges = s.pendingChanges + 1
+  next.save = s.save.status === 'conflict' ? s.save : { status: 'dirty', message: null }
+  return next
 }
 
 export const useEditor = create<EditorState>()((set) => ({
@@ -145,7 +166,8 @@ export const useEditor = create<EditorState>()((set) => ({
           }
       const labels = new Map(s.labels)
       labels.set(id, next)
-      const patch = changed(s, labels)
+      const patch = changedDoc(s, { labels })
+      if (!('labels' in patch)) return {}
       // A disabled label has nothing on the canvas to select, and Delete/Backspace on a selection
       // left behind would toggle it straight back on.
       if (!next.enabled && s.selectedId === id) patch.selectedId = null
@@ -160,7 +182,7 @@ export const useEditor = create<EditorState>()((set) => ({
       if (!label || (label.x === x && label.y === y)) return {}
       const labels = new Map(s.labels)
       labels.set(id, { ...label, x, y, collided: false })
-      return changed(s, labels)
+      return changedDoc(s, { labels })
     }),
   applyLabels: (updated) =>
     set((s) => {
@@ -169,7 +191,7 @@ export const useEditor = create<EditorState>()((set) => ({
         if (!labels.has(label.object_id)) continue
         labels.set(label.object_id, label)
       }
-      return changed(s, labels)
+      return changedDoc(s, { labels })
     }),
   markSaving: () => set({ pendingChanges: 0, save: { status: 'saving', message: null } }),
   markSaved: (version, updatedAt) =>
