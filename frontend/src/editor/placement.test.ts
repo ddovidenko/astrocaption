@@ -9,10 +9,19 @@ import random2 from '../../../tests/fixtures/placement/random_2.json'
 import single from '../../../tests/fixtures/placement/single_right.json'
 import stacked from '../../../tests/fixtures/placement/stacked_same_position.json'
 import type { Box } from './metrics'
-import { PAD_FACTOR, boxesOverlap, placeLabels, placeNewLabel, type Circle, type Placement, type PlacementItem } from './placement'
+import {
+  PAD_FACTOR,
+  boxesOverlap,
+  placeLabels,
+  placeNewLabel,
+  placeNewLabels,
+  type Circle,
+  type Placement,
+  type PlacementItem,
+} from './placement'
 import { scaleUnit, measureLabel } from './metrics'
 import { useEditor } from './store'
-import { makeDoc } from './testDoc'
+import { makeDoc, withThirdObject } from './testDoc'
 
 interface Vector {
   name: string
@@ -68,5 +77,41 @@ describe('placeNewLabel', () => {
   it('returns null for an unknown object', () => {
     useEditor.getState().load(makeDoc())
     expect(placeNewLabel(useEditor.getState(), measure, 999)).toBeNull()
+  })
+})
+
+describe('placeNewLabels', () => {
+  const measure = () => 100
+  it('places later ids around the ones placed earlier in the same call', () => {
+    useEditor.getState().reset()
+    // Two disabled labels on top of each other at the same object position.
+    useEditor.getState().load(withThirdObject(makeDoc(), { x: 1560, y: 1010 }))
+    const out = placeNewLabels(useEditor.getState(), measure, [2, 3])
+    expect(out.size).toBe(2)
+    const a = out.get(2)!
+    const b = out.get(3)!
+    expect([a.x, a.y]).not.toEqual([b.x, b.y])
+  })
+  it('skips ids the state does not hold', () => {
+    useEditor.getState().reset()
+    useEditor.getState().load(makeDoc())
+    expect(placeNewLabels(useEditor.getState(), measure, [2, 99]).has(99)).toBe(false)
+  })
+
+  it('an enabled label that is not being placed is an obstacle at its stored position', () => {
+    useEditor.getState().reset()
+    // Object 3's label sits away from its object, as after a drag.
+    useEditor.getState().load(withThirdObject(makeDoc()))
+    const state = useEditor.getState()
+
+    // Where 2 lands with nothing in the way.
+    const unblocked = placeNewLabels(state, measure, [2]).get(2)!
+
+    // A working copy with 3 enabled exactly on that spot (the store itself is not written).
+    const labels = new Map(state.labels)
+    labels.set(3, { ...state.labels.get(3)!, enabled: true, x: unblocked.x, y: unblocked.y })
+
+    const blocked = placeNewLabels({ ...state, labels }, measure, [2]).get(2)!
+    expect([blocked.x, blocked.y]).not.toEqual([unblocked.x, unblocked.y])
   })
 })

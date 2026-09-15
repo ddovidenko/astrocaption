@@ -99,14 +99,17 @@ interface EntryProps {
   font: FontOut
   editable: boolean
   select: (id: number | null) => void
-  moveLabel: (id: number, x: number, y: number) => void
-  /** Whether Space is held: a pan gesture, which wins over selecting or dragging a label. */
-  spaceRef: RefObject<boolean>
+  moveLabel: (id: number, x: number, y: number, commit?: boolean) => void
+  /** Whether Space is held: a pan gesture, which wins over selecting or dragging a label. Held in
+   *  React state so `draggable` can turn off before Konva sees the press. */
+  spacePan: boolean
   onDrawError: (message: string) => void
 }
 
 /** One object's marker, leader and draggable label. Memoised on the cached `Entry`, so a drag
- *  frame re-renders the dragged label only, not every label on the layer. */
+ *  frame re-renders the dragged label only, not every label on the layer. `spacePan` is a plain
+ *  prop, not part of `Entry`, so a Space press or release still re-renders every label once (it
+ *  flips `draggable` on each of them). */
 const LabelEntry = memo(function LabelEntry({
   entry: { label, obj, box, text, seg, leader },
   style,
@@ -114,13 +117,9 @@ const LabelEntry = memo(function LabelEntry({
   editable,
   select,
   moveLabel,
-  spaceRef,
+  spacePan,
   onDrawError,
 }: EntryProps) {
-  // Konva still fires dragmove/dragend after a stopDrag() in dragstart; those must not reach the
-  // store. (A dragend at the label's own position is already a no-op in `moveLabel`.)
-  const suppressDragRef = useRef(false)
-
   return (
     <Group>
       {/* Not the stored radius: the stroke sits half a marker width inside it so Konva's
@@ -146,36 +145,20 @@ const LabelEntry = memo(function LabelEntry({
       <Group
         x={label.x}
         y={label.y}
-        draggable={editable}
+        // Not draggable during a Space-pan: Konva then never starts the drag, so there is nothing
+        // to suppress. Konva.dragButtons keeps the middle button out too.
+        draggable={editable && !spacePan}
         onMouseDown={(e) => {
-          // Space-drag and the middle button pan anywhere on the canvas, labels included, so
-          // those presses are left to bubble to the stage untouched.
-          if (spaceRef.current || e.evt.button === 1) return
-          // Without this the stage would read the press as the start of a pan.
-          e.cancelBubble = true
+          // Space-drag and the middle button pan anywhere on the canvas, labels included: the
+          // press bubbles to the stage, which starts the pan. A plain press also bubbles, so the
+          // stage records it and `movedRef` can tell a later click from a drag; the stage does not
+          // pan for it because the target is this group, not the stage.
+          if (spacePan || e.evt.button === 1) return
           select(label.object_id)
         }}
-        onDragStart={(e) => {
-          // Belt and braces with Konva.dragButtons: a drag begun while Space is held, or with
-          // any button but the left one, is a pan.
-          if (spaceRef.current || e.evt.button !== 0) {
-            suppressDragRef.current = true
-            e.target.stopDrag()
-            return
-          }
-          suppressDragRef.current = false
-          select(label.object_id)
-        }}
-        onDragMove={(e) => {
-          if (suppressDragRef.current) return
-          moveLabel(label.object_id, e.target.x(), e.target.y())
-        }}
-        onDragEnd={(e) => {
-          const suppressed = suppressDragRef.current
-          suppressDragRef.current = false
-          if (suppressed) return
-          moveLabel(label.object_id, e.target.x(), e.target.y())
-        }}
+        onDragStart={() => select(label.object_id)}
+        onDragMove={(e) => moveLabel(label.object_id, e.target.x(), e.target.y(), false)}
+        onDragEnd={(e) => moveLabel(label.object_id, e.target.x(), e.target.y())}
       >
         <LabelTextShape label={label} style={style} font={font} box={box} text={text} onDrawError={onDrawError} />
       </Group>
@@ -246,16 +229,14 @@ export default function EditorCanvas() {
   const overlayRef = useRef<Konva.Layer>(null)
   const badgesRef = useRef<Konva.Group>(null)
   const panRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null)
-  // Where the last mousedown that reached the stage landed, in screen pixels. A press on a label
-  // stops at the label (its own handler cancels the bubble), and that is harmless: Konva fires
-  // `click` only when the press and the release are on the same shape, so a gesture begun on a
-  // label can never end as a click on a marker.
+  // Where the last mousedown that reached the stage landed, in screen pixels. Every press reaches
+  // it, label presses included; `movedRef` below is what tells a click from a drag.
   const downRef = useRef<{ x: number; y: number } | null>(null)
   // Whether the pointer travelled far enough between that mousedown and the click Konva fires
   // after mouseup for the gesture to be a drag: a pan, or a label drag that happened to end over
   // a marker, is not the click that deselects or toggles.
   const movedRef = useRef(false)
-  const spaceRef = useRef(false)
+  const [spacePan, setSpacePan] = useState(false)
 
   // Keyed by the URL it was loaded from, so a second image opened without unmounting can never
   // show the first bitmap (or the first failure) — resetting the state in the effect below would
@@ -373,8 +354,22 @@ export default function EditorCanvas() {
         // A focused toolbar button would otherwise take Space as a click, and the page would scroll.
         if (inField(true)) return
         e.preventDefault()
-        spaceRef.current = true
+        setSpacePan(true)
         return
+      }
+      // Undo/redo: Ctrl (Cmd on macOS) + Z / Y / Shift+Z. Fields keep their own undo.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !inField()) {
+        const key = e.key.toLowerCase()
+        if (key === 'z' && !e.shiftKey) {
+          e.preventDefault()
+          useEditor.getState().undoLast()
+          return
+        }
+        if (key === 'y' || (key === 'z' && e.shiftKey)) {
+          e.preventDefault()
+          useEditor.getState().redoLast()
+          return
+        }
       }
       if (inField() || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === 'f' || e.key === 'F') useEditor.getState().fit()
@@ -391,11 +386,11 @@ export default function EditorCanvas() {
       }
     }
     const up = (e: KeyboardEvent) => {
-      if (e.code === 'Space') spaceRef.current = false
+      if (e.code === 'Space') setSpacePan(false)
     }
     // A Space released outside the window would otherwise leave every mousedown panning.
     const blur = () => {
-      spaceRef.current = false
+      setSpacePan(false)
     }
     window.addEventListener('keydown', down)
     window.addEventListener('keyup', up)
@@ -530,7 +525,7 @@ export default function EditorCanvas() {
     // Recorded for every press that reaches the stage, pan or not: a Space-pan begun on a marker
     // ends with a click on that marker, and only the displacement below tells the two apart.
     downRef.current = pointer ? { x: pointer.x, y: pointer.y } : null
-    if (!(e.target === stage || e.evt.button === 1 || spaceRef.current)) return
+    if (!(e.target === stage || e.evt.button === 1 || spacePan)) return
     if (!pointer) return
     e.evt.preventDefault()
     panRef.current = { sx: pointer.x, sy: pointer.y, vx: view.x, vy: view.y }
@@ -550,7 +545,7 @@ export default function EditorCanvas() {
     setView({ scale: view.scale, x: start.vx + (pointer.x - start.sx), y: start.vy + (pointer.y - start.sy) })
   }
 
-  // spaceRef is not cleared here: Space owns only whether the *next* mousedown pans, and the
+  // spacePan is not cleared here: Space owns only whether the *next* mousedown pans, and the
   // window `blur` listener above already resets it when the key-up would be missed.
   const stopPan = useCallback(() => {
     if (!panRef.current) return
@@ -620,7 +615,7 @@ export default function EditorCanvas() {
               editable={editable}
               select={select}
               moveLabel={moveLabel}
-              spaceRef={spaceRef}
+              spacePan={spacePan}
               onDrawError={onDrawError}
               badgesRef={badgesRef}
             />

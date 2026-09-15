@@ -122,7 +122,7 @@ describe('autosave', () => {
     useEditor.getState().toggleObject(1)
     await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 2)
     expect(f.calls).toHaveLength(0)
-    expect(useEditor.getState().save.status).toBe('dirty')
+    expect(useEditor.getState().save.status).toBe('saved')
   })
 
   // SPEC § 5: a failed re-solve leaves the previous layout editable, and the server accepts the

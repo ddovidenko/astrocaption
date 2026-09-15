@@ -1,4 +1,4 @@
-import type { Annotations, FontOut, ImageOut, ObjectOut, StyleConfig } from '../api'
+import type { Annotations, FontOut, ImageOut, Label, ObjectOut, StyleConfig } from '../api'
 import type { LoadedDocument } from './store'
 
 /** A small solved document for editor tests: a 3000x2000 image, two objects (one radius-0
@@ -91,4 +91,17 @@ export function makeDoc(): LoadedDocument {
   ]
 
   return { image, objects, annotations, fonts }
+}
+
+/** Adds a third object to a `makeDoc()` document with a disabled label; the label sits on the
+ *  object unless `label` says otherwise. Returns the same document, for chaining into `load`. */
+export function withThirdObject(
+  doc: LoadedDocument,
+  obj: Partial<ObjectOut> = {},
+  label: Partial<Label> = {},
+): LoadedDocument {
+  const object: ObjectOut = { id: 3, catalog_names: ['X'], primary_name: 'X', type: 'ngc', x: 2500, y: 1800, radius: 0, ...obj }
+  doc.objects.push(object)
+  doc.annotations.labels.push({ ...doc.annotations.labels[1]!, object_id: 3, x: object.x, y: object.y, ...label })
+  return doc
 }

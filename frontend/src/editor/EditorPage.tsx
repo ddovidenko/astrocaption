@@ -60,6 +60,8 @@ export default function EditorPage() {
   const error = id ? (settled?.error ?? null) : 'That image could not be found.'
   const image = useEditor((s) => s.image)
   const scale = useEditor((s) => s.view.scale)
+  const canUndo = useEditor((s) => s.undo.length > 0 && isEditable(s))
+  const canRedo = useEditor((s) => s.redo.length > 0 && isEditable(s))
   const [panelOpen, setPanelOpen] = useState(true)
 
   useEffect(() => {
@@ -132,6 +134,24 @@ export default function EditorPage() {
           onClick={() => useEditor.getState().actual()}
         >
           100 %
+        </button>
+        <button
+          className="secondary"
+          title="Undo (Ctrl+Z)"
+          disabled={!canUndo}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => useEditor.getState().undoLast()}
+        >
+          Undo
+        </button>
+        <button
+          className="secondary"
+          title="Redo (Ctrl+Y)"
+          disabled={!canRedo}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => useEditor.getState().redoLast()}
+        >
+          Redo
         </button>
         <SaveStatus />
       </div>

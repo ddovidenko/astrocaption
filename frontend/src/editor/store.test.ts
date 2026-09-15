@@ -1,5 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { documentForSave, enabledLabels, fontFor, labelFor, useEditor, type LoadedDocument } from './store'
+import {
+  documentForSave,
+  enabledLabels,
+  fontFor,
+  HISTORY_LIMIT,
+  isEditable,
+  labelFor,
+  useEditor,
+  type LoadedDocument,
+} from './store'
 import { makeDoc } from './testDoc'
 
 let doc: LoadedDocument
@@ -148,7 +157,7 @@ describe('document actions', () => {
   it('moveLabel sets the position and clears collided', () => {
     const s = useEditor.getState()
     s.load(doc)
-    s.applyLabels([{ ...s.labels.get(1)!, collided: true }])
+    s.applyLabels([{ ...useEditor.getState().labels.get(1)!, collided: true }])
     s.moveLabel(1, 10, 20)
     expect(useEditor.getState().labels.get(1)).toMatchObject({ x: 10, y: 20, collided: false })
   })
@@ -180,11 +189,11 @@ describe('document actions', () => {
     const out = documentForSave(useEditor.getState())
     expect(out.labels.map((l) => l.object_id)).toEqual([1, 2])
   })
-  it('applyLabels never inserts a label for an id the store does not have', () => {
+  it('applyLabels throws on an id the store does not have', () => {
     const s = useEditor.getState()
     s.load(doc)
     const label = useEditor.getState().labels.get(1)!
-    s.applyLabels([{ ...label, object_id: 42 }])
+    expect(() => s.applyLabels([{ ...label, object_id: 42 }])).toThrow('applyLabels: no label for object 42')
     expect(useEditor.getState().labels.has(42)).toBe(false)
   })
   it('save state: dirty → saving → saved, but stays dirty if a change landed during the save', () => {
@@ -210,5 +219,170 @@ describe('document actions', () => {
     expect(useEditor.getState().save).toEqual({ status: 'conflict', message: 'This image was changed elsewhere. Reload to continue editing.' })
     s.markSaveError('boom')
     expect(useEditor.getState().save.status).toBe('error')
+  })
+
+  it('refuses every document change while a solve is running', () => {
+    const s = useEditor.getState()
+    s.load({ ...doc, image: { ...doc.image, solve_status: 'solving' } })
+    const before = useEditor.getState().labels
+    s.toggleObject(1)
+    s.moveLabel(1, 10, 20)
+    s.applyLabels([{ ...before.get(1)!, x: 5 }])
+    expect(useEditor.getState().labels).toBe(before)
+    expect(useEditor.getState().changeSeq).toBe(0)
+    expect(useEditor.getState().save.status).toBe('saved')
+  })
+
+  it('keeps editing live after a conflict (only saving stops)', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.markConflict('changed elsewhere')
+    s.toggleObject(1)
+    expect(useEditor.getState().labels.get(1)?.enabled).toBe(false)
+    expect(useEditor.getState().save.status).toBe('conflict')
+  })
+})
+
+describe('undo/redo', () => {
+  it('a commit pushes the previous document and clears redo', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    expect(useEditor.getState().undo).toHaveLength(0)
+    s.toggleObject(1)
+    expect(useEditor.getState().undo).toHaveLength(1)
+    expect(useEditor.getState().redo).toHaveLength(0)
+  })
+
+  it('undoLast restores the labels and commits (autosave sees a change)', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(1)
+    const seq = useEditor.getState().changeSeq
+    useEditor.getState().undoLast()
+    const state = useEditor.getState()
+    expect(state.labels.get(1)?.enabled).toBe(true)
+    expect(state.changeSeq).toBe(seq + 1)
+    expect(state.save.status).toBe('dirty')
+    expect(state.undo).toHaveLength(0)
+    expect(state.redo).toHaveLength(1)
+  })
+
+  it('redoLast re-applies what undoLast took back', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(1)
+    useEditor.getState().undoLast()
+    useEditor.getState().redoLast()
+    expect(useEditor.getState().labels.get(1)?.enabled).toBe(false)
+    expect(useEditor.getState().redo).toHaveLength(0)
+    expect(useEditor.getState().undo).toHaveLength(1)
+  })
+
+  it('a new commit after an undo drops the redo stack', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(1)
+    useEditor.getState().undoLast()
+    useEditor.getState().toggleObject(2, { x: 1, y: 2 })
+    expect(useEditor.getState().redo).toHaveLength(0)
+  })
+
+  it('undo and redo are no-ops on empty stacks and while not editable', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const seq = useEditor.getState().changeSeq
+    s.undoLast()
+    s.redoLast()
+    expect(useEditor.getState().changeSeq).toBe(seq)
+    s.toggleObject(1)
+    useEditor.setState({ image: { ...doc.image, solve_status: 'solving' } })
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().labels.get(1)?.enabled).toBe(false)
+  })
+
+  it('the history is capped at HISTORY_LIMIT entries', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    for (let i = 0; i < HISTORY_LIMIT + 10; i++) useEditor.getState().toggleObject(1)
+    expect(useEditor.getState().undo).toHaveLength(HISTORY_LIMIT)
+  })
+
+  it('load and markConflict clear both stacks', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(1)
+    useEditor.getState().undoLast()
+    useEditor.getState().markConflict('changed elsewhere')
+    expect(useEditor.getState().undo).toHaveLength(0)
+    expect(useEditor.getState().redo).toHaveLength(0)
+    useEditor.getState().load(makeDoc())
+    useEditor.getState().toggleObject(1)
+    useEditor.getState().load(makeDoc())
+    expect(useEditor.getState().undo).toHaveLength(0)
+  })
+
+  it('a style change is one undo entry too', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.setStyle({ font_size: 30 })
+    expect(useEditor.getState().style?.font_size).toBe(30)
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().style?.font_size).toBe(24)
+  })
+
+  it('a drag coalesces into one undo entry: preview frames record nothing, drag-end commits', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const seq = useEditor.getState().changeSeq
+    s.moveLabel(1, 10, 20, false)
+    useEditor.getState().moveLabel(1, 11, 21, false)
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ x: 11, y: 21 })
+    expect(useEditor.getState().changeSeq).toBe(seq)
+    expect(useEditor.getState().undo).toHaveLength(0)
+    expect(useEditor.getState().save.status).toBe('saved')
+    useEditor.getState().moveLabel(1, 12, 22)
+    expect(useEditor.getState().changeSeq).toBe(seq + 1)
+    expect(useEditor.getState().undo).toHaveLength(1)
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ x: doc.annotations.labels[0]!.x, y: doc.annotations.labels[0]!.y })
+  })
+
+  it('undoLast clears a selection the restored snapshot disables', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(2, { x: 1, y: 2 }) // enables 2
+    s.select(2)
+    useEditor.getState().undoLast() // back to 2 disabled
+    expect(useEditor.getState().selectedId).toBeNull()
+  })
+
+  it('undoLast leaves a selection alone when the restored snapshot keeps it enabled', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.select(1) // label 1 is enabled in both the current and the restored snapshot
+    s.toggleObject(2, { x: 1, y: 2 })
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().selectedId).toBe(1)
+  })
+
+  it('a drag that ends where it began restores the committed document and records nothing', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const committedLabels = useEditor.getState().labels
+    const { x, y } = committedLabels.get(1)!
+    s.moveLabel(1, x + 5, y, false)
+    useEditor.getState().moveLabel(1, x, y)
+    expect(useEditor.getState().labels).toBe(committedLabels)
+    expect(useEditor.getState().undo).toHaveLength(0)
+    expect(useEditor.getState().save.status).toBe('saved')
+  })
+})
+
+describe('isEditable', () => {
+  it('is true for solved and failed, false while pending or solving', () => {
+    for (const [status, want] of [['solved', true], ['failed', true], ['pending', false], ['solving', false]] as const) {
+      useEditor.getState().load({ ...doc, image: { ...doc.image, solve_status: status } })
+      expect(isEditable(useEditor.getState())).toBe(want)
+    }
   })
 })
