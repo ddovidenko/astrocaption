@@ -163,7 +163,12 @@ Every enabled object has:
 - A **marker** at the object's position: circle sized to the catalogue radius (min 4 px), or a small ring for stars.
 - A **label** (text block): primary name, optional secondary line with aliases. The stored `x, y` is the
   **top-left of the text box**; line height is `ceil(size × 1.2)`; the alias line is set at `0.7 × size`
-  (min 6 px) and aliases are joined with ` · `.
+  (min 6 px) and aliases are joined with ` · `. The alias line follows one policy on both renderers
+  (`models.alias_names`, `names.ts`): the primary is dropped; star-catalogue ids (HD, HIP, SAO…) and
+  unknown abbreviations are dropped when a better alias exists; a common name contained in another
+  common name of the same object is dropped ("Orion Nebula" inside "Great Orion Nebula"); common names
+  come first in nova's order, then the rest in the primary-name ranking order; the first `max_aliases`
+  (0–5, default 2) survive. M 42 reads "M 42" over "Great Orion Nebula · NGC 1976".
 - A **leader line** from marker edge to label, drawn only when the label is farther than a gap threshold
   (`auto`: gap between marker edge and the closest point of the text box > 12·s). Owner can force it always/never.
 
@@ -199,7 +204,7 @@ Tabs:
 1. **Objects** — searchable list of every object nova returned. Columns: checkbox (enabled), name, type, radius. Hovering a row highlights on canvas; clicking pans to it. Bulk actions are "Enable shown" / "Disable shown" (both act on the rows the search and type filter currently show).
    Each is one change: the labels being enabled are placed one after another, each around the ones before it, and applied together, so a batch is one undo entry and one save.
 *M3 note:* the type filter uses nova's own annotation types — `NGC`, `IC`, `Bright stars`, `HD stars`, `Other` — rather than the galaxy/nebula/cluster/star buckets above; the richer OpenNGC types arrive in milestone 4. `HD stars` starts unchecked (#37): a narrow field can return dozens of duplicate HD rows, most of them a brighter object's twin. The min-size slider is not built.
-2. **Style** — global defaults: font (dropdown of bundled fonts, live preview), font size, text colour, marker colour, leader colour, halo (stroke) on/off + colour, marker line width, alias line on/off, **name preference** (`popular`: Messier/Caldwell/Sharpless/Barnard, then NGC, then IC, then other catalogues, then common names; `ngc_ic`: NGC/IC designations first; stars: proper name, then Bayer, then Flamsteed). Per-label overrides win over globals. `config.default_style` seeds these for new images.
+2. **Style** — global defaults: font (dropdown of bundled fonts, live preview), font size, text colour, marker colour, leader colour, halo (stroke) on/off + colour, marker line width, alias line on/off, max aliases (0–5), **name preference** (`popular`: Messier/Caldwell/Sharpless/Barnard, then NGC, then IC, then other catalogues, then common names; `ngc_ic`: NGC/IC designations first; stars: proper name, then Bayer, then Flamsteed). Per-label overrides win over globals. `config.default_style` seeds these for new images. The config page's name-preference dropdown offers "Default (…)" and the one other value; the Style tab lists both values by name.
 3. **Layout** — "Auto-arrange" button: flushes any pending save, then runs the collision-avoidance placer on all enabled labels (same algorithm as the initial placement); "Reset positions" asks for confirmation, then does the same. In M3 no label is pinned, so the two differ only by the confirmation — M4's pinned labels will make Reset discard pins. Neither touches the document until the placed labels come back; both then mark it dirty for the autosave to pick up. A 409 shows as the toolbar's Reload state, with one line in the tab saying the layout was not arranged; a label dragged while the request was in flight drops the answer rather than undoing the drag.
 4. **Image** — read-only solve facts (nova job link, field centre/size/rotation, pixel scale, image size) and the **Export** button (full resolution, matching the original JPEG's encoding). *M3 note:* re-solve, publish toggle and delete stay on the image card, not this tab.
 
@@ -261,7 +266,7 @@ objects (per image, from nova; immutable after solve)
 
 annotations (per image; the editable layout)
   image_id
-  style         json  (global StyleConfig)
+  style         json  (global StyleConfig; includes max_aliases since M4)
   labels        json  [{object_id, enabled, x, y, font_size?, text_override?, color?, show_aliases?, leader: auto|on|off, collided}]
   version       int   (bumped on every save; the editor's conflict check)
 ```
@@ -346,7 +351,7 @@ it, and the parity test asserts the engine is present. The
 render contract is pinned by `tests/fixtures/render/vectors.json` (`make render-vectors`): text boxes,
 line heights, alias sizes, ascents, leader segments and anchor boxes that `render.py` computes for real
 label strings from the nova fixtures, in every bundled font. `backend/tests/test_render_parity.py` and
-`frontend/src/editor/metrics.test.ts` replay it exactly. The browser measures text with
+`frontend/src/editor/metrics.test.ts` replay it exactly. The name ranking and alias policy have their own contract: `make names-vectors` writes `tests/fixtures/names/vectors.json` from `models.py` for every fixture name list and a hand-written edge set, and `backend/tests/test_names_vectors.py` and `frontend/src/editor/names.test.ts` replay it. The browser measures text with
 `textRendering: geometricPrecision` and must return every vector string's width within 0.5 px of
 Pillow's; the editor's rendering of the e2e field may differ from the server's annotated preview in at
 most 1 % of pixels by more than 48 (of 255) in any channel (`frontend/e2e/parity.spec.ts`).
