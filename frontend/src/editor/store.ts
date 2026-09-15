@@ -12,6 +12,15 @@ export interface LoadedDocument {
 
 export type SaveStatus = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict'
 
+/** The document at one point in its history: what undo/redo swap in and out. */
+export interface Snapshot {
+  labels: Map<number, Label>
+  style: StyleConfig
+}
+
+/** Undo entries kept per editing session (spec § A). */
+export const HISTORY_LIMIT = 100
+
 export interface EditorState {
   image: ImageOut | null
   objects: Map<number, ObjectOut>
@@ -29,6 +38,11 @@ export interface EditorState {
   changeSeq: number // increments on every document change; autosave keys on it
   pendingChanges: number // changes since markSaving; markSaved leaves 'dirty' when > 0
   save: { status: SaveStatus; message: string | null }
+  committed: Snapshot | null // the document as of the last commit; the head of the history
+  undo: Snapshot[]
+  redo: Snapshot[]
+  undoLast(): void
+  redoLast(): void
   load(doc: LoadedDocument): void
   setView(view: View): void
   select(id: number | null): void
@@ -64,6 +78,9 @@ const initial = {
   changeSeq: 0,
   pendingChanges: 0,
   save: { status: 'saved' as SaveStatus, message: null as string | null },
+  committed: null as Snapshot | null,
+  undo: [] as Snapshot[],
+  redo: [] as Snapshot[],
 }
 
 /** The one place the read-only rule lives: the canvas, the side panel, the toolbar and the
@@ -89,25 +106,57 @@ interface DocPatch {
  *  `Label` objects — `useShallow(enabledLabels)` in the canvas relies on identity. */
 function changedDoc(s: EditorState, patch: DocPatch, commit = true): Partial<EditorState> {
   if (!isEditable(s)) return {}
-  const next: Partial<EditorState> = {}
-  if (patch.labels) next.labels = patch.labels
-  if (patch.style) next.style = patch.style
+  const labels = patch.labels ?? s.labels
+  const style = patch.style ?? s.style
+  if (!style) return {}
+  const next: Partial<EditorState> = { labels, style }
   if (!commit) return next
-  next.changeSeq = s.changeSeq + 1
-  next.pendingChanges = s.pendingChanges + 1
-  next.save = s.save.status === 'conflict' ? s.save : { status: 'dirty', message: null }
-  return next
+  const snapshot: Snapshot = { labels, style }
+  // The previous head goes onto the undo stack; a fresh commit invalidates whatever was redone.
+  const undo = s.committed ? [...s.undo, s.committed].slice(-HISTORY_LIMIT) : s.undo
+  return {
+    ...next,
+    committed: snapshot,
+    undo,
+    redo: [],
+    changeSeq: s.changeSeq + 1,
+    pendingChanges: s.pendingChanges + 1,
+    save: s.save.status === 'conflict' ? s.save : { status: 'dirty', message: null },
+  }
+}
+
+/** For tests until the Style tab (M4 PR 3) has a real style action: commits `patch` as one change. */
+export function changedDocForTest(patch: { labels?: Map<number, Label>; style?: StyleConfig }): Partial<EditorState> {
+  return changedDoc(useEditor.getState(), patch)
+}
+
+/** Moves one snapshot from `from` to `to` and makes it the document. Shared by undo and redo:
+ *  the restored document is a commit like any other, so the autosave writes it. */
+function swapHistory(s: EditorState, from: Snapshot[], to: Snapshot[]): Partial<EditorState> {
+  if (!isEditable(s) || !s.committed || from.length === 0) return {}
+  const snapshot = from[from.length - 1]!
+  return {
+    labels: snapshot.labels,
+    style: snapshot.style,
+    committed: snapshot,
+    undo: from === s.undo ? from.slice(0, -1) : [...to, s.committed],
+    redo: from === s.redo ? from.slice(0, -1) : [...to, s.committed],
+    changeSeq: s.changeSeq + 1,
+    pendingChanges: s.pendingChanges + 1,
+    save: s.save.status === 'conflict' ? s.save : { status: 'dirty', message: null },
+  }
 }
 
 export const useEditor = create<EditorState>()((set) => ({
   ...initial,
-  load: (doc) =>
+  load: (doc) => {
+    const labels = new Map(doc.annotations.labels.map((l) => [l.object_id, l]))
     set({
       image: doc.image,
       objects: new Map(doc.objects.map((o) => [o.id, o])),
       objectOrder: doc.objects.map((o) => o.id),
       style: doc.annotations.style,
-      labels: new Map(doc.annotations.labels.map((l) => [l.object_id, l])),
+      labels,
       version: doc.annotations.version,
       updatedAt: doc.annotations.updated_at,
       fonts: new Map(doc.fonts.map((f) => [f.file, f])),
@@ -117,7 +166,11 @@ export const useEditor = create<EditorState>()((set) => ({
       fitted: false,
       changeSeq: 0,
       pendingChanges: 0,
-    }),
+      committed: { style: doc.annotations.style, labels },
+      undo: [],
+      redo: [],
+    })
+  },
   setView: (view) => set({ view }),
   select: (selectedId) => set({ selectedId }),
   hover: (hoveredId) => set({ hoveredId }),
@@ -128,6 +181,8 @@ export const useEditor = create<EditorState>()((set) => ({
       labels: new Map(),
       fonts: new Map(),
       objectOrder: [],
+      undo: [],
+      redo: [],
     }),
   setViewport: (w, h) =>
     set((s) => {
@@ -201,7 +256,9 @@ export const useEditor = create<EditorState>()((set) => ({
       save: s.pendingChanges > 0 ? { status: 'dirty', message: null } : { status: 'saved', message: null },
     })),
   markSaveError: (message) => set({ save: { status: 'error', message } }),
-  markConflict: (message) => set({ save: { status: 'conflict', message } }),
+  markConflict: (message) => set({ save: { status: 'conflict', message }, undo: [], redo: [] }),
+  undoLast: () => set((s) => swapHistory(s, s.undo, s.redo)),
+  redoLast: () => set((s) => swapHistory(s, s.redo, s.undo)),
 }))
 
 export function labelFor(state: EditorState, id: number): Label | undefined {

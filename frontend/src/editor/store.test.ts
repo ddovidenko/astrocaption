@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { documentForSave, enabledLabels, fontFor, isEditable, labelFor, useEditor, type LoadedDocument } from './store'
+import {
+  changedDocForTest,
+  documentForSave,
+  enabledLabels,
+  fontFor,
+  HISTORY_LIMIT,
+  isEditable,
+  labelFor,
+  useEditor,
+  type LoadedDocument,
+} from './store'
 import { makeDoc } from './testDoc'
 
 let doc: LoadedDocument
@@ -231,6 +241,94 @@ describe('document actions', () => {
     s.toggleObject(1)
     expect(useEditor.getState().labels.get(1)?.enabled).toBe(false)
     expect(useEditor.getState().save.status).toBe('conflict')
+  })
+})
+
+describe('undo/redo', () => {
+  it('a commit pushes the previous document and clears redo', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    expect(useEditor.getState().undo).toHaveLength(0)
+    s.toggleObject(1)
+    expect(useEditor.getState().undo).toHaveLength(1)
+    expect(useEditor.getState().redo).toHaveLength(0)
+  })
+
+  it('undoLast restores the labels and commits (autosave sees a change)', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(1)
+    const seq = useEditor.getState().changeSeq
+    useEditor.getState().undoLast()
+    const state = useEditor.getState()
+    expect(state.labels.get(1)?.enabled).toBe(true)
+    expect(state.changeSeq).toBe(seq + 1)
+    expect(state.save.status).toBe('dirty')
+    expect(state.undo).toHaveLength(0)
+    expect(state.redo).toHaveLength(1)
+  })
+
+  it('redoLast re-applies what undoLast took back', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(1)
+    useEditor.getState().undoLast()
+    useEditor.getState().redoLast()
+    expect(useEditor.getState().labels.get(1)?.enabled).toBe(false)
+    expect(useEditor.getState().redo).toHaveLength(0)
+    expect(useEditor.getState().undo).toHaveLength(1)
+  })
+
+  it('a new commit after an undo drops the redo stack', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(1)
+    useEditor.getState().undoLast()
+    useEditor.getState().toggleObject(2, { x: 1, y: 2 })
+    expect(useEditor.getState().redo).toHaveLength(0)
+  })
+
+  it('undo and redo are no-ops on empty stacks and while not editable', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const seq = useEditor.getState().changeSeq
+    s.undoLast()
+    s.redoLast()
+    expect(useEditor.getState().changeSeq).toBe(seq)
+    s.toggleObject(1)
+    useEditor.setState({ image: { ...doc.image, solve_status: 'solving' } })
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().labels.get(1)?.enabled).toBe(false)
+  })
+
+  it('the history is capped at HISTORY_LIMIT entries', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    for (let i = 0; i < HISTORY_LIMIT + 10; i++) useEditor.getState().toggleObject(1)
+    expect(useEditor.getState().undo).toHaveLength(HISTORY_LIMIT)
+  })
+
+  it('load and markConflict clear both stacks', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(1)
+    useEditor.getState().undoLast()
+    useEditor.getState().markConflict('changed elsewhere')
+    expect(useEditor.getState().undo).toHaveLength(0)
+    expect(useEditor.getState().redo).toHaveLength(0)
+    useEditor.getState().load(makeDoc())
+    useEditor.getState().toggleObject(1)
+    useEditor.getState().load(makeDoc())
+    expect(useEditor.getState().undo).toHaveLength(0)
+  })
+
+  it('a style change is one undo entry too', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    useEditor.setState(changedDocForTest({ style: { ...doc.annotations.style, font_size: 30 } }))
+    expect(useEditor.getState().style?.font_size).toBe(30)
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().style?.font_size).toBe(24)
   })
 })
 
