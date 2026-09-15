@@ -276,7 +276,12 @@ export const useEditor = create<EditorState>()((set) => ({
       // undone back to the same value, or a reset clicked when already at the defaults, must not
       // manufacture an undo entry or a save.
       const changed = (Object.keys(patch) as (keyof StyleConfig)[]).some((k) => patch[k] !== current[k])
-      if (!changed) return {}
+      // A font_file patch that resolves to the font already in the document is still a real change
+      // while a fallback notice is pending: the stored row still names the gone font, so the
+      // document differs from it even though nothing here looks different. Let it through so the
+      // resolved font is committed (autosaved) and the notice clears below, as it promises.
+      const forced = s.fontFallback !== null && 'font_file' in patch
+      if (!changed && !forced) return {}
       const next = changedDoc(s, { style: { ...current, ...patch } })
       if (!next) return {}
       return { ...next, ...('font_file' in patch ? { fontFallback: null } : {}) }

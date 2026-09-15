@@ -218,6 +218,15 @@ describe('document actions', () => {
     expect(useEditor.getState().style).toBe(styleBefore)
   })
 
+  it('setStyle commits a font_file patch equal to the current font while a fallback is pending', () => {
+    useEditor.getState().load({ ...doc, fontFallback: { stored: 'Gone.ttf', used: doc.annotations.style.font_file } })
+    useEditor.getState().setStyle({ font_file: doc.annotations.style.font_file })
+    const state = useEditor.getState()
+    expect(state.undo).toHaveLength(1)
+    expect(state.save.status).toBe('dirty')
+    expect(state.fontFallback).toBeNull()
+  })
+
   it('applyLabels throws on an id the store does not have', () => {
     const s = useEditor.getState()
     s.load(doc)

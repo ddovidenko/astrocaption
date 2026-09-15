@@ -150,7 +150,10 @@ export default function StyleTab() {
   }
 
   async function changeFont(file: string): Promise<void> {
-    if (!file || file === style?.font_file) return
+    // Choosing the font already in use is normally a no-op, except while a fallback notice is
+    // pending: the notice promises that "picking a font" clears it, and store.setStyle lets that
+    // same-value patch through in that case (#C), so it must reach setStyle here too.
+    if (!file || (file === style?.font_file && !fallback)) return
     setFontLoading(file)
     setFontError(null)
     try {
