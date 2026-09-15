@@ -3,7 +3,7 @@ import type { StyleDefaults } from '../api'
 import { loadBundledFont } from '../editor/fonts'
 import { fontFamilyFor } from '../editor/metrics'
 import type { StyleForm } from './styleForm'
-import { PREVIEW_SIZE, previewCap, previewGeometry, previewLines } from './labelPreview'
+import { previewCap, previewGeometry, previewLines } from './labelPreview'
 
 /** Fixed stars so the preview is the same every time. */
 const STARS = [
@@ -67,7 +67,7 @@ export default function LabelPreview({ style, defaults }: { style: StyleForm; de
       ))}
       <circle cx="120" cy="72" r="34" fill="none" stroke={marker} strokeWidth={g.markerWidth} />
       <line x1="154" y1="72" x2="196" y2="62" stroke={leader} strokeWidth={g.markerWidth} />
-      <text x="204" y={aliasesOn ? 62 : 70} fill={text} fontFamily={family} fontSize={PREVIEW_SIZE} {...strokeProps}>
+      <text x="204" y={aliasesOn ? 62 : 70} fill={text} fontFamily={family} fontSize={g.textSize} {...strokeProps}>
         {lines.primary}
       </text>
       {aliasesOn && (
