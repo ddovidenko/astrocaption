@@ -99,7 +99,7 @@ interface EntryProps {
   font: FontOut
   editable: boolean
   select: (id: number | null) => void
-  moveLabel: (id: number, x: number, y: number) => void
+  moveLabel: (id: number, x: number, y: number, commit?: boolean) => void
   /** Whether Space is held: a pan gesture, which wins over selecting or dragging a label. */
   spaceRef: RefObject<boolean>
   onDrawError: (message: string) => void
@@ -168,7 +168,7 @@ const LabelEntry = memo(function LabelEntry({
         }}
         onDragMove={(e) => {
           if (suppressDragRef.current) return
-          moveLabel(label.object_id, e.target.x(), e.target.y())
+          moveLabel(label.object_id, e.target.x(), e.target.y(), false)
         }}
         onDragEnd={(e) => {
           const suppressed = suppressDragRef.current

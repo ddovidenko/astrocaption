@@ -330,6 +330,35 @@ describe('undo/redo', () => {
     useEditor.getState().undoLast()
     expect(useEditor.getState().style?.font_size).toBe(24)
   })
+
+  it('a drag coalesces into one undo entry: preview frames record nothing, drag-end commits', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const seq = useEditor.getState().changeSeq
+    s.moveLabel(1, 10, 20, false)
+    useEditor.getState().moveLabel(1, 11, 21, false)
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ x: 11, y: 21 })
+    expect(useEditor.getState().changeSeq).toBe(seq)
+    expect(useEditor.getState().undo).toHaveLength(0)
+    expect(useEditor.getState().save.status).toBe('saved')
+    useEditor.getState().moveLabel(1, 12, 22)
+    expect(useEditor.getState().changeSeq).toBe(seq + 1)
+    expect(useEditor.getState().undo).toHaveLength(1)
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ x: doc.annotations.labels[0]!.x, y: doc.annotations.labels[0]!.y })
+  })
+
+  it('a drag that ends where it began restores the committed document and records nothing', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const committedLabels = useEditor.getState().labels
+    const { x, y } = committedLabels.get(1)!
+    s.moveLabel(1, x + 5, y, false)
+    useEditor.getState().moveLabel(1, x, y)
+    expect(useEditor.getState().labels).toBe(committedLabels)
+    expect(useEditor.getState().undo).toHaveLength(0)
+    expect(useEditor.getState().save.status).toBe('saved')
+  })
 })
 
 describe('isEditable', () => {

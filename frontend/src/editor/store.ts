@@ -53,7 +53,7 @@ export interface EditorState {
   actual(): void
   panTo(objectId: number): void
   toggleObject(id: number, placed?: { x: number; y: number; collided?: boolean }): void
-  moveLabel(id: number, x: number, y: number): void
+  moveLabel(id: number, x: number, y: number, commit?: boolean): void
   applyLabels(labels: Label[]): void
   markSaving(): void
   markSaved(version: number, updatedAt: string): void
@@ -228,13 +228,25 @@ export const useEditor = create<EditorState>()((set) => ({
       if (!next.enabled && s.selectedId === id) patch.selectedId = null
       return patch
     }),
-  moveLabel: (id, x, y) =>
+  moveLabel: (id, x, y, commit = true) =>
     set((s) => {
       const label = s.labels.get(id)
-      // A move to where the label already is changes nothing: saying so would only mark the
-      // document dirty and clear the placer's `collided` verdict (Konva fires dragmove/dragend
-      // at the start position for a gesture that never moved).
-      if (!label || (label.x === x && label.y === y)) return {}
+      if (!label) return {}
+      if (!commit) {
+        if (label.x === x && label.y === y) return {}
+        const labels = new Map(s.labels)
+        labels.set(id, { ...label, x, y, collided: false })
+        return changedDoc(s, { labels }, false)
+      }
+      // A commit is measured against the last committed position, not the last preview frame:
+      // Konva fires dragmove/dragend at the start position for a gesture that never moved, and a
+      // drag that came back to where it began has changed nothing worth an undo entry or a save
+      // (it would also clear the placer's `collided` verdict). Restoring the committed map keeps
+      // the label identities the canvas memoises on.
+      const origin = s.committed?.labels.get(id) ?? label
+      if (origin.x === x && origin.y === y) {
+        return s.committed && s.labels !== s.committed.labels ? { labels: s.committed.labels } : {}
+      }
       const labels = new Map(s.labels)
       labels.set(id, { ...label, x, y, collided: false })
       return changedDoc(s, { labels })
