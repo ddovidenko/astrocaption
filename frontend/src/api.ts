@@ -67,6 +67,7 @@ export interface StyleConfig {
   marker_width: number
   marker_min_radius: number
   show_aliases: boolean
+  max_aliases: number
   name_preference: NamePreference
 }
 
@@ -118,6 +119,7 @@ export interface StyleDefaults {
   halo: boolean
   halo_color: string
   show_aliases: boolean
+  max_aliases: number
   name_preference: NamePreference
 }
 

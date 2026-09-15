@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import asdict
+from itertools import product
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.config import REPO_ROOT
 from app.fonts import DEFAULT_FONT_FILE, layout_engine_available, list_fonts, load_font
 from app.layout import default_style
-from app.models import MAX_FONT_SIZE, MIN_FONT_SIZE, Label, LeaderMode, SolveObject, StyleConfig
+from app.models import (
+    DEFAULT_MAX_ALIASES,
+    MAX_ALIASES,
+    MAX_FONT_SIZE,
+    MIN_FONT_SIZE,
+    Label,
+    LeaderMode,
+    NamePreference,
+    SolveObject,
+    StyleConfig,
+)
 from app.objects import objects_from_nova
 from app.placement import ANCHORS, Box, anchor_box, scale_unit
 from app.render import label_text, leader_segment, leader_visible, marker_radius, measure_label
@@ -44,8 +55,9 @@ GLYPH_STRINGS = (
     "θ1 Ori C",
     "ι Ori · 44 Ori",
     "υ Ori · 36 Ori",
-    "M 43 · Mairan's Nebula",
-    "M 42 · LBN 974 · Great Orion Nebula · Orion Nebula",
+    "Mairan's Nebula · M 43",
+    "Great Orion Nebula · NGC 1976",
+    "Great Orion Nebula · NGC 1976 · LBN 974",
     "NGC 1976",
     "HD 198639",
     "the Running Man Nebula",
@@ -96,15 +108,18 @@ def fixture_objects() -> list[SolveObject]:
 
 
 def label_strings(objects: list[SolveObject]) -> list[str]:
-    """Every primary and alias line a fixture object can produce under either name preference."""
+    """Every primary and alias line a fixture object can produce under either name preference
+    and both alias caps (the default and the maximum)."""
     strings: set[str] = set()
-    for obj in objects:
-        for preference in ("popular", "ngc_ic"):
-            style = StyleConfig(name_preference=preference)
-            text = label_text(obj, Label(object_id=obj.id), style)
-            strings.add(text.primary)
-            if text.alias:
-                strings.add(text.alias)
+    preferences: tuple[NamePreference, ...] = ("popular", "ngc_ic")
+    for obj, preference, max_aliases in product(
+        objects, preferences, (DEFAULT_MAX_ALIASES, MAX_ALIASES)
+    ):
+        style = StyleConfig(name_preference=preference, max_aliases=max_aliases)
+        text = label_text(obj, Label(object_id=obj.id), style)
+        strings.add(text.primary)
+        if text.alias:
+            strings.add(text.alias)
     return sorted(strings)
 
 
@@ -150,14 +165,15 @@ def _label_case(
 
 def label_vectors(fonts_dir: Path, objects: list[SolveObject]) -> list[dict[str, Any]]:
     """Every fixture object under the size-relative default style and under a second style
-    with a bold condensed font, NGC/IC names first, a per-label size, and some aliases or
-    names overridden."""
+    with a bold condensed font, NGC/IC names first, a per-label size, some aliases or names
+    overridden, and the alias line at its five-name cap."""
     base = default_style(3000, 2000, fonts_dir)  # s = 3: font 36, marker_min_radius 18
     other = base.model_copy(
         update={
             "font_file": "RobotoCondensed-Bold.ttf",
             "name_preference": "ngc_ic",
             "marker_min_radius": 4,
+            "max_aliases": MAX_ALIASES,
         }
     )
     cases: list[dict[str, Any]] = []
@@ -166,7 +182,7 @@ def label_vectors(fonts_dir: Path, objects: list[SolveObject]) -> list[dict[str,
         tuned = Label(
             object_id=obj.id,
             font_size=LABEL_SIZES[i % len(LABEL_SIZES)],
-            show_aliases=None if i % 3 else False,
+            show_aliases=False if i % 3 == 1 else None,
             text_override="Override · text" if i % 5 == 0 else None,
         )
         cases.append(_label_case(fonts_dir, other, tuned, obj))

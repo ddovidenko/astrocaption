@@ -1,5 +1,6 @@
 import type { NamePreference, StyleDefaults } from '../api'
-import { ALIAS_SCALE, LINE_HEIGHT } from '../editor/metrics'
+import { MAX_ALIASES, aliasNames, primaryName } from '../editor/names'
+import { ALIAS_SCALE, ALIAS_SEP, LINE_HEIGHT } from '../editor/metrics'
 import type { StyleForm } from './configForm'
 
 /** The preview draws at a fixed text size; every other length keeps its ratio to the font size. */
@@ -7,14 +8,22 @@ export const PREVIEW_SIZE = 22
 /** StyleConfig.font_size: what an unset size means for the ratios below. */
 export const ASSUMED_FONT_SIZE = 24
 
-/** One object, two ways round: the primary line follows the name preference (SPEC § 6.3). */
-const LINES: Record<NamePreference, { primary: string; aliases: string }> = {
-  popular: { primary: 'M 42', aliases: 'NGC 1976 · Orion Nebula' },
-  ngc_ic: { primary: 'NGC 1976', aliases: 'M 42 · Orion Nebula' },
+/** One object, both ways round: M 42's real name list through the same ranking and alias
+ *  policy the renderers use, so the sample tracks the rules (SPEC § 6.2). */
+const SAMPLE = ['NGC 1976', 'M 42', 'LBN 974', 'Great Orion Nebula', 'Orion Nebula']
+
+export function previewLines(preference: '' | NamePreference, fallback: NamePreference, maxAliases: number) {
+  const p = preference || fallback
+  return { primary: primaryName(SAMPLE, p), aliases: aliasNames(SAMPLE, p, maxAliases).join(ALIAS_SEP) }
 }
 
-export function previewLines(preference: '' | NamePreference, fallback: NamePreference) {
-  return LINES[preference || fallback]
+/** Clamp the raw max-aliases field to what the API accepts: blank or unparseable falls back to
+ *  `fallback`, everything else is truncated and clamped to 0..MAX_ALIASES. */
+export function previewCap(raw: string, fallback: number): number {
+  if (raw.trim() === '') return fallback
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(MAX_ALIASES, Math.max(0, Math.trunc(n)))
 }
 
 export interface PreviewGeometry {

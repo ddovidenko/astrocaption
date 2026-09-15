@@ -50,6 +50,7 @@ export function makeDoc(): LoadedDocument {
     marker_width: 2,
     marker_min_radius: 6,
     show_aliases: false,
+    max_aliases: 2,
     name_preference: 'popular',
   }
 

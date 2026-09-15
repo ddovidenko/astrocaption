@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { ConfigOut } from '../api'
-import { buildUpdate, normalizeHex, overridesFromStyleForm, sameOverrides, styleFormFromOverrides, type StyleForm } from './configForm'
+import {
+  buildUpdate,
+  normalizeHex,
+  otherPreference,
+  overridesFromStyleForm,
+  PREFERENCE_LABELS,
+  sameOverrides,
+  styleFormFromOverrides,
+  type StyleForm,
+} from './configForm'
 
 const empty: StyleForm = {
   font_file: '',
@@ -14,6 +23,7 @@ const empty: StyleForm = {
   marker_width: '',
   marker_min_radius: '',
   show_aliases: '',
+  max_aliases: '',
   name_preference: '',
 }
 
@@ -32,6 +42,19 @@ describe('config form helpers', () => {
 
   it('treats a non-numeric size as unset', () => {
     expect(overridesFromStyleForm({ ...empty, marker_width: 'abc' })).toEqual({})
+  })
+
+  it('round-trips max_aliases and drops it when blank', () => {
+    expect(styleFormFromOverrides({ max_aliases: 3 }).max_aliases).toBe('3')
+    expect(overridesFromStyleForm({ ...styleFormFromOverrides({}), max_aliases: '0' })).toEqual({ max_aliases: 0 })
+    expect(overridesFromStyleForm({ ...styleFormFromOverrides({}), max_aliases: '' })).toEqual({})
+  })
+
+  it('names the other preference and labels both', () => {
+    expect(otherPreference('popular')).toBe('ngc_ic')
+    expect(otherPreference('ngc_ic')).toBe('popular')
+    expect(PREFERENCE_LABELS.popular).toContain('Messier')
+    expect(PREFERENCE_LABELS.ngc_ic).toContain('NGC')
   })
 
   it('compares override sets regardless of key order', () => {
@@ -58,6 +81,7 @@ describe('config form helpers', () => {
         halo: true,
         halo_color: '#000000',
         show_aliases: true,
+        max_aliases: 2,
         name_preference: 'popular',
       },
       locked: [],

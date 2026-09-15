@@ -57,7 +57,7 @@ def test_measurement_uses_line_heights_and_alias_scale() -> None:
 def test_label_text_override_and_alias_toggle() -> None:
     style = default_style(3000, 2000, FONTS_DIR)
     t = label_text(OBJECTS[0], Label(object_id=1), style)
-    assert (t.primary, t.alias) == ("M 42", "NGC 1976 · Orion Nebula")
+    assert (t.primary, t.alias) == ("M 42", "Orion Nebula · NGC 1976")
     t = label_text(
         OBJECTS[0], Label(object_id=1, text_override="  Orion  ", show_aliases=False), style
     )

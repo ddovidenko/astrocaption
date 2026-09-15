@@ -92,9 +92,9 @@ applies to newly solved images. Only the fields you list are overridden; anythin
 out keeps its built-in default, and for `font_size`, `halo_width`, `marker_width` and
 `marker_min_radius` that default is derived from each image's size. Colours are `#RRGGBB`
 (`"#ffd54a"`, not `"yellow"`), sizes are whole numbers within the bounds the API accepts
-(font size 6-200, halo and marker width 0-40 and 1-40, marker minimum radius 1-400) and the
-font is a bundled file name. The bundled families are listed in `fonts/README.md`; a
-`font_file` that is not bundled is ignored with a server-log warning and the default
+(font size 6-200, halo and marker width 0-40 and 1-40, marker minimum radius 1-400, max
+aliases 0-5) and the font is a bundled file name. The bundled families are listed in
+`fonts/README.md`; a `font_file` that is not bundled is ignored with a server-log warning and the default
 `Inter-Regular.ttf` is used. A value the page cannot represent — a colour by name, a size out
 of range, a field that is not part of the style — is dropped when the file is read, with a
 warning in the server log naming the field; the rest of your `default_style` still applies.
@@ -102,7 +102,12 @@ warning in the server log naming the field; the rest of your `default_style` sti
 `name_preference` picks the label's primary line: `popular`
 (Messier, Caldwell, Sharpless and Barnard first, then NGC, then IC, then other catalogues,
 then common names) or `ngc_ic` (NGC and IC designations first). Stars show their proper name
-first, then the Bayer letter, then the Flamsteed number. Other names appear on the alias line.
+first, then the Bayer letter, then the Flamsteed number. The alias line drops the primary
+name, prefers common names ("Great Orion Nebula" before "NGC 1976"), leaves out
+star-catalogue ids when a better name exists, and shows at most `max_aliases` names (default
+2; 0 hides the line). Images solved before this version keep their saved layout, but their
+alias lines follow the new rule, so exports made after the upgrade can differ from earlier
+ones.
 
 The config page edits the same object: blank fields keep the built-in defaults, and saving
 stores exactly the fields shown filled in, so clearing one there removes it from the file.

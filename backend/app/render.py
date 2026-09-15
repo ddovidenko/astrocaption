@@ -90,7 +90,7 @@ def label_text(obj: SolveObject, label: Label, style: StyleConfig) -> LabelText:
     override = (label.text_override or "").strip()
     primary = override or obj.primary_name_for(style.name_preference)
     show = style.show_aliases if label.show_aliases is None else label.show_aliases
-    aliases = obj.aliases_for(style.name_preference)
+    aliases = obj.aliases_for(style.name_preference, style.max_aliases)
     alias = ALIAS_SEP.join(aliases) if show and aliases else None
     return LabelText(primary=primary, alias=alias)
 

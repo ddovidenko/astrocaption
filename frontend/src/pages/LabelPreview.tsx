@@ -3,7 +3,7 @@ import type { StyleDefaults } from '../api'
 import { loadBundledFont } from '../editor/fonts'
 import { fontFamilyFor } from '../editor/metrics'
 import type { StyleForm } from './configForm'
-import { PREVIEW_SIZE, previewGeometry, previewLines } from './labelPreview'
+import { PREVIEW_SIZE, previewCap, previewGeometry, previewLines } from './labelPreview'
 
 /** Fixed stars so the preview is the same every time. */
 const STARS = [
@@ -50,8 +50,10 @@ export default function LabelPreview({ style, defaults }: { style: StyleForm; de
   const marker = style.marker_color || defaults.marker_color
   const leader = style.leader_color || defaults.leader_color
   const haloColor = style.halo_color || defaults.halo_color
-  const aliasesOn = style.show_aliases === '' ? defaults.show_aliases : style.show_aliases === 'on'
-  const lines = previewLines(style.name_preference, defaults.name_preference)
+  const aliasesOnSetting = style.show_aliases === '' ? defaults.show_aliases : style.show_aliases === 'on'
+  const maxAliases = previewCap(style.max_aliases, defaults.max_aliases)
+  const lines = previewLines(style.name_preference, defaults.name_preference, maxAliases)
+  const aliasesOn = aliasesOnSetting && lines.aliases !== ''
   const g = previewGeometry(style, defaults)
   const description = `Preview: ${lines.primary}${aliasesOn ? `, ${lines.aliases}` : ''} in ${fontFile}`
   const strokeProps = { stroke: haloColor, strokeWidth: g.haloWidth, paintOrder: 'stroke' as const, strokeLinejoin: 'round' as const }
