@@ -148,8 +148,9 @@ renderers, pinned by render vectors:
 1. Candidate endpoints on the text box, in order: nearest point (today's), the four edge midpoints
    (top, right, bottom, left), the four corners (top-left, top-right, bottom-right, bottom-left).
 2. A candidate is rejected if the segment from the marker edge to it passes within `r + pad` of
-   the centre of any *other* enabled object whose marker radius `r` is at least the style's
-   minimum (pad = the placer's `4·s`), or passes through that object's text box.
+   the centre of any *other* enabled object, where `r = max(catalogue radius, marker_min_radius)`
+   (the drawn ring) and `pad` is the placer's `4·s`. Only rings block, as in the placer; text
+   boxes do not.
 3. The first accepted candidate wins; if none is accepted the nearest point is used.
 4. `leader_visible` (the `auto` gap rule) is evaluated on the chosen segment.
 
