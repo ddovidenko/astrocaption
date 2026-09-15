@@ -30,6 +30,7 @@ make reset-password   # in the compose container; see docs/LOCKOUT.md
 make reset-password-dev   # the same on a make dev checkout
 make placement-vectors   # regenerate tests/fixtures/placement/*.json from the Python placer
 make render-vectors      # regenerate tests/fixtures/render/vectors.json from render.py (text boxes, ascents, leaders, anchors)
+make names-vectors       # regenerate tests/fixtures/names/vectors.json from models.py (name ranking + alias line)
 make names-catalog       # rebuild backend/app/catalog/names.json from OpenNGC (network)
 make fonts               # refresh fonts/*.ttf + LICENSES from Google Fonts (network); family list in backend/scripts/fetch_fonts.py
 make favicons            # regenerate frontend/public/ icons from frontend/icon/icon-source.png
@@ -48,6 +49,8 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
   same change to the other and a regenerated contract: `make render-vectors`
   rewrites `tests/fixtures/render/vectors.json` from `render.py`, `backend/tests/test_render_parity.py` fails
   while it is stale, `frontend/src/editor/metrics.ts` (pinned by `metrics.test.ts`) must be changed to match,
+  the name ranking and alias policy are pinned the same way by `make names-vectors` (`tests/fixtures/names/vectors.json`,
+  replayed by `backend/tests/test_names_vectors.py` and `frontend/src/editor/names.test.ts`),
   and the pixel diff in `frontend/e2e/parity.spec.ts` (Konva stage exported as PNG at a fixed zoom against
   the server's annotated preview, within the tolerance in SPEC § 9)
   must still pass. Konva needs a browser, so the pixel diff lives in the Playwright suite, not pytest.

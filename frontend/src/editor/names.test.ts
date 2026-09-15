@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { aliasNames, nameCategory, primaryName } from './names'
+import raw from '../../../tests/fixtures/names/vectors.json'
+import { MAX_ALIASES, aliasNames, nameCategory, primaryName } from './names'
 
 describe('nameCategory', () => {
   it.each([
@@ -76,5 +77,36 @@ describe('aliasNames', () => {
       'the Witch Head Nebula',
     ])
     expect(aliasNames(['NGC 1', 'Eyes', 'Eyes Galaxy'], 'popular', 5)).toEqual(['Eyes Galaxy'])
+  })
+})
+
+interface NamesVectors {
+  max_aliases: number
+  cases: {
+    names: string[]
+    categories: string[]
+    popular: { primary: string; aliases: Record<string, string[]> }
+    ngc_ic: { primary: string; aliases: Record<string, string[]> }
+  }[]
+}
+const vectors = raw as unknown as NamesVectors
+
+describe('names vectors', () => {
+  it('loaded the contract the Python side generated', () => {
+    expect(vectors.max_aliases).toBe(MAX_ALIASES)
+    expect(vectors.cases.length).toBeGreaterThan(20)
+  })
+  it('reproduces every category, primary line and alias line at every cap', () => {
+    for (const c of vectors.cases) {
+      expect(c.names.map(nameCategory), c.names.join(' | ')).toEqual(c.categories)
+      for (const preference of ['popular', 'ngc_ic'] as const) {
+        expect(primaryName(c.names, preference), `${preference}: ${c.names.join(' | ')}`).toBe(c[preference].primary)
+        for (let cap = 0; cap <= vectors.max_aliases; cap++) {
+          expect(aliasNames(c.names, preference, cap), `${preference} cap ${cap}: ${c.names.join(' | ')}`).toEqual(
+            c[preference].aliases[String(cap)],
+          )
+        }
+      }
+    }
   })
 })

@@ -8,7 +8,7 @@ NPM       := npm --prefix frontend
 # True when the `make dev-service` systemd unit is serving (false where systemd is absent).
 DEV_UNIT_ACTIVE := command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet astrocaption-dev
 
-.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors render-vectors names-catalog fonts record-fixtures favicons e2e-fixture e2e clean
+.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors render-vectors names-vectors names-catalog fonts record-fixtures favicons e2e-fixture e2e clean
 
 help:
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -114,6 +114,9 @@ placement-vectors: $(VENV)/.installed ## Regenerate tests/fixtures/placement/*.j
 
 render-vectors: $(VENV)/.installed ## Regenerate tests/fixtures/render/vectors.json from render.py (the canvas parity contract)
 	cd backend && .venv/bin/python scripts/make_render_vectors.py
+
+names-vectors: $(VENV)/.installed ## Regenerate tests/fixtures/names/vectors.json from models.py (name ranking + alias line, pins the TypeScript port)
+	cd backend && .venv/bin/python scripts/make_names_vectors.py
 
 names-catalog: $(VENV)/.installed ## Rebuild backend/app/catalog/names.json from OpenNGC (network)
 	cd backend && .venv/bin/python scripts/build_names_catalog.py
