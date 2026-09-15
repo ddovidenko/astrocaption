@@ -9,6 +9,7 @@ bundled files that are already on disk.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,19 @@ def test_resolve_font_file_logs_when_the_default_itself_is_missing(
     assert resolved == DEFAULT_FONT_FILE
     assert any("Gone-Regular.ttf" in r.message and r.levelname == "WARNING" for r in caplog.records)
     assert any(DEFAULT_FONT_FILE in r.message and r.levelname == "ERROR" for r in caplog.records)
+
+
+def test_resolve_font_file_uses_the_font_list_as_the_one_predicate(tmp_path: Path) -> None:
+    """A file that exists but that list_fonts skips (unreadable) resolves to the default (#63)."""
+    fonts_dir = tmp_path / "fonts"
+    fonts_dir.mkdir()
+    shutil.copy(FONTS_DIR / DEFAULT_FONT_FILE, fonts_dir / DEFAULT_FONT_FILE)
+    (fonts_dir / "Broken-Regular.ttf").write_bytes(b"not a font")
+    list_fonts.cache_clear()
+    resolve_font_file.cache_clear()
+    assert [f.file for f in list_fonts(fonts_dir)] == [DEFAULT_FONT_FILE]
+    assert resolve_font_file(fonts_dir, "Broken-Regular.ttf") == DEFAULT_FONT_FILE
+    assert resolve_font_file(fonts_dir, DEFAULT_FONT_FILE) == DEFAULT_FONT_FILE
 
 
 def test_ascent_table_is_the_renderers_metric_at_every_size() -> None:
