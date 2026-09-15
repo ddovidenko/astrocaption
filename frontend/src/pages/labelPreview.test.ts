@@ -12,6 +12,7 @@ const defaults: StyleDefaults = {
   halo: true,
   halo_color: '#000000',
   show_aliases: true,
+  max_aliases: 2,
   name_preference: 'popular',
 }
 

@@ -58,6 +58,7 @@ describe('config form helpers', () => {
         halo: true,
         halo_color: '#000000',
         show_aliases: true,
+        max_aliases: 2,
         name_preference: 'popular',
       },
       locked: [],

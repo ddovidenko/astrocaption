@@ -50,6 +50,9 @@ this server. Only ``timeout`` is resumable; see ``ImageOut.check_available``.
 # Catalogue objects (immutable after a solve)
 # ---------------------------------------------------------------------------
 
+DEFAULT_MAX_ALIASES = 2
+MAX_ALIASES = 5
+
 
 class SolveObject(BaseModel):
     """One catalogued object nova found in the field, in original pixels."""
@@ -64,9 +67,10 @@ class SolveObject(BaseModel):
     def primary_name_for(self, preference: NamePreference = "popular") -> str:
         return primary_name(self.catalog_names, preference)
 
-    def aliases_for(self, preference: NamePreference = "popular") -> list[str]:
-        p = self.primary_name_for(preference)
-        return [n for n in self.catalog_names if n != p]
+    def aliases_for(
+        self, preference: NamePreference = "popular", max_aliases: int = DEFAULT_MAX_ALIASES
+    ) -> list[str]:
+        return alias_names(self.catalog_names, preference, max_aliases)
 
     @property
     def primary_name(self) -> str:
@@ -241,6 +245,43 @@ def primary_name(names: list[str], preference: NamePreference = "popular") -> st
     return ranked[0][1]
 
 
+def alias_names(
+    names: list[str], preference: NamePreference = "popular", max_aliases: int = DEFAULT_MAX_ALIASES
+) -> list[str]:
+    """The alias line, in order and capped (SPEC § 6.2):
+
+    1. the primary is dropped;
+    2. star-catalogue ids and unknown abbreviations are dropped when a better alias exists;
+    3. a common name contained in another common name of the same object is dropped
+       (case-insensitive, whole string: "Orion Nebula" inside "Great Orion Nebula");
+    4. common names first in nova's order, then the rest in the primary-name ranking order;
+    5. the first ``max_aliases`` survive.
+
+    ``frontend/src/editor/names.ts`` is a line-by-line port; ``make names-vectors`` pins the two.
+    """
+    primary = primary_name(names, preference)
+    rest = [n for n in names if n != primary]
+    category = {n: name_category(n) for n in rest}
+    weak = {"star", "designation"}
+    if any(category[n] not in weak for n in rest):
+        rest = [n for n in rest if category[n] not in weak]
+    commons = [n for n in rest if category[n] == "common"]
+
+    def nested(n: str) -> bool:
+        return category[n] == "common" and any(o != n and n.lower() in o.lower() for o in commons)
+
+    rest = [n for n in rest if not nested(n)]
+    order = _RANKING[preference]
+    ranked = sorted(
+        enumerate(rest),
+        key=lambda kv: (
+            0 if category[kv[1]] == "common" else 1 + order.index(category[kv[1]]),
+            kv[0],
+        ),
+    )
+    return [n for _, n in ranked][:max_aliases]
+
+
 # ---------------------------------------------------------------------------
 # Annotation layout (editable)
 # ---------------------------------------------------------------------------
@@ -261,7 +302,8 @@ HexColor = Annotated[str, StringConstraints(pattern=HEX_COLOR)]
 
 class StyleConfig(BaseModel):
     """Global style for one image. All lengths are original-image pixels; colours are #RRGGBB.
-    Unknown fields are refused so a typo cannot be stored (rows are written by this model)."""
+    Unknown fields are refused so a typo cannot be stored (rows are written by this model).
+    ``max_aliases`` caps the alias line (0 means none)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -276,6 +318,7 @@ class StyleConfig(BaseModel):
     marker_width: int = Field(default=2, ge=1, le=MAX_STROKE_WIDTH)
     marker_min_radius: int = Field(default=6, ge=1, le=MAX_MARKER_MIN_RADIUS)
     show_aliases: bool = True
+    max_aliases: int = Field(default=DEFAULT_MAX_ALIASES, ge=0, le=MAX_ALIASES)
     name_preference: NamePreference = "popular"
 
 
@@ -501,6 +544,7 @@ class StyleDefaults(BaseModel):
     halo: bool
     halo_color: str
     show_aliases: bool
+    max_aliases: int
     name_preference: NamePreference
 
 
@@ -536,6 +580,7 @@ class StyleOverrides(BaseModel):
     marker_width: int | None = Field(default=None, ge=1, le=MAX_STROKE_WIDTH)
     marker_min_radius: int | None = Field(default=None, ge=1, le=MAX_MARKER_MIN_RADIUS)
     show_aliases: bool | None = None
+    max_aliases: int | None = Field(default=None, ge=0, le=MAX_ALIASES)
     name_preference: NamePreference | None = None
 
     def overrides(self) -> dict[str, object]:

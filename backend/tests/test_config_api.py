@@ -151,6 +151,7 @@ def test_default_style_is_validated_and_stored_as_overrides(
                     "font_file": "Roboto-Bold.ttf",
                     "text_color": "#ff8800",
                     "halo": None,
+                    "max_aliases": 3,
                 }
             },
         )
@@ -158,14 +159,20 @@ def test_default_style_is_validated_and_stored_as_overrides(
         assert ok.json()["default_style"] == {
             "font_file": "Roboto-Bold.ttf",
             "text_color": "#ff8800",
+            "max_aliases": 3,
         }
         assert read_config(tmp_path)["default_style"] == {
             "font_file": "Roboto-Bold.ttf",
             "text_color": "#ff8800",
+            "max_aliases": 3,
         }
         # Sending a style replaces the override set; an empty one removes the key.
         assert client.put("/api/config", json={"default_style": {}}).json()["default_style"] == {}
         assert "default_style" not in read_config(tmp_path)
+
+        too_many = client.put("/api/config", json={"default_style": {"max_aliases": 9}})
+        assert too_many.status_code == 422 and "9" not in too_many.text
+        assert client.get("/api/config").json()["style_defaults"]["max_aliases"] == 2
 
 
 def test_put_rejects_unknown_fields_and_needs_a_session(

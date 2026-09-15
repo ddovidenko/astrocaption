@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from app.catalog import enrich_names, normalise
-from app.models import name_category, primary_name
+from app.models import (
+    SolveObject,
+    StyleConfig,
+    StyleOverrides,
+    alias_names,
+    name_category,
+    primary_name,
+)
 from app.objects import objects_from_nova, split_names
 from tests.conftest import NOVA_NARROW_FIXTURES, load_fixture
 
@@ -110,7 +118,7 @@ def test_recorded_fixture_is_scaled_enriched_and_ordered() -> None:
     biggest = objects[0]
     assert biggest.catalog_names == orion_names()
     assert biggest.primary_name == "M 42"
-    assert biggest.aliases == ["NGC 1976", "LBN 974", "Great Orion Nebula", "Orion Nebula"]
+    assert biggest.aliases == ["Great Orion Nebula", "NGC 1976"]
     src = next(a for a in raw if a["names"] == ["NGC 1976"])
     assert (biggest.x, biggest.y, biggest.radius) == (
         src["pixelx"] * 2,
@@ -159,3 +167,49 @@ def test_narrow_field_keeps_hd_stars_separate_from_their_bright_twins() -> None:
         assert abs(by_name[bright].x - by_name[hd].x) <= 1
         assert abs(by_name[bright].y - by_name[hd].y) <= 1
         assert by_name[bright].type == "bright" and by_name[hd].type == "hd"
+
+
+ORION = ["NGC 1976", "M 42", "LBN 974", "Great Orion Nebula", "Orion Nebula"]
+
+
+def test_alias_line_common_first_nested_dropped_then_ranking_order_capped() -> None:
+    assert alias_names(ORION, "popular", 2) == ["Great Orion Nebula", "NGC 1976"]
+    assert alias_names(ORION, "popular", 5) == ["Great Orion Nebula", "NGC 1976", "LBN 974"]
+    assert alias_names(ORION, "ngc_ic", 2) == ["Great Orion Nebula", "M 42"]
+    assert alias_names(["Mel 22", "M 45", "Pleiades"], "popular", 2) == ["Pleiades", "Mel 22"]
+    assert alias_names(ORION, "popular", 0) == []
+
+
+def test_alias_line_drops_star_ids_and_unknown_abbreviations_only_when_something_better_exists() -> (
+    None
+):
+    assert alias_names(["ζ Ori", "Alnitak", "HD 37742", "HIP 26727"], "popular", 5) == ["ζ Ori"]
+    assert alias_names(["HD 37742", "HIP 26727"], "popular", 5) == ["HIP 26727"]
+    assert alias_names(["XYZ 12", "ABC 3"], "popular", 5) == ["ABC 3"]
+
+
+def test_alias_line_nesting_is_case_insensitive_and_whole_string() -> None:
+    assert alias_names(["NGC 1", "the Witch Head Nebula", "WITCH HEAD NEBULA"], "popular", 5) == [
+        "the Witch Head Nebula"
+    ]
+    assert alias_names(["NGC 1", "Eyes", "Eyes Galaxy"], "popular", 5) == ["Eyes Galaxy"]
+    assert alias_names(["NGC 1", "Alpha", "Beta", "Gamma"], "popular", 5) == [
+        "Alpha",
+        "Beta",
+        "Gamma",
+    ]
+
+
+def test_solve_object_alias_line_uses_the_policy() -> None:
+    obj = SolveObject(id=1, catalog_names=ORION, type="ngc", x=0, y=0, radius=1)
+    assert obj.aliases_for("popular", 2) == ["Great Orion Nebula", "NGC 1976"]
+    assert obj.aliases == ["Great Orion Nebula", "NGC 1976"]
+
+
+def test_max_aliases_bounds() -> None:
+    assert StyleConfig().max_aliases == 2
+    assert StyleConfig(max_aliases=0).max_aliases == 0
+    with pytest.raises(ValidationError):
+        StyleConfig(max_aliases=6)
+    with pytest.raises(ValidationError):
+        StyleOverrides(max_aliases=-1)

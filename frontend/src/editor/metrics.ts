@@ -8,6 +8,7 @@
 // server resolves a font that is no longer bundled to the default, and the browser must draw
 // with the same one. A /fonts/<file> 404 would fall back to a system font silently.
 import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
+import { aliasNames, primaryName } from './names'
 
 export const MIN_FONT_SIZE = 6
 export const MAX_FONT_SIZE = 200
@@ -68,14 +69,15 @@ export interface LabelLines {
   alias: string | null
 }
 
-/** `obj.primary_name` already follows the image's name preference: the server ranks names
- *  (models.primary_name), so a preference change means re-fetching the objects. */
+/** Both lines from the object's raw names and the *store's* style (names.ts): a preference or
+ *  cap change re-measures at once, and the export builds the same lines from the same rules
+ *  (#64). `obj.primary_name` is the server's ranking at fetch time, kept for the Objects tab. */
 export function labelText(obj: ObjectOut, label: Label, style: StyleConfig): LabelLines {
   const override = (label.text_override ?? '').trim()
-  const primary = override || obj.primary_name
+  const primary = override || primaryName(obj.catalog_names, style.name_preference)
   const show = label.show_aliases ?? style.show_aliases
-  const aliases = obj.catalog_names.filter((n) => n !== obj.primary_name)
-  return { primary, alias: show && aliases.length > 0 ? aliases.join(ALIAS_SEP) : null }
+  const aliases = show ? aliasNames(obj.catalog_names, style.name_preference, style.max_aliases) : []
+  return { primary, alias: aliases.length > 0 ? aliases.join(ALIAS_SEP) : null }
 }
 
 /** The CSS family name for a bundled font file: its stem, so browser and export name the same file. */
