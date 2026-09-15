@@ -52,14 +52,15 @@ export default function LayoutTab() {
       if (useEditor.getState().image?.id !== imageId) return
       useEditor.getState().applyLabels(res.labels)
     } catch (err) {
-      // A 409 is the same stale-document story the autosave tells, so the sentence with the
-      // Reload button goes to the toolbar; the tab only says this button did nothing.
       if (err instanceof ApiError && err.status === 409) {
         useEditor.getState().markConflict(err.message)
         setError('The layout was not arranged; see the message in the toolbar.')
+      } else if (err instanceof ApiError) {
+        // The server's own sentence: plain language by contract (CLAUDE.md), never raw exception text.
+        setError(err.message)
       } else {
-        // Anything else (including applyLabels' "no label for object N" bug guard) must not reach
-        // the page as raw exception text (CLAUDE.md hard rule).
+        // A throw from applying the answer (a store contract violation), not from the request:
+        // the cause goes to the console, the page gets a sentence.
         console.error('autoarrange apply failed', err)
         setError('The arranged layout could not be applied; reload the editor.')
       }
