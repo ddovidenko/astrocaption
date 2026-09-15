@@ -179,7 +179,7 @@ def label_vectors(fonts_dir: Path, objects: list[SolveObject]) -> list[dict[str,
         tuned = Label(
             object_id=obj.id,
             font_size=LABEL_SIZES[i % len(LABEL_SIZES)],
-            show_aliases=None if i % 3 else False,
+            show_aliases=False if i % 3 == 1 else None,
             text_override="Override · text" if i % 5 == 0 else None,
         )
         cases.append(_label_case(fonts_dir, other, tuned, obj))
