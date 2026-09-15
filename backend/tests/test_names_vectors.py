@@ -24,5 +24,6 @@ def test_edge_cases_cover_the_policy_rules() -> None:
     flat = [tuple(c) for c in EDGE_CASES]
     assert ("NGC 1976", "M 42", "LBN 974", "Great Orion Nebula", "Orion Nebula") in flat
     assert ("HD 37742", "HIP 26727") in flat
+    assert ("HD 198639",) in flat
     assert ("XYZ 12", "ABC 3") in flat
-    assert any(len(c) > 6 for c in flat)
+    assert ("NGC 1", "Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta") in flat

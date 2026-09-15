@@ -49,6 +49,7 @@ EDGE_CASES: tuple[list[str], ...] = (
     ["HD 198639"],
     ["XYZ 12", "ABC 3"],
     ["θ1 Ori C", "41 Ori C", "HD 37022"],
+    # pre-split shape (ingest splits on ' / '): pins the tie rule — both `common`, nova order wins
     ["ι Ori / 44 Ori", "Hatysa"],
     ["c Ori", "42 Ori", "Mizan Batil I"],
     ["NGC 1", "the Witch Head Nebula", "WITCH HEAD NEBULA"],
