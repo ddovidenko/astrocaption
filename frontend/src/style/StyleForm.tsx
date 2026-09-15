@@ -1,10 +1,11 @@
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import type { FontOut, StyleDefaults } from '../api'
 import ColorField from './ColorField'
 import LabelPreview from './LabelPreview'
 import {
   NUMBER_BOUNDS,
   otherPreference,
+  parseNumberField,
   PREFERENCE_LABELS,
   type ColorKey,
   type NumberKey,
@@ -52,12 +53,23 @@ export default function StyleForm({
   const overrides = mode === 'overrides'
   const fontList = fonts ?? []
   const fontsLoaded = fonts !== null
+  const formId = useId()
+  const fieldId = (key: string) => `${formId}-${key}`
   const numberField = (label: string, key: NumberKey, placeholder = 'auto') => {
     const [min, max] = NUMBER_BOUNDS[key]
+    // Values mode holds a concrete style at all times, so a blank or out-of-bounds field there is
+    // always wrong (never "use the default", as it would be in overrides mode) — flag it rather
+    // than let it silently fail to commit (StyleTab's patchForField returns null for it).
+    const bad = !overrides && parseNumberField(key, values[key]) === null
+    const id = fieldId(key)
+    const noteId = `${id}-note`
     return (
-      <label className="field" key={key}>
-        <span className="field-label">{label}</span>
+      <div className="field" key={key}>
+        <label className="field-label" htmlFor={id}>
+          {label}
+        </label>
         <input
+          id={id}
           type="number"
           min={min}
           max={max}
@@ -66,6 +78,8 @@ export default function StyleForm({
           placeholder={overrides ? placeholder : undefined}
           disabled={disabled}
           value={values[key]}
+          aria-invalid={bad || undefined}
+          aria-describedby={bad ? noteId : undefined}
           onChange={(e) => onChange(key, e.target.value)}
           onBlur={() => onNumberFlush?.(key)}
           onKeyDown={(e) => {
@@ -77,19 +91,29 @@ export default function StyleForm({
             }
           }}
         />
-      </label>
+        {bad && (
+          <span className="field-note" id={noteId}>
+            Whole number between {min} and {max}.
+          </span>
+        )}
+      </div>
     )
   }
-  const triField = (label: string, key: TriKey) => (
-    <label className="field" key={key}>
-      <span className="field-label">{label}</span>
-      <select value={values[key]} disabled={disabled} onChange={(e) => onChange(key, e.target.value as Tri)}>
-        {overrides && <option value="">Default ({d[key] ? 'on' : 'off'})</option>}
-        <option value="on">On</option>
-        <option value="off">Off</option>
-      </select>
-    </label>
-  )
+  const triField = (label: string, key: TriKey) => {
+    const id = fieldId(key)
+    return (
+      <div className="field" key={key}>
+        <label className="field-label" htmlFor={id}>
+          {label}
+        </label>
+        <select id={id} value={values[key]} disabled={disabled} onChange={(e) => onChange(key, e.target.value as Tri)}>
+          {overrides && <option value="">Default ({d[key] ? 'on' : 'off'})</option>}
+          <option value="on">On</option>
+          <option value="off">Off</option>
+        </select>
+      </div>
+    )
+  }
   const colorField = (label: string, key: ColorKey) => (
     <ColorField
       key={key}
@@ -108,9 +132,16 @@ export default function StyleForm({
       <LabelPreview style={values} defaults={d} />
       {children}
       <div className="grid3">
-        <label className="field span2">
-          <span className="field-label">Font</span>
-          <select value={values.font_file} disabled={disabled || !fontsLoaded} onChange={(e) => onChange('font_file', e.target.value)}>
+        <div className="field span2">
+          <label className="field-label" htmlFor={fieldId('font_file')}>
+            Font
+          </label>
+          <select
+            id={fieldId('font_file')}
+            value={values.font_file}
+            disabled={disabled || !fontsLoaded}
+            onChange={(e) => onChange('font_file', e.target.value)}
+          >
             {overrides && <option value="">Default ({d.font_file})</option>}
             {fontMissing && (
               <option value={values.font_file}>{fontsLoaded ? `${values.font_file} (not installed)` : values.font_file}</option>
@@ -123,11 +154,14 @@ export default function StyleForm({
           </select>
           {!fontsLoaded && <span className="field-note">{FONTS_UNAVAILABLE}</span>}
           {fontNote && <span className="field-note">{fontNote}</span>}
-        </label>
+        </div>
         {numberField('Font size (px)', 'font_size')}
-        <label className="field span2">
-          <span className="field-label">Primary name</span>
+        <div className="field span2">
+          <label className="field-label" htmlFor={fieldId('name_preference')}>
+            Primary name
+          </label>
           <select
+            id={fieldId('name_preference')}
             value={values.name_preference}
             disabled={disabled}
             onChange={(e) => onChange('name_preference', e.target.value as StyleFormValues['name_preference'])}
@@ -147,7 +181,7 @@ export default function StyleForm({
               </>
             )}
           </select>
-        </label>
+        </div>
         {triField('Alias line', 'show_aliases')}
         {numberField('Aliases shown (max)', 'max_aliases', `Default (${d.max_aliases})`)}
         {colorField('Text colour', 'text_color')}

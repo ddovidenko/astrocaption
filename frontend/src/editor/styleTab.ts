@@ -1,8 +1,10 @@
 import type { StyleConfig } from '../api'
 import type { FontFallback } from './store'
-import { normalizeHex, parseNumberField, type NumberKey, type StyleForm } from '../style/styleForm'
+import { NUMBER_BOUNDS, normalizeHex, parseNumberField, type NumberKey, type StyleForm } from '../style/styleForm'
 
-export const NUMBER_KEYS: readonly NumberKey[] = ['font_size', 'halo_width', 'marker_width', 'marker_min_radius', 'max_aliases']
+// NUMBER_BOUNDS (styleForm.ts) is the single source of which fields are number fields; keeping
+// this list derived from it means a new bound there is a new debounced number field here too.
+export const NUMBER_KEYS = Object.keys(NUMBER_BOUNDS) as NumberKey[]
 
 /** Whether a form field key is one of the debounced number fields (StyleTab commits these on a
  *  400ms pause, not on every keystroke). */

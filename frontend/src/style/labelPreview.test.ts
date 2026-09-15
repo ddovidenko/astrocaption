@@ -52,6 +52,10 @@ describe('label preview', () => {
     expect(previewGeometry(styleFormFromOverrides({ halo: false }), defaults).haloWidth).toBe(0)
   })
 
+  it('draws no halo for an explicit halo_width of 0, distinct from an unset one', () => {
+    expect(previewGeometry(styleFormFromOverrides({ halo_width: 0 }), defaults).haloWidth).toBe(0)
+  })
+
   it('treats a negative font size as unset', () => {
     const negative = previewGeometry(styleFormFromOverrides({ font_size: -5 }), defaults)
     const unset = previewGeometry(styleFormFromOverrides({}), defaults)

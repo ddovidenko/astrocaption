@@ -56,7 +56,13 @@ export function previewGeometry(style: StyleForm, defaults: StyleDefaults): Prev
   const fontSize = fontSizeOf(style.font_size, ASSUMED_FONT_SIZE)
   const textSize = previewTextSize(style.font_size, ASSUMED_FONT_SIZE)
   const scale = textSize / fontSize
-  const px = (v: string, fallback: number) => Math.max(0.5, (Number(v) || fallback) * scale)
+  // Parsed the same way as fontSizeOf above: blank or non-finite falls back, everything else is
+  // taken as typed. `Number(v) || fallback` (the old form) turned an explicit 0 into the fallback,
+  // which made a halo width of 0 draw a halo instead of none (#F).
+  const px = (v: string, fallback: number) => {
+    const n = v.trim() === '' ? fallback : Number(v)
+    return Math.max(0, (Number.isFinite(n) ? n : fallback) * scale)
+  }
   const haloOn = style.halo === '' ? defaults.halo : style.halo === 'on'
   return {
     textSize,
