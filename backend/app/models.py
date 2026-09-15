@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
@@ -239,13 +239,17 @@ def name_category(name: str) -> str:
     return "common"
 
 
+def _ranked(names: list[str], key: Callable[[str], int]) -> list[str]:
+    """Names sorted by ``key``, ties in nova's original order (names.ts ``ranked``)."""
+    return [n for _, n in sorted(enumerate(names), key=lambda kv: (key(kv[1]), kv[0]))]
+
+
 def primary_name(names: list[str], preference: NamePreference = "popular") -> str:
     """Pick the label's primary line; ties keep nova's original order."""
     if not names:
         raise ValueError("primary_name needs at least one catalogue name")
     order = _RANKING[preference]
-    ranked = sorted(enumerate(names), key=lambda kv: (order.index(name_category(kv[1])), kv[0]))
-    return ranked[0][1]
+    return _ranked(names, lambda n: order.index(name_category(n)))[0]
 
 
 def alias_names(
@@ -275,14 +279,8 @@ def alias_names(
 
     rest = [n for n in rest if not nested(n)]
     order = _RANKING[preference]
-    ranked = sorted(
-        enumerate(rest),
-        key=lambda kv: (
-            0 if category[kv[1]] == "common" else 1 + order.index(category[kv[1]]),
-            kv[0],
-        ),
-    )
-    return [n for _, n in ranked][:max_aliases]
+    key = lambda n: 0 if category[n] == "common" else 1 + order.index(category[n])
+    return _ranked(rest, key)[:max_aliases]
 
 
 # ---------------------------------------------------------------------------

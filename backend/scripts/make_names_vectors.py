@@ -11,7 +11,6 @@ python scripts/make_names_vectors.py   (``make names-vectors``)
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,13 +19,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import REPO_ROOT
 from app.models import MAX_ALIASES, NamePreference, alias_names, name_category, primary_name
-from app.objects import objects_from_nova
+from scripts.make_render_vectors import dump, fixture_objects
 
 OUT = REPO_ROOT / "tests" / "fixtures" / "names" / "vectors.json"
-FIXTURES = (
-    REPO_ROOT / "backend" / "tests" / "fixtures" / "nova",
-    REPO_ROOT / "backend" / "tests" / "fixtures" / "nova-narrow",
-)
 PREFERENCES: tuple[NamePreference, ...] = ("popular", "ngc_ic")
 
 # Shapes the fixtures do not contain: Greek and Latin Bayer letters with and without a
@@ -67,16 +62,7 @@ EDGE_CASES: tuple[list[str], ...] = (
 def name_lists() -> list[list[str]]:
     seen: set[tuple[str, ...]] = set()
     out: list[list[str]] = []
-    for names in list(EDGE_CASES) + [
-        obj.catalog_names
-        for fixtures_dir in FIXTURES
-        for obj in objects_from_nova(
-            json.loads((fixtures_dir / "annotations.json").read_text(encoding="utf-8"))[
-                "annotations"
-            ],
-            1.0,
-        )
-    ]:
+    for names in list(EDGE_CASES) + [obj.catalog_names for obj in fixture_objects()]:
         key = tuple(names)
         if key in seen:
             continue
@@ -99,17 +85,6 @@ def case(names: list[str]) -> dict[str, Any]:
 
 def build_vectors() -> dict[str, Any]:
     return {"max_aliases": MAX_ALIASES, "cases": [case(names) for names in name_lists()]}
-
-
-def dump(doc: dict[str, Any]) -> str:
-    """One case per line, so a diff shows which object changed."""
-    lines = ["{", f' "max_aliases": {doc["max_aliases"]},', ' "cases": [']
-    cases = doc["cases"]
-    for i, item in enumerate(cases):
-        sep = "," if i < len(cases) - 1 else ""
-        lines.append(f"  {json.dumps(item, ensure_ascii=False, separators=(',', ':'))}{sep}")
-    lines += [" ]", "}"]
-    return "\n".join(lines) + "\n"
 
 
 def main() -> None:

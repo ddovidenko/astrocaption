@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import asdict
+from itertools import product
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ from app.models import (
     MIN_FONT_SIZE,
     Label,
     LeaderMode,
+    NamePreference,
     SolveObject,
     StyleConfig,
 )
@@ -109,14 +111,15 @@ def label_strings(objects: list[SolveObject]) -> list[str]:
     """Every primary and alias line a fixture object can produce under either name preference
     and both alias caps (the default and the maximum)."""
     strings: set[str] = set()
-    for obj in objects:
-        for preference in ("popular", "ngc_ic"):
-            for max_aliases in (DEFAULT_MAX_ALIASES, MAX_ALIASES):
-                style = StyleConfig(name_preference=preference, max_aliases=max_aliases)
-                text = label_text(obj, Label(object_id=obj.id), style)
-                strings.add(text.primary)
-                if text.alias:
-                    strings.add(text.alias)
+    preferences: tuple[NamePreference, ...] = ("popular", "ngc_ic")
+    for obj, preference, max_aliases in product(
+        objects, preferences, (DEFAULT_MAX_ALIASES, MAX_ALIASES)
+    ):
+        style = StyleConfig(name_preference=preference, max_aliases=max_aliases)
+        text = label_text(obj, Label(object_id=obj.id), style)
+        strings.add(text.primary)
+        if text.alias:
+            strings.add(text.alias)
     return sorted(strings)
 
 

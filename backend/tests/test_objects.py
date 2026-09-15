@@ -174,7 +174,7 @@ def test_narrow_field_keeps_hd_stars_separate_from_their_bright_twins() -> None:
         assert by_name[bright].type == "bright" and by_name[hd].type == "hd"
 
 
-ORION = ["NGC 1976", "M 42", "LBN 974", "Great Orion Nebula", "Orion Nebula"]
+ORION = orion_names()
 
 
 def test_alias_line_common_first_nested_dropped_then_ranking_order_capped() -> None:
