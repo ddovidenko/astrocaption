@@ -93,6 +93,17 @@ test('first run: setup, sign in, solve, export, edit, config, sign out', async (
   // A horizontal drag moves nothing else: a pan or a re-place would have shifted y too.
   expect((await storedLabel(label!.id))!.y).toBeCloseTo(label!.y, 0)
 
+  // Undo: Ctrl+Z puts the label back where the drag began, and the autosave writes that too.
+  await page.keyboard.press('Control+z')
+  await expect
+    .poll(async () => (await storedLabel(label!.id))?.x ?? Number.NEGATIVE_INFINITY, { timeout: 3_000 })
+    .toBeCloseTo(label!.x, 0)
+  // Redo from the toolbar moves it forward again.
+  await page.getByRole('button', { name: 'Redo' }).click()
+  await expect
+    .poll(async () => (await storedLabel(label!.id))?.x ?? Number.NEGATIVE_INFINITY, { timeout: 3_000 })
+    .toBeGreaterThan(label!.x)
+
   // Layout tab: Auto-arrange flushes the pending drag save, re-places every enabled label, and the
   // result is itself autosaved back to "Saved" — a new stored version is the proof it ran.
   const versionBeforeArrange = (await stored()).version
