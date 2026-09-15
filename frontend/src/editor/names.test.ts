@@ -53,6 +53,9 @@ describe('primaryName', () => {
     expect(primaryName(['ι Ori', 'Hatysa'], 'popular')).toBe('Hatysa')
     expect(primaryName(['Mintaka'], 'popular')).toBe('Mintaka')
   })
+  it('rejects an empty list', () => {
+    expect(() => primaryName([], 'popular')).toThrow()
+  })
 })
 
 describe('aliasNames', () => {

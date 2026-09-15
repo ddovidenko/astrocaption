@@ -22,6 +22,11 @@ def test_primary_name_prefers_messier() -> None:
     assert primary_name(["Mintaka"]) == "Mintaka"
 
 
+def test_primary_name_rejects_an_empty_list() -> None:
+    with pytest.raises(ValueError):
+        primary_name([])
+
+
 @pytest.mark.parametrize(
     ("name", "category"),
     [

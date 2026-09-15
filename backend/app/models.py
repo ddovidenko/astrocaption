@@ -78,6 +78,7 @@ class SolveObject(BaseModel):
 
     @property
     def aliases(self) -> list[str]:
+        """The alias line under the default preference and cap (see `alias_names`)."""
         return self.aliases_for()
 
 
@@ -240,6 +241,8 @@ def name_category(name: str) -> str:
 
 def primary_name(names: list[str], preference: NamePreference = "popular") -> str:
     """Pick the label's primary line; ties keep nova's original order."""
+    if not names:
+        raise ValueError("primary_name needs at least one catalogue name")
     order = _RANKING[preference]
     ranked = sorted(enumerate(names), key=lambda kv: (order.index(name_category(kv[1])), kv[0]))
     return ranked[0][1]

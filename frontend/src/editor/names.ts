@@ -2,6 +2,8 @@
 // spec § B). Line-by-line port of backend/app/models.py (name_category, primary_name,
 // alias_names): both renderers must build the same two lines from the same catalog_names, and
 // tests/fixtures/names/vectors.json (make names-vectors) pins this module to the Python original.
+// Faithful for ASCII and Greek catalogue names; Python's `\d`, `\s` and IGNORECASE are Unicode-wider,
+// which no name from nova or OpenNGC exercises.
 
 import type { NamePreference } from '../api'
 
@@ -106,8 +108,11 @@ function ranked(names: string[], key: (name: string) => number): string[] {
 
 /** The label's primary line; ties keep nova's original order (models.primary_name). */
 export function primaryName(names: string[], preference: NamePreference): string {
+  if (names.length === 0) throw new Error('primaryName needs at least one catalogue name')
   const order = RANKING[preference]
-  return ranked(names, (n) => order.indexOf(nameCategory(n)))[0]!
+  const [first] = ranked(names, (n) => order.indexOf(nameCategory(n)))
+  if (first === undefined) throw new Error('primaryName needs at least one catalogue name')
+  return first
 }
 
 /** The alias line, in order and capped (models.alias_names, design spec § B):
