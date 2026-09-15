@@ -199,7 +199,9 @@ describe('document actions', () => {
     useEditor.getState().load({ ...doc, fontFallback: { stored: 'Gone.ttf', used: 'Inter-Regular.ttf' } })
     useEditor.getState().setStyle({ font_size: 30 })
     expect(useEditor.getState().fontFallback).not.toBeNull()
-    useEditor.getState().setStyle({ font_file: 'Inter-Regular.ttf' })
+    // A genuine font change (not the same file the style already holds): setStyle's no-op guard
+    // (below) must not swallow this, since it is a real change, not a same-value patch.
+    useEditor.getState().setStyle({ font_file: 'Lato-Regular.ttf' })
     expect(useEditor.getState().fontFallback).toBeNull()
 
     // A refused change (document not editable) must not clear the notice either.
@@ -353,6 +355,15 @@ describe('undo/redo', () => {
     expect(useEditor.getState().style?.font_size).toBe(30)
     useEditor.getState().undoLast()
     expect(useEditor.getState().style?.font_size).toBe(24)
+  })
+
+  it('setStyle skips a commit that matches the current style (no history, no dirty)', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.setStyle({ font_size: 24 })
+    const state = useEditor.getState()
+    expect(state.undo).toEqual([])
+    expect(state.save.status).toBe('saved')
   })
 
   it('a drag coalesces into one undo entry: preview frames record nothing, drag-end commits', () => {

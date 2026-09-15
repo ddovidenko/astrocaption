@@ -28,6 +28,9 @@ export interface StyleFormProps {
   onChange: <K extends keyof StyleFormValues>(key: K, value: StyleFormValues[K]) => void
   /** values mode only: a colour picker closed or a hex was typed — commit the current value. */
   onColorCommit?: (key: ColorKey) => void
+  /** values mode only: a number field lost focus, or Enter was pressed in it — commit its
+   *  currently-debounced value at once rather than waiting out the debounce. */
+  onNumberFlush?: (key: NumberKey) => void
   /** Rendered above the grid, after the preview (the config page's note; the Style tab's reset button). */
   children?: ReactNode
 }
@@ -41,6 +44,7 @@ export default function StyleForm({
   fontNote = null,
   onChange,
   onColorCommit,
+  onNumberFlush,
   children,
 }: StyleFormProps) {
   const overrides = mode === 'overrides'
@@ -61,6 +65,13 @@ export default function StyleForm({
           disabled={disabled}
           value={values[key]}
           onChange={(e) => onChange(key, e.target.value)}
+          onBlur={() => onNumberFlush?.(key)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              onNumberFlush?.(key)
+            }
+          }}
         />
       </label>
     )

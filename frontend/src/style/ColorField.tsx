@@ -34,10 +34,18 @@ export default function ColorField({
   const id = useId()
   const valueId = `${id}-value`
   const shown = value || fallback
+  // The document listeners below are wired once per open (not once per render), so they cannot
+  // close over a fresh `onCommit` themselves; an effect (not render — refs may not be written
+  // during render) keeps this ref current after every render, so a drag that just changed the
+  // draft is what gets committed, not whatever `onCommit` closed over when the picker opened.
+  const onCommitRef = useRef(onCommit)
+  useEffect(() => {
+    onCommitRef.current = onCommit
+  })
   const pick = (hex: string) => onChange(normalizeHex(hex))
   const typed = (hex: string) => {
     pick(hex)
-    onCommit?.()
+    onCommitRef.current?.()
   }
   const openPicker = () => {
     openRef.current = true
@@ -49,7 +57,7 @@ export default function ColorField({
     openRef.current = false
     setOpen(false)
     if (refocus) swatch.current?.focus() // a keyboard user lands back where they started
-    onCommit?.()
+    onCommitRef.current?.()
   }
 
   useEffect(() => {
@@ -66,9 +74,8 @@ export default function ColorField({
       document.removeEventListener('mousedown', away)
       document.removeEventListener('keydown', key)
     }
-    // closePicker reads only refs and the latest onCommit through the closure created for this
-    // open; resubscribing per keystroke is the wrong fix.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // closePicker reads only refs, including the latest onCommit through onCommitRef (kept
+    // current by the effect above), so it needs nothing in the dependency list besides `open`.
   }, [open])
 
   return (

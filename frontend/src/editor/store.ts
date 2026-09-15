@@ -269,8 +269,15 @@ export const useEditor = create<EditorState>()((set) => ({
     }),
   setStyle: (patch) =>
     set((s) => {
-      if (!s.style) return {}
-      const next = changedDoc(s, { style: { ...s.style, ...patch } })
+      const current = s.style
+      if (!current) return {}
+      // A patch that changes nothing (every key already holds that value) commits no history and
+      // marks nothing dirty — a debounced number commit that lands after its field was already
+      // undone back to the same value, or a reset clicked when already at the defaults, must not
+      // manufacture an undo entry or a save.
+      const changed = (Object.keys(patch) as (keyof StyleConfig)[]).some((k) => patch[k] !== current[k])
+      if (!changed) return {}
+      const next = changedDoc(s, { style: { ...current, ...patch } })
       if (!next) return {}
       return { ...next, ...('font_file' in patch ? { fontFallback: null } : {}) }
     }),

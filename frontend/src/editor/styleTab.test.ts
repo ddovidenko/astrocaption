@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fallbackSentence, patchForField } from './styleTab'
+import { fallbackSentence, isNumberKey, patchForField } from './styleTab'
 
 describe('patchForField', () => {
   it('parses numbers within bounds and refuses the rest', () => {
@@ -14,6 +14,18 @@ describe('patchForField', () => {
     expect(patchForField('text_color', '#abc')).toEqual({ text_color: '#aabbcc' })
     expect(patchForField('text_color', 'red')).toBeNull()
     expect(patchForField('font_file', 'Roboto-Bold.ttf')).toEqual({ font_file: 'Roboto-Bold.ttf' })
+  })
+})
+describe('isNumberKey', () => {
+  it('picks out the debounced number fields and nothing else', () => {
+    expect(isNumberKey('font_size')).toBe(true)
+    expect(isNumberKey('halo_width')).toBe(true)
+    expect(isNumberKey('marker_width')).toBe(true)
+    expect(isNumberKey('marker_min_radius')).toBe(true)
+    expect(isNumberKey('max_aliases')).toBe(true)
+    expect(isNumberKey('halo')).toBe(false)
+    expect(isNumberKey('font_file')).toBe(false)
+    expect(isNumberKey('text_color')).toBe(false)
   })
 })
 describe('fallbackSentence', () => {
