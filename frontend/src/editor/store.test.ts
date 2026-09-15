@@ -348,6 +348,24 @@ describe('undo/redo', () => {
     expect(useEditor.getState().labels.get(1)).toMatchObject({ x: doc.annotations.labels[0]!.x, y: doc.annotations.labels[0]!.y })
   })
 
+  it('undoLast clears a selection the restored snapshot disables', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(2, { x: 1, y: 2 }) // enables 2
+    s.select(2)
+    useEditor.getState().undoLast() // back to 2 disabled
+    expect(useEditor.getState().selectedId).toBeNull()
+  })
+
+  it('undoLast leaves a selection alone when the restored snapshot keeps it enabled', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.select(1) // label 1 is enabled in both the current and the restored snapshot
+    s.toggleObject(2, { x: 1, y: 2 })
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().selectedId).toBe(1)
+  })
+
   it('a drag that ends where it began restores the committed document and records nothing', () => {
     const s = useEditor.getState()
     s.load(doc)

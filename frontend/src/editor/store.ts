@@ -135,7 +135,7 @@ export function changedDocForTest(patch: { labels?: Map<number, Label>; style?: 
 function swapHistory(s: EditorState, from: Snapshot[], to: Snapshot[]): Partial<EditorState> {
   if (!isEditable(s) || !s.committed || from.length === 0) return {}
   const snapshot = from[from.length - 1]!
-  return {
+  const patch: Partial<EditorState> = {
     labels: snapshot.labels,
     style: snapshot.style,
     committed: snapshot,
@@ -145,6 +145,10 @@ function swapHistory(s: EditorState, from: Snapshot[], to: Snapshot[]): Partial<
     pendingChanges: s.pendingChanges + 1,
     save: s.save.status === 'conflict' ? s.save : { status: 'dirty', message: null },
   }
+  // As in toggleObject/applyLabels: a selection the restored snapshot disables has nothing on the
+  // canvas to select, and Delete/Backspace on it would re-enable a label the owner meant to leave.
+  if (s.selectedId !== null && snapshot.labels.get(s.selectedId)?.enabled !== true) patch.selectedId = null
+  return patch
 }
 
 export const useEditor = create<EditorState>()((set) => ({
@@ -245,6 +249,8 @@ export const useEditor = create<EditorState>()((set) => ({
       // the label identities the canvas memoises on.
       const origin = s.committed?.labels.get(id) ?? label
       if (origin.x === x && origin.y === y) {
+        // Only ever restores the committed map (never a fresh one), so this can sit ahead of the
+        // `isEditable` gate inside `changedDoc` below without risking an edit while read-only.
         return s.committed && s.labels !== s.committed.labels ? { labels: s.committed.labels } : {}
       }
       const labels = new Map(s.labels)
