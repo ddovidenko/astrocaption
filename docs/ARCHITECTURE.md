@@ -78,6 +78,11 @@ carries Pillow's ascent per size, because the browser draws on the alphabetic ba
 the ascender line. Marker rings: Pillow's outline grows inward, so the canvas draws the circle at
 `r − width/2`.
 
+A second, smaller contract covers the name ranking and alias-line policy: `make names-vectors`
+writes `tests/fixtures/names/vectors.json` from `models.py`, replayed by
+`backend/tests/test_names_vectors.py` (fails when the file is stale) and
+`frontend/src/editor/names.test.ts` (the TypeScript port).
+
 ## Editor
 
 `frontend/src/editor/` holds the canvas: `store.ts` (zustand document state), `load.ts` (fetches
