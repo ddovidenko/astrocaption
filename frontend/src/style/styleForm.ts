@@ -68,18 +68,18 @@ export function styleFormFromOverrides(o: StyleOverrides): StyleForm {
 export function styleFormFromConfig(c: StyleConfig): StyleForm {
   return {
     font_file: c.font_file,
-    font_size: String(c.font_size),
+    font_size: str(c.font_size),
     text_color: c.text_color,
     marker_color: c.marker_color,
     leader_color: c.leader_color,
-    halo: c.halo ? 'on' : 'off',
+    halo: tri(c.halo),
     halo_color: c.halo_color,
-    halo_width: String(c.halo_width),
-    marker_width: String(c.marker_width),
-    marker_min_radius: String(c.marker_min_radius),
-    show_aliases: c.show_aliases ? 'on' : 'off',
+    halo_width: str(c.halo_width),
+    marker_width: str(c.marker_width),
+    marker_min_radius: str(c.marker_min_radius),
+    show_aliases: tri(c.show_aliases),
     name_preference: c.name_preference,
-    max_aliases: String(c.max_aliases),
+    max_aliases: str(c.max_aliases),
   }
 }
 

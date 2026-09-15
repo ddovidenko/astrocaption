@@ -6,7 +6,7 @@ import type { LoadedDocument } from './store'
 import { makeDoc } from './testDoc'
 
 vi.mock('../api', () => ({ api: { image: vi.fn(), objects: vi.fn(), annotations: vi.fn(), fonts: vi.fn() } }))
-vi.mock('./fonts', () => ({ loadFonts: vi.fn().mockResolvedValue(undefined), DEFAULT_FONT_FILE: 'Inter-Regular.ttf' }))
+vi.mock('./fonts', () => ({ loadFonts: vi.fn().mockResolvedValue(undefined) }))
 
 function mockApi(doc: LoadedDocument) {
   vi.mocked(api.image).mockResolvedValue(doc.image)
@@ -42,22 +42,14 @@ describe('loadEditor', () => {
     )
   })
 
-  it('resolves an unlisted style font to the default and reports the fallback', async () => {
-    const doc = makeDoc()
-    mockApi({ ...doc, annotations: { ...doc.annotations, style: { ...doc.annotations.style, font_file: 'Gone.ttf' } } })
-    const loaded = await loadEditor('img-1')
-    expect(loaded.annotations.style.font_file).toBe('Inter-Regular.ttf')
-    expect(loaded.fontFallback).toEqual({ stored: 'Gone.ttf', used: 'Inter-Regular.ttf' })
-    expect(loadFonts).toHaveBeenCalledWith(['Inter-Regular.ttf'])
-  })
-
   it('passes the server-reported fallback through', async () => {
     const doc = makeDoc()
     mockApi({ ...doc, annotations: { ...doc.annotations, font_fallback: 'Lato-Regular.ttf' } })
     expect((await loadEditor('img-1')).fontFallback).toEqual({ stored: 'Lato-Regular.ttf', used: 'Inter-Regular.ttf' })
+    expect(loadFonts).toHaveBeenCalledWith(['Inter-Regular.ttf'])
   })
 
-  it('still rejects when neither the style font nor the default is listed', async () => {
+  it('rejects when the served font is not in the font list (a broken bundle)', async () => {
     const doc = makeDoc()
     mockApi({
       ...doc,

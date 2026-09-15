@@ -1,6 +1,6 @@
 import { expect, test } from './fixtures'
-import type { Annotations, StyleConfig } from '../src/api'
-import { ensureSetUpAndSignedIn, ensureSolvedImage } from './helpers'
+import type { StyleConfig } from '../src/api'
+import { ensureSetUpAndSignedIn, ensureSolvedImage, fetchAnnotations } from './helpers'
 
 // Style tab (SPEC § 6.3): a number field commits its debounced value and autosaves it, Ctrl+Z
 // (from outside any input, since the canvas key handler ignores focused fields) takes it back,
@@ -15,11 +15,7 @@ test('the Style tab changes the font size live, autosaves it, and Ctrl+Z takes i
 
   const imageId = /\/images\/([^/?#]+)/.exec(page.url())?.[1]
   expect(imageId, `no image id in ${page.url()}`).toBeTruthy()
-  const stored = async (): Promise<Annotations> => {
-    const res = await page.request.get(`/api/images/${imageId}/annotations`)
-    expect(res.status()).toBe(200)
-    return (await res.json()) as Annotations
-  }
+  const stored = () => fetchAnnotations(page, imageId!)
   const before = await stored()
 
   await page.getByRole('tab', { name: 'Style' }).click()

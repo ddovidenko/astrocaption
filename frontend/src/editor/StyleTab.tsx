@@ -37,44 +37,34 @@ export default function StyleTab() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  // Pending debounced commits, one timer per number field. A patch is captured when the timer is
-  // (re)scheduled, so the value that eventually lands is the one from the keystroke that started
-  // this timer's 400ms — the correct "debounce of the latest value" once later keystrokes cancel
-  // and reschedule it.
+  // Pending debounced commits, one timer per number field; the patch is captured when the timer
+  // is (re)scheduled, so the value that lands is the one from the keystroke that started the wait.
   const numberTimers = useRef<Partial<Record<NumberKey, PendingNumberCommit>>>({})
 
-  // Every style change — its own field's timer landing, undo/redo/reset, a colour/font commit, a
-  // reset-to-defaults — cancels whatever is still pending: past this point it can only be stale.
-  // Every one of those is reached by a click, and every one of those controls blurs the input
-  // first except Undo/Redo/Reset-to-defaults (all `onMouseDown`-preventDefault, on purpose, so
-  // clicking them doesn't steal focus from the canvas) — re-committing a half-typed value on top
-  // of what Undo just restored would look like Undo failed for that field, and add a spurious
-  // history entry on top. A timer that itself just fired has already deleted its own entry before
-  // calling `setStyle` (`scheduleNumberCommit`'s timeout below runs `delete` synchronously ahead
-  // of `setStyle`, and `setStyle` is what causes this same effect to run), so this pass never
-  // re-touches the very commit that triggered it — only a sibling field's still-pending, now-stale
-  // one. An effect, not the render body below: refs may be read and written only outside render
-  // (react-hooks/refs).
+  /** Removes a field's pending commit and returns its patch, or null when nothing was pending. */
+  const takePending = (key: NumberKey): Partial<StyleConfig> | null => {
+    const entry = numberTimers.current[key]
+    if (!entry) return null
+    clearTimeout(entry.timer)
+    delete numberTimers.current[key]
+    return entry.patch
+  }
+  const pendingKeys = () => Object.keys(numberTimers.current) as NumberKey[]
+
+  // Cancel on every style change: past a commit, an undo/redo or a reset, a pending value can
+  // only be stale (Undo/Redo/Reset never blur the input, so nothing else would flush it). A timer
+  // that just fired deleted its own entry before calling setStyle, so it never cancels itself.
   useEffect(() => {
-    for (const entry of Object.values(numberTimers.current)) if (entry) clearTimeout(entry.timer)
-    numberTimers.current = {}
+    for (const key of pendingKeys()) takePending(key)
   }, [style])
 
-  // Unmount only (switching tabs, leaving the editor): nothing above ever runs for this, since a
-  // dependency-less effect's cleanup fires only when the component goes away, never on a `[style]`
-  // change. The tab buttons are the same `onMouseDown`-preventDefault controls noted above, so
-  // switching away never blurs a focused number input either — cancelling here would silently
-  // drop a still-in-flight, already-valid edit, so this commits it instead. (StrictMode's extra
-  // mount+unmount pass runs this once more too, against a map that's still empty at that point —
-  // harmless.)
+  // Flush on unmount only (a tab switch never blurs the input either): a valid edit still waiting
+  // out its debounce commits instead of vanishing. StrictMode's extra pass sees an empty map.
   useEffect(() => {
     return () => {
-      for (const key of Object.keys(numberTimers.current) as NumberKey[]) {
-        const entry = numberTimers.current[key]
-        if (!entry) continue
-        clearTimeout(entry.timer)
-        delete numberTimers.current[key]
-        useEditor.getState().setStyle(entry.patch)
+      for (const key of pendingKeys()) {
+        const patch = takePending(key)
+        if (patch) useEditor.getState().setStyle(patch)
       }
     }
   }, [])
@@ -91,42 +81,26 @@ export default function StyleTab() {
 
   if (!style || !draft) return null
 
-  // StyleDefaults-shaped fallbacks for the preview; in values mode every field is set, so
-  // they are never shown.
-  const defaults = {
-    font_file: style.font_file, text_color: style.text_color, marker_color: style.marker_color,
-    leader_color: style.leader_color, halo: style.halo, halo_color: style.halo_color,
-    show_aliases: style.show_aliases, name_preference: style.name_preference, max_aliases: style.max_aliases,
-  }
-
   /** (Re)starts a field's debounce: any previous wait for this field is cancelled, and — while
    *  the text is currently a value the API accepts — a fresh 400ms wait begins for exactly that
    *  patch. Text that is not currently valid (out of bounds, mid-edit) leaves nothing scheduled,
    *  so an invalid keystroke can never commit a stale prior value later. */
   const scheduleNumberCommit = (key: NumberKey, raw: string) => {
-    const pending = numberTimers.current[key]
-    if (pending) clearTimeout(pending.timer)
+    takePending(key)
     const patch = patchForField(key, raw)
-    if (!patch) {
-      delete numberTimers.current[key]
-      return
-    }
+    if (!patch) return
     numberTimers.current[key] = {
       patch,
       timer: setTimeout(() => {
-        delete numberTimers.current[key]
-        setStyle(patch)
+        if (takePending(key)) setStyle(patch)
       }, NUMBER_DEBOUNCE_MS),
     }
   }
 
   /** Commits a field's pending debounce at once (blur, Enter) instead of waiting out the timer. */
   const flushNumberCommit = (key: NumberKey) => {
-    const pending = numberTimers.current[key]
-    if (!pending) return
-    clearTimeout(pending.timer)
-    delete numberTimers.current[key]
-    setStyle(pending.patch)
+    const patch = takePending(key)
+    if (patch) setStyle(patch)
   }
 
   const onChange = <K extends keyof StyleFormValues>(key: K, value: StyleFormValues[K]) => {
@@ -195,7 +169,7 @@ export default function StyleTab() {
       <StyleForm
         mode="values"
         values={draft}
-        defaults={defaults}
+        defaults={style}
         fonts={fonts}
         disabled={!editable || fontLoading !== null || busy}
         fontNote={fontNote}

@@ -17,21 +17,22 @@ export function previewLines(preference: '' | NamePreference, fallback: NamePref
   return { primary: primaryName(SAMPLE, p), aliases: aliasNames(SAMPLE, p, maxAliases).join(ALIAS_SEP) }
 }
 
+/** A raw number field: blank or unparseable is `fallback`, anything else the number as typed. */
+function numberOrFallback(raw: string, fallback: number): number {
+  const n = raw.trim() === '' ? NaN : Number(raw)
+  return Number.isFinite(n) ? n : fallback
+}
+
 /** Clamp the raw max-aliases field to what the API accepts: blank or unparseable falls back to
  *  `fallback`, everything else is truncated and clamped to 0..MAX_ALIASES. */
 export function previewCap(raw: string, fallback: number): number {
-  if (raw.trim() === '') return fallback
-  const n = Number(raw)
-  if (!Number.isFinite(n)) return fallback
-  return Math.min(MAX_ALIASES, Math.max(0, Math.trunc(n)))
+  return Math.min(MAX_ALIASES, Math.max(0, Math.trunc(numberOrFallback(raw, fallback))))
 }
 
-/** Parse font size: blank, non-finite, or non-positive becomes `fallback`. */
+/** The font size a field holds: blank, unparseable or non-positive is `fallback`. */
 function fontSizeOf(raw: string, fallback: number): number {
-  if (raw.trim() === '') return fallback
-  const n = Number(raw)
-  if (!Number.isFinite(n) || n <= 0) return fallback
-  return n
+  const n = numberOrFallback(raw, fallback)
+  return n > 0 ? n : fallback
 }
 
 export interface PreviewGeometry {
@@ -56,13 +57,8 @@ export function previewGeometry(style: StyleForm, defaults: StyleDefaults): Prev
   const fontSize = fontSizeOf(style.font_size, ASSUMED_FONT_SIZE)
   const textSize = previewTextSize(style.font_size, ASSUMED_FONT_SIZE)
   const scale = textSize / fontSize
-  // Parsed the same way as fontSizeOf above: blank or non-finite falls back, everything else is
-  // taken as typed. `Number(v) || fallback` (the old form) turned an explicit 0 into the fallback,
-  // which made a halo width of 0 draw a halo instead of none (#F).
-  const px = (v: string, fallback: number) => {
-    const n = v.trim() === '' ? fallback : Number(v)
-    return Math.max(0, (Number.isFinite(n) ? n : fallback) * scale)
-  }
+  // An explicit 0 stays 0 (a halo width of 0 draws no halo); only blank or unparseable falls back.
+  const px = (v: string, fallback: number) => Math.max(0, numberOrFallback(v, fallback) * scale)
   const haloOn = style.halo === '' ? defaults.halo : style.halo === 'on'
   return {
     textSize,

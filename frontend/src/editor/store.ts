@@ -280,11 +280,12 @@ export const useEditor = create<EditorState>()((set) => ({
       // while a fallback notice is pending: the stored row still names the gone font, so the
       // document differs from it even though nothing here looks different. Let it through so the
       // resolved font is committed (autosaved) and the notice clears below, as it promises.
-      const forced = s.fontFallback !== null && 'font_file' in patch
-      if (!changed && !forced) return {}
+      // (StyleTab.changeFont skips its own same-font early return in that case for the same reason.)
+      const hasFontPatch = 'font_file' in patch
+      if (!changed && !(hasFontPatch && s.fontFallback !== null)) return {}
       const next = changedDoc(s, { style: { ...current, ...patch } })
       if (!next) return {}
-      return { ...next, ...('font_file' in patch ? { fontFallback: null } : {}) }
+      return { ...next, ...(hasFontPatch ? { fontFallback: null } : {}) }
     }),
   markSaving: () => set({ pendingChanges: 0, save: { status: 'saving', message: null } }),
   markSaved: (version, updatedAt) =>
