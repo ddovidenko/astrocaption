@@ -55,6 +55,8 @@ export interface EditorState {
   toggleObject(id: number, placed?: { x: number; y: number; collided?: boolean }): void
   moveLabel(id: number, x: number, y: number, commit?: boolean): void
   applyLabels(labels: Label[]): void
+  /** Global style fields; one commit (one undo entry) per call. */
+  setStyle(patch: Partial<StyleConfig>): void
   markSaving(): void
   markSaved(version: number, updatedAt: string): void
   markSaveError(message: string): void
@@ -99,56 +101,54 @@ interface DocPatch {
   style?: StyleConfig
 }
 
-/** Every document action goes through this. It refuses (returns `{}`) while the document may not
- *  be edited, so no tab can slip a change past the read-only rule. A commit bumps
- *  `changeSeq`/`pendingChanges` (the autosave keys on `changeSeq`) and marks the document dirty
- *  unless a conflict is already sticky. Callers hand in *new* maps and never mutate the stored
+/** Every document action goes through this. It returns `null` while the document may not be
+ *  edited, so no tab can slip a change past the read-only rule. A preview (`commit: false`, the
+ *  drag frames) only swaps the maps in; a commit records history, bumps `changeSeq`/
+ *  `pendingChanges` (the autosave keys on `changeSeq`) and marks the document dirty unless a
+ *  conflict is already sticky. It also drops a selection the new labels map disables: a disabled
+ *  label has nothing on the canvas to select, and Delete/Backspace on a selection left behind
+ *  would toggle it straight back on. Callers hand in *new* maps and never mutate the stored
  *  `Label` objects — `useShallow(enabledLabels)` in the canvas relies on identity. */
-function changedDoc(s: EditorState, patch: DocPatch, commit = true): Partial<EditorState> {
-  if (!isEditable(s)) return {}
+function changedDoc(s: EditorState, patch: DocPatch, commit = true): Partial<EditorState> | null {
+  if (!isEditable(s)) return null
   const labels = patch.labels ?? s.labels
   const style = patch.style ?? s.style
-  if (!style) return {}
+  if (!style) return null
   const next: Partial<EditorState> = { labels, style }
+  if (s.selectedId !== null && labels.get(s.selectedId)?.enabled !== true) next.selectedId = null
   if (!commit) return next
-  const snapshot: Snapshot = { labels, style }
   // The previous head goes onto the undo stack; a fresh commit invalidates whatever was redone.
-  const undo = s.committed ? [...s.undo, s.committed].slice(-HISTORY_LIMIT) : s.undo
+  const history = s.committed
+    ? { undo: [...s.undo, s.committed].slice(-HISTORY_LIMIT), redo: [] }
+    : { undo: s.undo, redo: s.redo }
+  return { ...next, ...history, ...committed(s, { labels, style }) }
+}
+
+/** The bookkeeping every commit shares, undo and redo included: the new head, the autosave
+ *  trigger and the dirty flag. */
+function committed(s: EditorState, snapshot: Snapshot): Partial<EditorState> {
   return {
-    ...next,
     committed: snapshot,
-    undo,
-    redo: [],
     changeSeq: s.changeSeq + 1,
     pendingChanges: s.pendingChanges + 1,
     save: s.save.status === 'conflict' ? s.save : { status: 'dirty', message: null },
   }
 }
 
-/** For tests until the Style tab (M4 PR 3) has a real style action: commits `patch` as one change. */
-export function changedDocForTest(patch: { labels?: Map<number, Label>; style?: StyleConfig }): Partial<EditorState> {
-  return changedDoc(useEditor.getState(), patch)
-}
-
-/** Moves one snapshot from `from` to `to` and makes it the document. Shared by undo and redo:
- *  the restored document is a commit like any other, so the autosave writes it. */
-function swapHistory(s: EditorState, from: Snapshot[], to: Snapshot[]): Partial<EditorState> {
-  if (!isEditable(s) || !s.committed || from.length === 0) return {}
+/** Makes the snapshot at the top of the undo or redo stack the document. The restored document is
+ *  a commit like any other (the autosave writes it), except that the history moves sideways
+ *  instead of growing. */
+function swapHistory(s: EditorState, direction: 'undo' | 'redo'): Partial<EditorState> {
+  const from = direction === 'undo' ? s.undo : s.redo
+  if (!s.committed || from.length === 0) return {}
   const snapshot = from[from.length - 1]!
-  const patch: Partial<EditorState> = {
-    labels: snapshot.labels,
-    style: snapshot.style,
-    committed: snapshot,
-    undo: from === s.undo ? from.slice(0, -1) : [...to, s.committed],
-    redo: from === s.redo ? from.slice(0, -1) : [...to, s.committed],
-    changeSeq: s.changeSeq + 1,
-    pendingChanges: s.pendingChanges + 1,
-    save: s.save.status === 'conflict' ? s.save : { status: 'dirty', message: null },
-  }
-  // As in toggleObject/applyLabels: a selection the restored snapshot disables has nothing on the
-  // canvas to select, and Delete/Backspace on it would re-enable a label the owner meant to leave.
-  if (s.selectedId !== null && snapshot.labels.get(s.selectedId)?.enabled !== true) patch.selectedId = null
-  return patch
+  const patch = changedDoc(s, snapshot, false)
+  if (!patch) return {}
+  const popped = from.slice(0, -1)
+  const to = direction === 'undo' ? s.redo : s.undo
+  const pushed = [...to, s.committed]
+  const history = direction === 'undo' ? { undo: popped, redo: pushed } : { undo: pushed, redo: popped }
+  return { ...patch, ...history, ...committed(s, snapshot) }
 }
 
 export const useEditor = create<EditorState>()((set) => ({
@@ -225,37 +225,26 @@ export const useEditor = create<EditorState>()((set) => ({
           }
       const labels = new Map(s.labels)
       labels.set(id, next)
-      const patch = changedDoc(s, { labels })
-      if (!('labels' in patch)) return {}
-      // A disabled label has nothing on the canvas to select, and Delete/Backspace on a selection
-      // left behind would toggle it straight back on.
-      if (!next.enabled && s.selectedId === id) patch.selectedId = null
-      return patch
+      return changedDoc(s, { labels }) ?? {}
     }),
   moveLabel: (id, x, y, commit = true) =>
     set((s) => {
       const label = s.labels.get(id)
       if (!label) return {}
-      if (!commit) {
-        if (label.x === x && label.y === y) return {}
-        const labels = new Map(s.labels)
-        labels.set(id, { ...label, x, y, collided: false })
-        return changedDoc(s, { labels }, false)
-      }
+      const labels = new Map(s.labels)
+      labels.set(id, { ...label, x, y, collided: false })
+      if (!commit) return label.x === x && label.y === y ? {} : (changedDoc(s, { labels }, false) ?? {})
       // A commit is measured against the last committed position, not the last preview frame:
       // Konva fires dragmove/dragend at the start position for a gesture that never moved, and a
       // drag that came back to where it began has changed nothing worth an undo entry or a save
       // (it would also clear the placer's `collided` verdict). Restoring the committed map keeps
-      // the label identities the canvas memoises on.
+      // the label identities the canvas memoises on. Preview frames are gated like commits, so
+      // the maps can only have diverged while the document was editable.
       const origin = s.committed?.labels.get(id) ?? label
       if (origin.x === x && origin.y === y) {
-        // Only ever restores the committed map (never a fresh one), so this can sit ahead of the
-        // `isEditable` gate inside `changedDoc` below without risking an edit while read-only.
         return s.committed && s.labels !== s.committed.labels ? { labels: s.committed.labels } : {}
       }
-      const labels = new Map(s.labels)
-      labels.set(id, { ...label, x, y, collided: false })
-      return changedDoc(s, { labels })
+      return changedDoc(s, { labels }) ?? {}
     }),
   applyLabels: (updated) =>
     set((s) => {
@@ -265,13 +254,9 @@ export const useEditor = create<EditorState>()((set) => ({
         if (!labels.has(label.object_id)) throw new Error(`applyLabels: no label for object ${label.object_id}`)
         labels.set(label.object_id, label)
       }
-      const patch = changedDoc(s, { labels })
-      // As in toggleObject: a label disabled by this change has nothing on the canvas to select.
-      if ('labels' in patch && s.selectedId !== null && labels.get(s.selectedId)?.enabled === false) {
-        patch.selectedId = null
-      }
-      return patch
+      return changedDoc(s, { labels }) ?? {}
     }),
+  setStyle: (patch) => set((s) => (s.style ? (changedDoc(s, { style: { ...s.style, ...patch } }) ?? {}) : {})),
   markSaving: () => set({ pendingChanges: 0, save: { status: 'saving', message: null } }),
   markSaved: (version, updatedAt) =>
     set((s) => ({
@@ -281,8 +266,8 @@ export const useEditor = create<EditorState>()((set) => ({
     })),
   markSaveError: (message) => set({ save: { status: 'error', message } }),
   markConflict: (message) => set({ save: { status: 'conflict', message }, undo: [], redo: [] }),
-  undoLast: () => set((s) => swapHistory(s, s.undo, s.redo)),
-  redoLast: () => set((s) => swapHistory(s, s.redo, s.undo)),
+  undoLast: () => set((s) => swapHistory(s, 'undo')),
+  redoLast: () => set((s) => swapHistory(s, 'redo')),
 }))
 
 export function labelFor(state: EditorState, id: number): Label | undefined {

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { disableAll, enableWithPlacement, isEditable, toggleWithPlacement } from './editing'
 import { placeNewLabel } from './placement'
 import { useEditor, type LoadedDocument } from './store'
-import { makeDoc } from './testDoc'
+import { makeDoc, withThirdObject } from './testDoc'
 
 // vitest runs in node, so every case injects a measurer: getMeasurer() needs a real canvas.
 const measure = () => 100 // every string 100 px wide; heights come from the size
@@ -101,10 +101,7 @@ describe('enableWithPlacement / disableAll', () => {
   })
 
   it('a kept-position label in the same batch is an obstacle for the ones being placed', () => {
-    const withThird = makeDoc()
-    withThird.objects.push({ id: 3, catalog_names: ['X'], primary_name: 'X', type: 'ngc', x: 2500, y: 1800, radius: 0 })
-    withThird.annotations.labels.push({ ...withThird.annotations.labels[1]!, object_id: 3 })
-    useEditor.getState().load(withThird)
+    useEditor.getState().load(withThirdObject(makeDoc()))
 
     // Where 2 would land with nothing else in the way. placeNewLabel reads the store but does not
     // write it, so label 2 is still sitting on its object afterwards, exactly as enableWithPlacement

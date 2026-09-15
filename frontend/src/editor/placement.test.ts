@@ -21,7 +21,7 @@ import {
 } from './placement'
 import { scaleUnit, measureLabel } from './metrics'
 import { useEditor } from './store'
-import { makeDoc } from './testDoc'
+import { makeDoc, withThirdObject } from './testDoc'
 
 interface Vector {
   name: string
@@ -84,11 +84,8 @@ describe('placeNewLabels', () => {
   const measure = () => 100
   it('places later ids around the ones placed earlier in the same call', () => {
     useEditor.getState().reset()
-    const doc = makeDoc()
     // Two disabled labels on top of each other at the same object position.
-    doc.objects.push({ id: 3, catalog_names: ['X'], primary_name: 'X', type: 'ngc', x: 1560, y: 1010, radius: 0 })
-    doc.annotations.labels.push({ ...doc.annotations.labels[1]!, object_id: 3 })
-    useEditor.getState().load(doc)
+    useEditor.getState().load(withThirdObject(makeDoc(), { x: 1560, y: 1010 }))
     const out = placeNewLabels(useEditor.getState(), measure, [2, 3])
     expect(out.size).toBe(2)
     const a = out.get(2)!
@@ -101,26 +98,20 @@ describe('placeNewLabels', () => {
     expect(placeNewLabels(useEditor.getState(), measure, [2, 99]).has(99)).toBe(false)
   })
 
-  it('treats an alsoFixed id\'s stored box as an obstacle', () => {
+  it('an enabled label that is not being placed is an obstacle at its stored position', () => {
     useEditor.getState().reset()
-    const doc = makeDoc()
-    // Object 3, disabled, its label already moved off its object (a previous drag) — the kind of
-    // label "Enable shown" leaves untouched but which must still block the ones it does place.
-    doc.objects.push({ id: 3, catalog_names: ['X'], primary_name: 'X', type: 'ngc', x: 2500, y: 1800, radius: 0 })
-    doc.annotations.labels.push({ ...doc.annotations.labels[1]!, object_id: 3, x: 2500, y: 1800 })
-    useEditor.getState().load(doc)
+    // Object 3's label sits away from its object, as after a drag.
+    useEditor.getState().load(withThirdObject(makeDoc()))
     const state = useEditor.getState()
 
     // Where 2 lands with nothing in the way.
     const unblocked = placeNewLabels(state, measure, [2]).get(2)!
 
-    // Move 3's stored label onto exactly that spot, without mutating the stored Label object.
-    const label3 = state.labels.get(3)!
+    // A working copy with 3 enabled exactly on that spot (the store itself is not written).
     const labels = new Map(state.labels)
-    labels.set(3, { ...label3, x: unblocked.x, y: unblocked.y })
-    useEditor.setState({ labels })
+    labels.set(3, { ...state.labels.get(3)!, enabled: true, x: unblocked.x, y: unblocked.y })
 
-    const blocked = placeNewLabels(useEditor.getState(), measure, [2], [3]).get(2)!
+    const blocked = placeNewLabels({ ...state, labels }, measure, [2]).get(2)!
     expect([blocked.x, blocked.y]).not.toEqual([unblocked.x, unblocked.y])
   })
 })

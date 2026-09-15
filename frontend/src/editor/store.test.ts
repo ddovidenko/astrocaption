@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  changedDocForTest,
   documentForSave,
   enabledLabels,
   fontFor,
@@ -325,7 +324,7 @@ describe('undo/redo', () => {
   it('a style change is one undo entry too', () => {
     const s = useEditor.getState()
     s.load(doc)
-    useEditor.setState(changedDocForTest({ style: { ...doc.annotations.style, font_size: 30 } }))
+    s.setStyle({ font_size: 30 })
     expect(useEditor.getState().style?.font_size).toBe(30)
     useEditor.getState().undoLast()
     expect(useEditor.getState().style?.font_size).toBe(24)

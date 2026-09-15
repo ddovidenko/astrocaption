@@ -130,17 +130,20 @@ export function placeLabels(
   return items.map((it) => result.get(it.id)!)
 }
 
+/** A placed label as the obstacle the next placement must avoid: its text box and its marker. */
+function obstacle(x: number, y: number, w: number, h: number, c: Circle): { box: Box; circle: Circle } {
+  return { box: { left: x, top: y, right: x + w, bottom: y + h }, circle: c }
+}
+
 /** Places the labels for `ids`, in that order, each against every other enabled label's box and
  *  marker *and* the ids placed before it in this call: what "Enable shown" needs so the whole
- *  batch is one change. `alsoFixed` are ids that are obstacles too but are not placed here —
- *  labels in the same batch that keep a stored position (SPEC § 6.3: "around the ones before
- *  it" covers those too, not just the freshly placed ones). Ids without an object or a label are
- *  skipped, in `ids` and in `alsoFixed` alike. */
+ *  batch is one change. Every enabled label in `state` that is not itself being placed is an
+ *  obstacle at its stored position, so a caller that wants a batch to block one another hands in
+ *  a state where the batch is already enabled. Ids without an object or a label are skipped. */
 export function placeNewLabels(
   state: EditorState,
   measure: TextMeasurer,
   ids: number[],
-  alsoFixed: number[] = [],
 ): Map<number, { x: number; y: number; collided: boolean }> {
   const out = new Map<number, { x: number; y: number; collided: boolean }>()
   const { image, style } = state
@@ -148,39 +151,33 @@ export function placeNewLabels(
   const wanted = new Set(ids)
   const fixedBoxes: Box[] = []
   const fixedCircles: Circle[] = []
+  const block = (o: { box: Box; circle: Circle }) => {
+    fixedBoxes.push(o.box)
+    fixedCircles.push(o.circle)
+  }
   for (const other of enabledLabels(state)) {
     if (wanted.has(other.object_id)) continue
     const o = state.objects.get(other.object_id)
     if (!o) continue
     const b = measureLabel(measure, style, other, o)
-    fixedBoxes.push({ left: other.x, top: other.y, right: other.x + b.width, bottom: other.y + b.height })
-    fixedCircles.push({ x: o.x, y: o.y, r: markerRadius(o, style) })
-  }
-  for (const id of alsoFixed) {
-    const obj = state.objects.get(id)
-    const label = state.labels.get(id)
-    if (!obj || !label) continue
-    const b = measureLabel(measure, style, label, obj)
-    fixedBoxes.push({ left: label.x, top: label.y, right: label.x + b.width, bottom: label.y + b.height })
-    fixedCircles.push({ x: obj.x, y: obj.y, r: markerRadius(obj, style) })
+    block(obstacle(other.x, other.y, b.width, b.height, { x: o.x, y: o.y, r: markerRadius(o, style) }))
   }
   for (const id of ids) {
     const obj = state.objects.get(id)
     const label = state.labels.get(id)
     if (!obj || !label) continue
     const box = measureLabel(measure, style, label, obj)
-    const r = markerRadius(obj, style)
+    const circle = { x: obj.x, y: obj.y, r: markerRadius(obj, style) }
     const [p] = placeLabels(
       image.width,
       image.height,
-      [{ id, x: obj.x, y: obj.y, radius: r, w: box.width, h: box.height }],
+      [{ id, x: obj.x, y: obj.y, radius: circle.r, w: box.width, h: box.height }],
       fixedBoxes,
       fixedCircles,
     )
     if (!p) continue
     out.set(id, { x: p.x, y: p.y, collided: p.collided })
-    fixedBoxes.push({ left: p.x, top: p.y, right: p.x + box.width, bottom: p.y + box.height })
-    fixedCircles.push({ x: obj.x, y: obj.y, r })
+    block(obstacle(p.x, p.y, box.width, box.height, circle))
   }
   return out
 }
