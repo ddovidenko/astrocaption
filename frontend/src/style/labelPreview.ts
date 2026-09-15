@@ -26,6 +26,14 @@ export function previewCap(raw: string, fallback: number): number {
   return Math.min(MAX_ALIASES, Math.max(0, Math.trunc(n)))
 }
 
+/** Parse font size: blank, non-finite, or non-positive becomes `fallback`. */
+function fontSizeOf(raw: string, fallback: number): number {
+  if (raw.trim() === '') return fallback
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n <= 0) return fallback
+  return n
+}
+
 export interface PreviewGeometry {
   textSize: number
   haloWidth: number
@@ -38,15 +46,14 @@ export interface PreviewGeometry {
  *  larger font looks larger (#93). The ring radius stays fixed: it depends on each object's
  *  catalogue radius, not on the style. */
 export function previewTextSize(fontSizeRaw: string, fallback: number): number {
-  const n = Number(fontSizeRaw)
-  const size = fontSizeRaw.trim() === '' || !Number.isFinite(n) || n <= 0 ? fallback : n
+  const size = fontSizeOf(fontSizeRaw, fallback)
   return Math.min(40, Math.max(12, (PREVIEW_SIZE * size) / ASSUMED_FONT_SIZE))
 }
 
 /** Stroke widths for the strip. Pillow's stroke_width dilates outward by N; an SVG stroke is centred,
  *  so 2N painted under the fill (paint-order: stroke) gives the same outward N. */
 export function previewGeometry(style: StyleForm, defaults: StyleDefaults): PreviewGeometry {
-  const fontSize = Number(style.font_size) || ASSUMED_FONT_SIZE
+  const fontSize = fontSizeOf(style.font_size, ASSUMED_FONT_SIZE)
   const textSize = previewTextSize(style.font_size, ASSUMED_FONT_SIZE)
   const scale = textSize / fontSize
   const px = (v: string, fallback: number) => Math.max(0.5, (Number(v) || fallback) * scale)

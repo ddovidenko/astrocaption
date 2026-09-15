@@ -42,7 +42,7 @@ function useBundledFont(file: string): { family: string; failed: boolean } {
   }
 }
 
-/** The label as the export would draw it, at a fixed text size, updating with every edit. */
+/** The label as the export would draw it, at a size that follows the font size, updating with every edit. */
 export default function LabelPreview({ style, defaults }: { style: StyleForm; defaults: StyleDefaults }) {
   const fontFile = style.font_file || defaults.font_file
   const { family, failed } = useBundledFont(fontFile)

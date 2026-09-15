@@ -36,6 +36,8 @@ describe('label preview', () => {
     expect(previewTextSize('12', 24)).toBeCloseTo(12) // 11 clamped
     expect(previewTextSize('36', 24)).toBeCloseTo(33)
     expect(previewTextSize('abc', 24)).toBeCloseTo(22)
+    expect(previewTextSize('Infinity', 24)).toBeCloseTo(22)
+    expect(previewTextSize('-5', 24)).toBeCloseTo(22)
   })
   it('keeps widths in proportion to the drawn text and doubles the halo for an outward stroke', () => {
     const base = previewGeometry(styleFormFromOverrides({}), defaults)
@@ -48,6 +50,16 @@ describe('label preview', () => {
     expect(bigger.textSize).toBeCloseTo(33)
     expect(bigger.markerWidth).toBeCloseTo((3 * 33) / 36) // same ratio to the text as 3 px to 36 px
     expect(previewGeometry(styleFormFromOverrides({ halo: false }), defaults).haloWidth).toBe(0)
+  })
+
+  it('treats a negative font size as unset', () => {
+    const negative = previewGeometry(styleFormFromOverrides({ font_size: -5 }), defaults)
+    const unset = previewGeometry(styleFormFromOverrides({}), defaults)
+    expect(negative.textSize).toBeCloseTo(unset.textSize)
+    expect(negative.markerWidth).toBeCloseTo(unset.markerWidth)
+    expect(negative.haloWidth).toBeCloseTo(unset.haloWidth)
+    expect(negative.aliasSize).toBeCloseTo(unset.aliasSize)
+    expect(negative.aliasOffset).toBeCloseTo(unset.aliasOffset)
   })
 
   it('clamps the max-aliases field to 0..MAX_ALIASES, falling back on blank or unparseable input', () => {
