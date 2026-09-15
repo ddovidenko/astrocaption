@@ -10,7 +10,14 @@ from pathlib import Path
 import pytest
 
 from app.auth import set_owner_password, verify_password
-from app.config import CONFIG_FIX_HINT, ConfigError, load_settings, update_config
+from app.config import (
+    CONFIG_FIX_HINT,
+    DEFAULT_POLL_SECONDS,
+    DEFAULT_SOLVE_TIMEOUT_SECONDS,
+    ConfigError,
+    load_settings,
+    update_config,
+)
 from tests.conftest import env_for
 
 
@@ -331,3 +338,54 @@ def test_settings_source_reload_stamps_before_it_loads(tmp_path: Path) -> None:
         mp.setattr(config_module, "load_settings", load_and_race)
         assert source.reload().site_title == "AAAA"  # the racing write was not in this read
     assert source.current().site_title == "BBBB"  # ... but the stale stamp finds it next time
+
+
+# The two process-level solve knobs (env only; not lockable, not on the config page).
+SOLVE_KNOBS = [
+    ("ASTROCAPTION_SOLVE_POLL_SECONDS", "solve_poll_seconds", DEFAULT_POLL_SECONDS),
+    ("ASTROCAPTION_SOLVE_TIMEOUT_SECONDS", "solve_timeout_seconds", DEFAULT_SOLVE_TIMEOUT_SECONDS),
+]
+
+
+def test_solve_knobs_come_from_the_environment(tmp_path: Path) -> None:
+    s = load_settings(
+        env_for(
+            tmp_path,
+            ASTROCAPTION_SOLVE_TIMEOUT_SECONDS="8",
+            ASTROCAPTION_SOLVE_POLL_SECONDS="0.5",
+        )
+    )
+    assert s.solve_timeout_seconds == 8.0 and s.solve_poll_seconds == 0.5
+
+
+@pytest.mark.parametrize(("var", "attr", "default"), SOLVE_KNOBS)
+@pytest.mark.parametrize("bad", ["soon", "0", "-5", "nan", "inf", "0.0001", "1e300"])
+def test_bad_solve_knobs_fall_back_with_one_warning(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    var: str,
+    attr: str,
+    default: float,
+    bad: str,
+) -> None:
+    """Not a finite number, or outside the bounds: the default, and exactly one line saying so."""
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        s = load_settings(env_for(tmp_path, **{var: bad}))
+    assert getattr(s, attr) == default
+    named = [r for r in caplog.records if var in r.getMessage()]
+    assert len(named) == 1 and "seconds between" in named[0].getMessage()
+
+
+@pytest.mark.parametrize("raw", ["", "   "])
+def test_unset_or_blank_solve_knobs_are_silent(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, raw: str
+) -> None:
+    """Not configured is not misconfigured: the defaults, and nothing in the log."""
+    env = env_for(tmp_path, **{var: raw for var, _, _ in SOLVE_KNOBS})
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        blank = load_settings(env)
+        unset = load_settings(env_for(tmp_path))
+    for s in (blank, unset):
+        assert s.solve_poll_seconds == DEFAULT_POLL_SECONDS
+        assert s.solve_timeout_seconds == DEFAULT_SOLVE_TIMEOUT_SECONDS
+    assert caplog.records == []

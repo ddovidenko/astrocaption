@@ -81,7 +81,7 @@ No multi-user, no roles, no invites in v1.
    original pixels. Solves run one at a time through an in-process queue. A row stays `pending` (previous
    nova ids and links intact) until nova accepts the upload, then becomes `solving` with the new ids, so a
    restart resumes exactly the in-flight submission and never re-uploads it; transient nova errors while
-   polling are retried until the 15-minute deadline; scale hints are stored on the row; deleting an image
+   polling are retried until the 15-minute deadline (configurable, `ASTROCAPTION_SOLVE_TIMEOUT_SECONDS`); scale hints are stored on the row; deleting an image
    mid-solve drops the job. Uploads whose `Content-Length` exceeds the limit are refused before the body is read (chunked
    uploads hit the same cap while streaming). Uploads are capped at 300 megapixels regardless of file size, 16-bit greyscale
    PNG/TIFF is rescaled rather than clipped, and JPEGs with a multi-picture (MPO) segment are accepted.

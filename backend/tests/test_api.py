@@ -632,3 +632,11 @@ def test_health_reports_a_broken_config_file(env_client: tuple[TestClient, Path]
     )
     body = client.get("/api/health").json()
     assert body["setup_required"] is False and body["config_error"] is None
+
+
+def test_the_worker_gets_the_solve_knobs_from_the_settings(tmp_path: Path) -> None:
+    """``create_app``'s two ``None`` defaults mean "whatever the environment put in Settings"
+    (parsed in config.py; test_config.py covers the parsing itself)."""
+    settings = make_settings(tmp_path, solve_timeout_seconds=8.0, solve_poll_seconds=0.5)
+    app = create_app(settings, solver_factory=lambda: None)
+    assert app.state.worker.timeout == 8.0 and app.state.worker.poll_interval == 0.5

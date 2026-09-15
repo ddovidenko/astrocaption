@@ -1,6 +1,11 @@
 // A fake nova.astrometry.net that replays the recorded fixtures, so the browser smoke test
 // never contacts nova (CLAUDE.md). Standard library only; started by Playwright's webServer.
 //
+// Everything under `/_fake/` is the fake's own control surface (`control()`), never nova:
+// `POST /_fake/mode` with {"job": "success"|"failure"|"timeout"} switches how job polls are
+// answered from then on, so a spec can drive a failed solve and a solve nova never finishes;
+// `GET /_fake/state` reports the mode and how many uploads the fake has received.
+//
 //   FAKE_NOVA_PORT   default 8901
 //   FAKE_NOVA_HOST   default 127.0.0.1 (0.0.0.0 in CI so a container can reach it)
 //   NOVA_FIXTURES    default ../backend/tests/fixtures/nova relative to this file
@@ -23,6 +28,7 @@ const FIXTURE_NAMES = [
   'submission_ready.json',
   'job_solving.json',
   'job_success.json',
+  'job_failure.json',
   'annotations.json',
   'job_info.json',
   'wcs.fits',
@@ -53,10 +59,45 @@ const firstThenRest = () => {
 let submission = firstThenRest()
 let job = firstThenRest()
 
+// How job polls are answered: 'success' replays the solved fixtures, 'failure' reports a job
+// nova gave up on, 'timeout' never finishes (the client's own deadline has to end the solve).
+// `uploads` counts POST /api/upload, which is how a spec proves Check again uploaded nothing.
+const MODES = ['success', 'failure', 'timeout']
+let mode = 'success'
+let uploads = 0
+const stateBody = () => JSON.stringify({ job: mode, uploads })
+
+/** Applies a POST /_fake/mode body. Returns the status and body to answer with. */
+function setMode(body) {
+  let wanted
+  try {
+    wanted = JSON.parse(body).job
+  } catch {
+    wanted = undefined
+  }
+  if (!MODES.includes(wanted)) {
+    return { status: 400, body: '{"status": "error", "errormessage": "unknown mode"}' }
+  }
+  if (wanted !== mode) console.log(`mode -> ${wanted}`)
+  mode = wanted
+  return { status: 200, body: stateBody() }
+}
+
+/** The fake's own endpoints. Owns every path under /_fake/, so a typo there is a 404 from the
+ *  control surface rather than a nova replay (or a silently ignored request). */
+function control(method, path, body) {
+  if ((method === 'GET' || method === 'HEAD') && path === '/_fake/state') {
+    return { status: 200, body: stateBody() }
+  }
+  if (method === 'POST' && path === '/_fake/mode') return setMode(body)
+  return { status: 404, body: '{"status": "error", "errormessage": "no such fake control endpoint"}' }
+}
+
 function route(method, path) {
   if ((method === 'GET' || method === 'HEAD') && path === '/') return { type: 'application/json', body: '{"ok": true}' }
   if (method === 'POST' && path === '/api/login') return json('login.json')
   if (method === 'POST' && path === '/api/upload') {
+    uploads += 1
     submission = firstThenRest()
     job = firstThenRest()
     return json('upload.json')
@@ -67,7 +108,9 @@ function route(method, path) {
   if (method === 'GET' && /^\/api\/jobs\/\d+\/annotations\/$/.test(path)) return json('annotations.json')
   if (method === 'GET' && /^\/api\/jobs\/\d+\/info\/$/.test(path)) return json('job_info.json')
   if (method === 'GET' && /^\/api\/jobs\/\d+$/.test(path)) {
-    return json(job('job_solving.json', 'job_success.json'))
+    // 'timeout' never leaves "solving", so the caller's deadline is the only thing that ends it.
+    if (mode === 'timeout') return json('job_solving.json')
+    return json(job('job_solving.json', mode === 'failure' ? 'job_failure.json' : 'job_success.json'))
   }
   if (method === 'GET' && /^\/wcs_file\/\d+$/.test(path)) {
     return { type: 'application/octet-stream', body: fixture('wcs.fits') }
@@ -80,24 +123,37 @@ function route(method, path) {
 
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://fake-nova')
-  // Drain the request body (uploads are multipart) before answering. Bodies are never
+  const method = req.method ?? 'GET'
+  // Drain the request body (uploads are multipart) before answering. Nova bodies are never
   // parsed or validated: a malformed upload still gets upload.json; this is a replay, not
   // a protocol check. A client that drops the connection mid-body fails only this request.
-  req.on('data', () => undefined)
+  // The only bodies that are read are the fake's own control requests.
+  const isControl = url.pathname.startsWith('/_fake/')
+  const chunks = []
+  req.on('data', (chunk) => {
+    if (isControl) chunks.push(chunk)
+  })
   req.on('error', (err) => {
     console.error(`fake nova: ${req.method} ${url.pathname} aborted (${err.message})`)
     res.destroy()
   })
   req.on('end', () => {
-    const hit = route(req.method ?? 'GET', url.pathname)
-    console.log(`${req.method} ${url.pathname} -> ${hit ? 200 : 404}`)
+    if (isControl) {
+      const answer = control(method, url.pathname, Buffer.concat(chunks).toString('utf8'))
+      console.log(`${method} ${url.pathname} -> ${answer.status}`)
+      res.writeHead(answer.status, { 'content-type': 'application/json' })
+      res.end(method === 'HEAD' ? undefined : answer.body)
+      return
+    }
+    const hit = route(method, url.pathname)
+    console.log(`${method} ${url.pathname} -> ${hit ? 200 : 404}`)
     if (!hit) {
       res.writeHead(404, { 'content-type': 'application/json' })
       res.end('{"status": "error", "errormessage": "not in the fixtures"}')
       return
     }
     res.writeHead(200, { 'content-type': hit.type })
-    res.end(req.method === 'HEAD' ? undefined : hit.body)
+    res.end(method === 'HEAD' ? undefined : hit.body)
   })
 })
 

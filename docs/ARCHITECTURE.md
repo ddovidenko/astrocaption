@@ -96,3 +96,26 @@ alongside `SidePanel.tsx` (the Objects/Layout/Image tabs, SPEC § 6.3). The canv
 — published only once the preview bitmap has loaded — so `frontend/e2e/parity.spec.ts` can force a
 render at a fixed scale for the pixel diff and read how many labels were drawn (the width test
 measures on its own canvas), and `frontend/e2e/smoke.spec.ts` can locate a label on screen to drag it.
+
+## Browser tests
+
+`frontend/e2e/` runs under Playwright against the built frontend served by uvicorn (`make e2e`) or
+the Docker image (CI), with `frontend/e2e/fake-nova.mjs` standing in for nova.astrometry.net: one
+worker, one data dir, and the spec files run in alphabetical order as one story —
+`parity.spec.ts` (the pixel diff above), `smoke.spec.ts` (setup, solve, export, edit, config, sign
+out) and `solve-failure.spec.ts` last, so the Orion image already exists by then. That spec's three
+steps are "nova reports failure", "re-solve times out" and "Check again resumes": a solve nova
+reports as failed, a Re-solve that never finishes and times out, and Check again resuming that
+stored job back to Solved without a second upload. It needs the fake to misbehave on demand
+(`POST /_fake/mode` with `success`, `failure` or `timeout`; `GET /_fake/state` reports the mode and
+the upload count) and needs the app's solve deadline to be seconds rather than 15 minutes, so
+uvicorn and the CI container both take their environment from `frontend/e2e/app.env`.
+
+Every spec imports `test`/`expect` from `frontend/e2e/fixtures.ts` rather than from Playwright:
+two automatic fixtures there fail a test on any uncaught page error and reset the fake nova's mode
+after each one, so mode leakage is not part of the file order. `frontend/e2e/dev-proxy.dev.spec.ts`
+is the exception to "against the built frontend": the `dev-proxy` project (opt-in, `E2E_DEV_PROXY=1`,
+set by `make e2e` and the CI step) starts Vite on :5799 pointed at the same app through
+`ASTROCAPTION_DEV_PROXY_TARGET`, and checks `/api` and `/fonts` really reach the backend through the
+proxy — the blank page (#11, #52) a lost proxy causes. `*.dev.spec.ts` is what the other project
+ignores.

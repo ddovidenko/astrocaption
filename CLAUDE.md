@@ -34,7 +34,7 @@ make names-catalog       # rebuild backend/app/catalog/names.json from OpenNGC (
 make fonts               # refresh fonts/*.ttf + LICENSES from Google Fonts (network); family list in backend/scripts/fetch_fonts.py
 make favicons            # regenerate frontend/public/ icons from frontend/icon/icon-source.png
 make record-fixtures IMAGE=path.jpg [OUT=dir]   # record nova fixtures from a real solve into backend/tests/fixtures/nova/ or OUT (network, needs the key)
-make e2e          # Playwright smoke test: built frontend + uvicorn on a scratch data dir + a fake nova
+make e2e          # Playwright: built frontend + uvicorn on a scratch data dir + a fake nova, and the Vite dev proxy (app env: frontend/e2e/app.env)
 make e2e-fixture  # regenerate frontend/e2e/fixtures/field.jpg
 ```
 
@@ -53,7 +53,8 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
   must still pass. Konva needs a browser, so the pixel diff lives in the Playwright suite, not pytest.
 - Never call nova.astrometry.net during tests. Use the recorded fixtures in `backend/tests/fixtures/nova/`
   (3.9° Orion field) and `backend/tests/fixtures/nova-narrow/` (1° Pelican field with `hd` stars);
-  `frontend/e2e/fake-nova.mjs` replays the Orion set for the browser test.
+  `frontend/e2e/fake-nova.mjs` replays the Orion set for the browser test, and can be switched to
+  a failed or never-finishing job (`POST /_fake/mode`) for the failure spec.
 - Secrets (nova API key, password hash, session secret) live only in `data/config.json`
   and env vars. Never in the repo, never in logs, never returned by any API endpoint.
 - Public (logged-out) routes are read-only and must never expose the editor, the config,
@@ -96,5 +97,6 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
   (pr-review-toolkit agent) on the diff, then `/simplify`; fix, re-run `make lint test`, and let the
   owner smoke-test on `make dev` before committing.
 - Don't switch git branches that add or remove `frontend/vite.config.ts` while `make dev` runs: Vite
-  restarts without the `/api` proxy and the page goes blank. Stop the servers first (kill by port, not
-  by process pattern). If `docker` needs `sudo`, the docker group hasn't taken effect in that shell yet.
+  restarts without the `/api` proxy and the page goes blank (`make e2e`'s dev-proxy project catches a
+  `vite.config.ts` that lost the proxy; it cannot see a live-restart). Stop the servers first (kill by
+  port, not by process pattern). If `docker` needs `sudo`, the docker group hasn't taken effect in that shell yet.

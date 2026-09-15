@@ -12,10 +12,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from .config import Settings, SettingsSource
+from .config import DEFAULT_POLL_SECONDS, DEFAULT_SOLVE_TIMEOUT_SECONDS, Settings, SettingsSource
 from .db import Database
 from .layout import build_default_annotations, rematch_annotations
 from .models import ImageRecord, SolveFailureKind, SolveStatus
@@ -53,6 +54,18 @@ class SolveTimeoutError(SolverError):
     """
 
 
+def _span(seconds: float) -> str:
+    """The deadline in the timeout sentence: whole seconds under a minute, whole minutes above.
+
+    Never "0 seconds": a sub-second deadline (the tests use one) still has to read as a span.
+    """
+    if seconds < 60:
+        n, unit = max(1, math.ceil(seconds)), "second"
+    else:
+        n, unit = max(1, round(seconds / 60)), "minute"
+    return f"{n} {unit}" if n == 1 else f"{n} {unit}s"
+
+
 class SolveWorker:
     def __init__(
         self,
@@ -60,8 +73,8 @@ class SolveWorker:
         settings: SettingsSource | Settings,
         solver_factory: Callable[[], Solver | None],
         *,
-        poll_interval: float = 5.0,
-        timeout: float = 15 * 60,
+        poll_interval: float = DEFAULT_POLL_SECONDS,
+        timeout: float = DEFAULT_SOLVE_TIMEOUT_SECONDS,
     ) -> None:
         self.db = db
         self._source = (
@@ -283,11 +296,11 @@ class SolveWorker:
     ) -> None:
         if now < deadline:
             return
-        minutes = round(self.timeout / 60)
+        span = _span(self.timeout)
         url = status_url(self.settings.nova_base_url, submission_id)
         detail = f" Last error: {last_error}" if last_error else ""
         raise SolveTimeoutError(
-            f"Timed out after {minutes} minutes waiting for nova.astrometry.net."
+            f"Timed out after {span} waiting for nova.astrometry.net."
             f" Check {url}: if the job finished there, use Check again; otherwise Re-solve.{detail}"
         )
 
