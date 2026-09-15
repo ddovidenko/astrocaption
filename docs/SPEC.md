@@ -154,7 +154,7 @@ select/drag, the autosave and the side panel (§ 6.3).
 - **Click** a hovered object: toggles it enabled. Its label appears at its default position.
 - **Click** a label: selects it (shows a selection outline). Clicking empty canvas deselects.
 - Keyboard: `Esc` deselect, `Delete`/`Backspace` disable the selected label, `F` fit to view, `1` 100 %.
-  *M3 note:* `Ctrl+Z` / `Ctrl+Y` undo/redo ship with milestone 4 (§ 13).
+- `Ctrl+Z` undo, `Ctrl+Y` / `Ctrl+Shift+Z` redo (`Cmd` on macOS), also as toolbar buttons. The history is per editing session (lost on reload and cleared by a conflict), capped at 100 entries; a drag is one entry, a bulk enable is one entry, an auto-arrange is one entry. Keys are ignored while a form field has the focus.
 
 ### 6.2 Labels (call-outs)
 
@@ -196,7 +196,9 @@ re-solve leaves the previous layout editable (§ 5), and the page says so above 
 
 Tabs:
 
-1. **Objects** — searchable list of every object nova returned. Columns: checkbox (enabled), name, type, radius. Hovering a row highlights on canvas; clicking pans to it. Bulk actions are "Enable shown" / "Disable shown" (both act on the rows the search and type filter currently show). *M3 note:* the type filter uses nova's own annotation types — `NGC`, `IC`, `Bright stars`, `HD stars`, `Other` — rather than the galaxy/nebula/cluster/star buckets above; the richer OpenNGC types arrive in milestone 4. `HD stars` starts unchecked (#37): a narrow field can return dozens of duplicate HD rows, most of them a brighter object's twin. The min-size slider is not built.
+1. **Objects** — searchable list of every object nova returned. Columns: checkbox (enabled), name, type, radius. Hovering a row highlights on canvas; clicking pans to it. Bulk actions are "Enable shown" / "Disable shown" (both act on the rows the search and type filter currently show).
+Each is one change: the labels being enabled are placed one after another, each around the ones before it, and applied together, so a batch is one undo entry and one save.
+*M3 note:* the type filter uses nova's own annotation types — `NGC`, `IC`, `Bright stars`, `HD stars`, `Other` — rather than the galaxy/nebula/cluster/star buckets above; the richer OpenNGC types arrive in milestone 4. `HD stars` starts unchecked (#37): a narrow field can return dozens of duplicate HD rows, most of them a brighter object's twin. The min-size slider is not built.
 2. **Style** — global defaults: font (dropdown of bundled fonts, live preview), font size, text colour, marker colour, leader colour, halo (stroke) on/off + colour, marker line width, alias line on/off, **name preference** (`popular`: Messier/Caldwell/Sharpless/Barnard, then NGC, then IC, then other catalogues, then common names; `ngc_ic`: NGC/IC designations first; stars: proper name, then Bayer, then Flamsteed). Per-label overrides win over globals. `config.default_style` seeds these for new images.
 3. **Layout** — "Auto-arrange" button: flushes any pending save, then runs the collision-avoidance placer on all enabled labels (same algorithm as the initial placement); "Reset positions" asks for confirmation, then does the same. In M3 no label is pinned, so the two differ only by the confirmation — M4's pinned labels will make Reset discard pins. Neither touches the document until the placed labels come back; both then mark it dirty for the autosave to pick up. A 409 shows as the toolbar's Reload state, with one line in the tab saying the layout was not arranged; a label dragged while the request was in flight drops the answer rather than undoing the drag.
 4. **Image** — read-only solve facts (nova job link, field centre/size/rotation, pixel scale, image size) and the **Export** button (full resolution, matching the original JPEG's encoding). *M3 note:* re-solve, publish toggle and delete stay on the image card, not this tab.
@@ -261,7 +263,7 @@ annotations (per image; the editable layout)
   image_id
   style         json  (global StyleConfig)
   labels        json  [{object_id, enabled, x, y, font_size?, text_override?, color?, show_aliases?, leader: auto|on|off, collided}]
-  version       int   (bumped on every save; used for undo history file naming)
+  version       int   (bumped on every save; the editor's conflict check)
 ```
 
 Config (`data/config.json`, never in DB): `password_hash`, `session_secret`, `nova_api_key`,

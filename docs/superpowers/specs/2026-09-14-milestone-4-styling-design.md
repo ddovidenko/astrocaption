@@ -31,7 +31,7 @@ Out (unchanged): server-side history, touch support (#57), Firefox fallback (#72
 
 `store.ts`'s `changed(s, labels)` becomes `changedDoc(s, patch, { commit })`, where `patch` may
 carry `labels` and/or `style`. Every document mutation goes through it. It refuses (returns `{}`)
-while the document is not editable: a solve in `pending`/`solving`, or a sticky conflict. The
+while the document is not editable: a solve in `pending`/`solving`. A conflict does not stop editing, only saving (SPEC § 6.3); it does clear the history. The
 `isEditable` predicate moves into `store.ts`.
 
 `commit: false` is used only by drag-move frames: the labels map is replaced so the canvas
