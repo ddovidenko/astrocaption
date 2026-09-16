@@ -80,6 +80,44 @@ describe('LabelToolbar', () => {
     expect(label(1).color).toBeNull()
   })
 
+  it('a picker drag is a live draft; the close commits it once', () => {
+    render(<LabelToolbar box={box} />)
+    const swatch = () => screen.getByRole('button', { name: /Text colour/ })
+    fireEvent.click(swatch())
+    const surface = screen.getByRole('dialog').querySelector('.react-colorful__interactive')!
+    fireEvent.mouseDown(surface, { clientX: 10, clientY: 10 })
+    fireEvent.mouseMove(document, { clientX: 20, clientY: 20 })
+    fireEvent.mouseUp(document)
+    // The draft is on screen (the "default" chip is gone) but nothing is committed yet.
+    expect(screen.queryByText('default')).toBeNull()
+    expect(label(1).color).toBeNull()
+    expect(state().undo).toHaveLength(1)
+    fireEvent.mouseDown(document.body) // click away: one commit for the whole drag
+    expect(label(1).color).toMatch(/^#[0-9a-f]{6}$/)
+    expect(state().undo).toHaveLength(2)
+    expect(swatch().textContent).toContain(label(1).color!.toUpperCase())
+  })
+
+  it('a close with no drag commits nothing', () => {
+    render(<LabelToolbar box={box} />)
+    fireEvent.click(screen.getByRole('button', { name: /Text colour/ }))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(label(1).color).toBeNull()
+    expect(state().undo).toHaveLength(1)
+  })
+
+  it('a typed hex commits once, and closing after it records no second entry', () => {
+    render(<LabelToolbar box={box} />)
+    const swatch = () => screen.getByRole('button', { name: /Text colour/ })
+    fireEvent.click(swatch())
+    fireEvent.change(screen.getByRole('dialog').querySelector('input')!, { target: { value: 'ff8800' } })
+    expect(label(1).color).toBe('#ff8800')
+    expect(swatch().textContent).toContain('#FF8800')
+    expect(state().undo).toHaveLength(2)
+    fireEvent.keyDown(document, { key: 'Escape' }) // the draft went with the commit
+    expect(state().undo).toHaveLength(2)
+  })
+
   it('pin toggles the whole selection; reset unpins and moves; clear overrides clears', () => {
     state().moveLabel(1, 5, 5) // pinned now
     state().toggleSelect(2)

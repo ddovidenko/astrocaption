@@ -56,6 +56,13 @@ export default function LabelToolbar({ box }: { box: Box }) {
   const draft = typed && typed.from === shownSize && typed.ids === selectedIds ? typed.text : shownSize
   const setDraft = (text: string) => setTyped({ from: shownSize, ids: selectedIds, text })
 
+  // The colour is a draft too, tagged the same way, so the picker surface follows the pointer
+  // while a drag is in flight and only the close commits it (StyleTab's shape).
+  const color = selected.length > 0 ? common(selected, (l) => l.color) : MIXED
+  const shownColor = color === MIXED ? '' : (color ?? '')
+  const [picked, setPicked] = useState<{ from: string; ids: ReadonlySet<number>; hex: string } | null>(null)
+  const colorDraft = picked && picked.from === shownColor && picked.ids === selectedIds ? picked.hex : null
+
   if (!style || !editable || selected.length === 0) return null
 
   const ids = selected.map((l) => l.object_id)
@@ -84,7 +91,6 @@ export default function LabelToolbar({ box }: { box: Box }) {
     s.applyLabels(updated)
   }
 
-  const color = common(selected, (l) => l.color)
   const aliases = common(selected, (l) => l.show_aliases)
   const leader = common(selected, (l) => l.leader)
   const pinned = common(selected, (l) => l.pinned)
@@ -123,18 +129,25 @@ export default function LabelToolbar({ box }: { box: Box }) {
       <button type="button" className="secondary" aria-label="Larger" onMouseDown={noFocus} onClick={() => step(1)}>
         +
       </button>
-      {/* A picker *drag* changes the draft only (`onChange` is a no-op here) and the popover's
-          close carries no hex, so a drag alone commits nothing: without a draft to hand back on
-          close, the toolbar commits only what it can name — a typed hex and "Use default". */}
+      {/* A drag only moves the draft, so the picker surface tracks the pointer; the close commits
+          it as one entry (a close with no drag carries no draft and commits nothing, and a draft
+          that landed back on the stored colour is a patch `updateLabels` drops). A typed hex
+          arrives with the commit and is committed on the keystroke; "Use default" clears the
+          override. Either way the draft is dropped, so the stored value shows again. */}
       <ColorField
         label="Text colour"
-        value={color === MIXED ? '' : (color ?? '')}
+        value={colorDraft ?? shownColor}
         fallback={style.text_color}
-        onChange={() => {}}
+        onChange={(hex) => setPicked({ from: shownColor, ids: selectedIds, hex })}
         onCommit={(hex) => {
-          if (hex !== undefined) update(ids, { color: hex })
+          const next = hex ?? colorDraft
+          if (next) update(ids, { color: next })
+          setPicked(null)
         }}
-        onClear={() => update(ids, { color: null })}
+        onClear={() => {
+          setPicked(null)
+          update(ids, { color: null })
+        }}
       />
       <select
         aria-label="Aliases"
