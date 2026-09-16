@@ -106,6 +106,8 @@ interface EntryProps {
   font: FontOut
   editable: boolean
   onPress: (id: number, shift: boolean) => void
+  /** A press that turned out to be a click, not a drag (the canvas checks `movedRef`). */
+  onClick: (id: number, shift: boolean) => void
   onDoubleClick: (id: number) => void
   moveLabel: (id: number, x: number, y: number, commit?: boolean) => void
   /** Whether Space is held: a pan gesture, which wins over selecting or dragging a label. Held in
@@ -124,6 +126,7 @@ const LabelEntry = memo(function LabelEntry({
   font,
   editable,
   onPress,
+  onClick,
   onDoubleClick,
   moveLabel,
   spacePan,
@@ -164,6 +167,9 @@ const LabelEntry = memo(function LabelEntry({
           // pan for it because the target is this group, not the stage.
           if (spacePan || e.evt.button === 1) return
           onPress(label.object_id, e.evt.shiftKey)
+        }}
+        onClick={(e) => {
+          if (e.evt.button === 0 && !spacePan) onClick(label.object_id, e.evt.shiftKey)
         }}
         onDblClick={(e) => {
           if (e.evt.button === 0 && !spacePan) onDoubleClick(label.object_id)
@@ -367,6 +373,16 @@ export default function EditorCanvas() {
     // Read back, not `id`: a shift-click that *removed* the label leaves it without a selection
     // outline, and a wheel must not then resize it.
     pressRef.current = useEditor.getState().selectedIds.has(id) ? id : null
+  }, [])
+
+  // ...and the click that follows narrows: a plain click on a label of a group selection leaves
+  // that one label selected (SPEC § 6.2). It cannot happen on the press, which has to keep the
+  // group so that dragging any of its labels moves them all; and it must not happen after a drag,
+  // which is what `movedRef` rules out.
+  const onLabelClick = useCallback((id: number, shift: boolean) => {
+    if (shift || movedRef.current) return
+    const s = useEditor.getState()
+    if (s.selectedIds.size > 1 && s.selectedIds.has(id)) s.select(id)
   }, [])
 
   // Which label a double-click opened for inline text editing.
@@ -700,6 +716,7 @@ export default function EditorCanvas() {
               font={font}
               editable={editable}
               onPress={onLabelPress}
+              onClick={onLabelClick}
               onDoubleClick={onLabelDoubleClick}
               moveLabel={moveLabel}
               spacePan={spacePan}
@@ -740,7 +757,7 @@ export default function EditorCanvas() {
           </div>
         )}
         {/* Hidden while the text editor is open, so the two overlays never stack. */}
-        {selectionBox && editingId === null && <LabelToolbar box={selectionBox} />}
+        {selectionBox && editing === null && <LabelToolbar box={selectionBox} />}
         {editing && (
           <LabelTextEditor
             key={editing.label.object_id}

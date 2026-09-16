@@ -85,6 +85,17 @@ test('toolbar, wheel, double-click and pins edit the selected labels', async ({ 
   await page.keyboard.up('Shift')
   await expect.poll(async () => (await selected()).sort()).toEqual([first.id, second.id].sort())
   await expect(size).toHaveValue('')
+
+  // A plain click on a label of that group narrows the selection to it (SPEC § 6.2): the press
+  // keeps the group (so a group drag works), the click that follows is what narrows.
+  await page.mouse.click(first.x, first.y)
+  await expect.poll(selected).toEqual([first.id])
+  // Both again, for the Clear overrides step below.
+  await page.keyboard.down('Shift')
+  await page.mouse.click(second.x, second.y)
+  await page.keyboard.up('Shift')
+  await expect.poll(async () => (await selected()).sort()).toEqual([first.id, second.id].sort())
+
   await toolbar.getByRole('button', { name: 'Clear overrides' }).click()
   await expect.poll(async () => (await storedLabel(first.id)).font_size, { timeout: 5_000 }).toBeNull()
   expect((await storedLabel(first.id)).text_override).toBeNull()
