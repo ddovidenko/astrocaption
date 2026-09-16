@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import LabelTextEditor from './LabelTextEditor'
 import { useEditor } from './store'
@@ -43,6 +43,39 @@ describe('LabelTextEditor', () => {
     expect(useEditor.getState().labels.get(1)!.text_override).toBeNull()
     expect(useEditor.getState().undo).toHaveLength(0)
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('an untouched close commits nothing (the catalogue name is not stored as an override)', () => {
+    const onClose = vi.fn()
+    render(<LabelTextEditor id={1} x={1552} y={970} width={120} fontSize={24} onClose={onClose} />)
+    expect(input().value).toBe('M 42')
+    fireEvent.blur(input())
+    expect(useEditor.getState().labels.get(1)!.text_override).toBeNull()
+    expect(useEditor.getState().undo).toHaveLength(0)
+    expect(useEditor.getState().changeSeq).toBe(0)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('a refused commit keeps the field open and says why', () => {
+    const onClose = vi.fn()
+    render(<LabelTextEditor id={1} x={1552} y={970} width={120} fontSize={24} onClose={onClose} />)
+    // A re-solve started while the field was open: the store's editable gate refuses the change.
+    act(() => useEditor.getState().load({ ...makeDoc(), image: { ...makeDoc().image, solve_status: 'solving' } }))
+    fireEvent.change(input(), { target: { value: 'Renamed' } })
+    fireEvent.keyDown(input(), { key: 'Enter' })
+    expect(useEditor.getState().labels.get(1)!.text_override).toBeNull()
+    expect(useEditor.getState().undo).toHaveLength(0)
+    expect(onClose).not.toHaveBeenCalled()
+    expect(input().value).toBe('Renamed')
+    expect(screen.getByText('The name could not be changed while the image is being solved.')).toBeTruthy()
+  })
+
+  it('closes itself when the label leaves the document', () => {
+    const onClose = vi.fn()
+    render(<LabelTextEditor id={1} x={1552} y={970} width={120} fontSize={24} onClose={onClose} />)
+    expect(onClose).not.toHaveBeenCalled()
+    act(() => useEditor.getState().load({ ...makeDoc(), annotations: { ...makeDoc().annotations, labels: [] } }))
+    expect(onClose).toHaveBeenCalled()
   })
 
   it('is placed and sized through the view transform', () => {
