@@ -1,7 +1,7 @@
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Annotations, HealthOut, ImageOut } from '../src/api'
+import type { Annotations, AnnotationsUpdate, ExportOut, HealthOut, ImageOut } from '../src/api'
 import type { EditorTestHook } from '../src/editor/EditorCanvas'
 
 // Shared steps for the e2e specs. The whole run shares one data dir (`make e2e` mints a scratch
@@ -159,4 +159,19 @@ export async function fetchAnnotations(page: Page, imageId: string): Promise<Ann
   const res = await page.request.get(`/api/images/${imageId}/annotations`)
   expect(res.status()).toBe(200)
   return (await res.json()) as Annotations
+}
+
+/** Stores `doc` as the image's annotations through the signed-in page's cookies. */
+export async function putAnnotations(page: Page, imageId: string, doc: AnnotationsUpdate): Promise<Annotations> {
+  const res = await page.request.put(`/api/images/${imageId}/annotations`, { data: doc })
+  expect(res.status(), `PUT annotations: ${await res.text()}`).toBe(200)
+  return (await res.json()) as Annotations
+}
+
+/** Exports the image (default quality and scale) and returns the annotated preview's absolute URL. */
+export async function exportImage(page: Page, imageId: string): Promise<string> {
+  const res = await page.request.post(`/api/images/${imageId}/export`, { data: {} })
+  expect(res.status(), `POST export: ${await res.text()}`).toBe(200)
+  const out = (await res.json()) as ExportOut
+  return new URL(out.annotated_preview_url, page.url()).href
 }
