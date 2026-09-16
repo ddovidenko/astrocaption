@@ -45,6 +45,7 @@ export interface EditorState {
   viewport: { w: number; h: number }
   fitted: boolean // whether the first fit has happened for this document (reset by load)
   changeSeq: number // increments on every document change; autosave keys on it
+  historySeq: number // increments on undoLast/redoLast only; StyleTab keys its pending-cancel effect on it
   pendingChanges: number // changes since markSaving; markSaved leaves 'dirty' when > 0
   save: { status: SaveStatus; message: string | null }
   committed: Snapshot | null // the document as of the last commit; the head of the history
@@ -88,6 +89,7 @@ const initial = {
   viewport: { w: 0, h: 0 },
   fitted: false,
   changeSeq: 0,
+  historySeq: 0,
   pendingChanges: 0,
   save: { status: 'saved' as SaveStatus, message: null as string | null },
   committed: null as Snapshot | null,
@@ -158,7 +160,9 @@ function swapHistory(s: EditorState, direction: 'undo' | 'redo'): Partial<Editor
   const to = direction === 'undo' ? s.redo : s.undo
   const pushed = [...to, s.committed]
   const history = direction === 'undo' ? { undo: popped, redo: pushed } : { undo: pushed, redo: popped }
-  return { ...patch, ...history, ...committed(s, snapshot) }
+  // historySeq moves on every undo/redo, even one that only touched labels (style unchanged) —
+  // StyleTab keys its pending-debounce cancel effect on it for exactly that case (#defect).
+  return { ...patch, ...history, ...committed(s, snapshot), historySeq: s.historySeq + 1 }
 }
 
 export const useEditor = create<EditorState>()((set) => ({
@@ -180,6 +184,7 @@ export const useEditor = create<EditorState>()((set) => ({
       save: { status: 'saved', message: null },
       fitted: false,
       changeSeq: 0,
+      historySeq: 0,
       pendingChanges: 0,
       committed: { style: doc.annotations.style, labels },
       undo: [],

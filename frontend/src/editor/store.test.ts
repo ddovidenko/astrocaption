@@ -423,6 +423,20 @@ describe('undo/redo', () => {
     expect(useEditor.getState().undo).toHaveLength(0)
     expect(useEditor.getState().save.status).toBe('saved')
   })
+
+  it('historySeq moves on undo/redo only, not on a plain commit, and load resets it', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    expect(useEditor.getState().historySeq).toBe(0)
+    s.toggleObject(1) // a plain commit: historySeq does not move
+    expect(useEditor.getState().historySeq).toBe(0)
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().historySeq).toBe(1)
+    useEditor.getState().redoLast()
+    expect(useEditor.getState().historySeq).toBe(2)
+    useEditor.getState().load(makeDoc())
+    expect(useEditor.getState().historySeq).toBe(0)
+  })
 })
 
 describe('isEditable', () => {
