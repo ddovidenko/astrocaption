@@ -361,7 +361,9 @@ export default function EditorCanvas() {
     const s = useEditor.getState()
     if (shift) s.toggleSelect(id)
     else if (!s.selectedIds.has(id)) s.select(id)
-    pressRef.current = id
+    // Read back, not `id`: a shift-click that *removed* the label leaves it without a selection
+    // outline, and a wheel must not then resize it.
+    pressRef.current = useEditor.getState().selectedIds.has(id) ? id : null
   }, [])
 
   // Which label a double-click opened for inline text editing; the editor itself lands in a later
@@ -413,8 +415,8 @@ export default function EditorCanvas() {
         e.preventDefault()
         const s = useEditor.getState()
         if (s.selectedIds.size === 0 || !isEditable(s)) return
-        // One commit for the whole selection (SPEC § 6.1). applyLabels drops them from the
-        // selection itself, so nothing is left behind to toggle back on.
+        // One commit for the whole selection (SPEC § 6.1). `changedDoc` drops the newly
+        // disabled labels from the selection, so nothing is left behind to toggle back on.
         disableAll([...s.selectedIds])
       }
     }
@@ -606,16 +608,25 @@ export default function EditorCanvas() {
   }, [panning, stopPan])
 
   // The wheel-resize preview is committed when the button comes up, wherever that happens.
-  // Konva's own window listener fires first, so a drag-end commit has already folded the size
-  // into its entry by then and commitPreview finds nothing left to record.
+  // Deferred past the current event dispatch rather than run inline, because the order of this
+  // listener against Konva's own window mouseup is not ours to pick: the Stage mounts only once
+  // the container has been measured, so this one is usually registered first. Committing inline
+  // would then beat Konva's `dragend`, which would find nothing left to move and would never
+  // record the pin a committed move carries. By the time the timeout runs, Konva's synchronous
+  // drag-end commit has folded any wheel size into that same entry, so this is a no-op after a
+  // drag and still the commit for a wheel-only resize.
   useEffect(() => {
+    let timer = 0
     const up = () => {
       if (pressRef.current === null) return
       pressRef.current = null
-      useEditor.getState().commitPreview()
+      timer = window.setTimeout(() => useEditor.getState().commitPreview(), 0)
     }
     window.addEventListener('mouseup', up)
-    return () => window.removeEventListener('mouseup', up)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('mouseup', up)
+    }
   }, [])
 
   if (!image || !style || !font) return null
