@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Annotations, AnnotationsUpdate, Label } from '../src/api'
 import {
+  currentImageId,
   ensureExported,
   ensureSetUpAndSignedIn,
   ensureSolvedImage,
@@ -194,8 +195,7 @@ test('the editor stage matches the annotated preview within the pixel budget', a
 
   // Every enabled label must be on the stage: an empty or half-drawn canvas would otherwise
   // diff clean against a preview whose annotations happen to be faint.
-  const imageId = /\/images\/([^/?#]+)/.exec(page.url())?.[1]
-  expect(imageId, `no image id in ${page.url()}`).toBeTruthy()
+  const imageId = currentImageId(page)
   const annotations = await page.request.get(`/api/images/${imageId}/annotations`)
   expect(annotations.status()).toBe(200)
   const { labels } = (await annotations.json()) as { labels: { enabled: boolean }[] }
@@ -214,9 +214,8 @@ test('the stage matches the preview for a document with per-label overrides and 
   const card = await ensureSolvedImage(page)
   await card.getByRole('link', { name: 'Edit' }).click()
   await page.waitForFunction(() => window.__astrocaptionEditor?.labelCount !== undefined)
-  const imageId = /\/images\/([^/?#]+)/.exec(page.url())?.[1]
-  expect(imageId, `no image id in ${page.url()}`).toBeTruthy()
-  const original = await fetchAnnotations(page, imageId!)
+  const imageId = currentImageId(page)
+  const original = await fetchAnnotations(page, imageId)
   const enabled = original.labels.filter((l) => l.enabled)
   expect(enabled.length).toBeGreaterThanOrEqual(3)
   const [a, b, c] = enabled as [Label, Label, Label]
@@ -240,14 +239,14 @@ test('the stage matches the preview for a document with per-label overrides and 
   let stored: Annotations | null = null
   let failed: unknown = null
   try {
-    stored = await putAnnotations(page, imageId!, overridden)
+    stored = await putAnnotations(page, imageId, overridden)
     // The overrides have to be in the document the server renders from, or the diff below would
     // be comparing two plain documents and would pass without testing anything.
     const byId = new Map(stored.labels.map((l) => [l.object_id, l]))
     expect(byId.get(a.object_id)).toMatchObject({ font_size: original.style.font_size * 2, color: '#ff8800' })
     expect(byId.get(b.object_id)).toMatchObject({ text_override: 'Overridden name', show_aliases: true })
     expect(byId.get(c.object_id)).toMatchObject({ pinned: true, leader: 'on', x: c.x + 60, y: c.y + 40 })
-    const previewUrl = await exportImage(page, imageId!)
+    const previewUrl = await exportImage(page, imageId)
     // Reload so the editor draws the stored document, then diff.
     await page.reload()
     await page.waitForFunction(() => window.__astrocaptionEditor?.labelCount !== undefined)
@@ -263,12 +262,12 @@ test('the stage matches the preview for a document with per-label overrides and 
   // the real failure; one that fails after the body already threw is only logged, so the original
   // failure is what the report shows.
   try {
-    await putAnnotations(page, imageId!, {
+    await putAnnotations(page, imageId, {
       style: original.style,
       labels: original.labels,
       version: stored?.version ?? original.version,
     })
-    await exportImage(page, imageId!)
+    await exportImage(page, imageId)
   } catch (e) {
     if (!failed) throw e
     console.error(`[parity] restore failed: ${e instanceof Error ? e.message : String(e)}`)

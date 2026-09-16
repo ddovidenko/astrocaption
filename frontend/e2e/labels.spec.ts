@@ -1,6 +1,7 @@
 import { expect, test } from './fixtures'
 import type { Page } from '@playwright/test'
-import { ensureSetUpAndSignedIn, ensureSolvedImage, fetchAnnotations } from './helpers'
+import type { Label } from '../src/api'
+import { currentImageId, ensureSetUpAndSignedIn, ensureSolvedImage, fetchAnnotations } from './helpers'
 
 // Per-label editing (SPEC § 6.2, milestone 4 PR 4): click / shift-click selection with the
 // floating toolbar, wheel-to-resize while the button is held, double-click text edit, pinning
@@ -25,9 +26,12 @@ test('toolbar, wheel, double-click and pins edit the selected labels', async ({ 
   const card = await ensureSolvedImage(page)
   await card.getByRole('link', { name: 'Edit' }).click()
   await page.waitForFunction(() => window.__astrocaptionEditor?.labelPositions !== undefined)
-  const imageId = /\/images\/([^/?#]+)/.exec(page.url())?.[1]
-  expect(imageId, `no image id in ${page.url()}`).toBeTruthy()
-  const storedLabel = async (id: number) => (await fetchAnnotations(page, imageId!)).labels.find((l) => l.object_id === id)!
+  const imageId = currentImageId(page)
+  const storedLabel = async (id: number) => (await fetchAnnotations(page, imageId)).labels.find((l) => l.object_id === id)!
+  // Every assertion below is about the *stored* document: the edit has to have reached the server
+  // through the autosave, not merely the canvas — hence a poll rather than a straight read.
+  const pollField = <K extends keyof Label>(id: number, field: K, expected: Label[K]) =>
+    expect.poll(async () => (await storedLabel(id))[field], { timeout: 5_000 }).toBe(expected)
   const selected = () => page.evaluate(() => window.__astrocaptionEditor!.selectedIds())
 
   // Click selects one; the toolbar appears above it.
@@ -41,7 +45,7 @@ test('toolbar, wheel, double-click and pins edit the selected labels', async ({ 
   const size = toolbar.getByLabel('Font size')
   await size.fill('31')
   await size.press('Enter')
-  await expect.poll(async () => (await storedLabel(first.id)).font_size, { timeout: 5_000 }).toBe(31)
+  await pollField(first.id, 'font_size', 31)
 
   // Wheel with the button held: one notch up = +1, committed on the mouseup (EditorCanvas.tsx),
   // then autosaved — so poll the stored document rather than assert straight away.
@@ -65,7 +69,7 @@ test('toolbar, wheel, double-click and pins edit the selected labels', async ({ 
   })
   await page.mouse.up()
   await cdp.detach()
-  await expect.poll(async () => (await storedLabel(first.id)).font_size, { timeout: 5_000 }).toBe(32)
+  await pollField(first.id, 'font_size', 32)
 
   // Double-click: inline text edit, Enter commits.
   await page.mouse.dblclick(first.x, first.y)
@@ -73,7 +77,7 @@ test('toolbar, wheel, double-click and pins edit the selected labels', async ({ 
   await expect(editor).toBeVisible()
   await editor.fill('Renamed by test')
   await editor.press('Enter')
-  await expect.poll(async () => (await storedLabel(first.id)).text_override, { timeout: 5_000 }).toBe('Renamed by test')
+  await pollField(first.id, 'text_override', 'Renamed by test')
 
   // Shift-click adds a second label; a mixed size shows blank; Clear overrides clears both.
   const second = await labelPoint(page, 1)
@@ -97,7 +101,7 @@ test('toolbar, wheel, double-click and pins edit the selected labels', async ({ 
   await expect.poll(async () => (await selected()).sort()).toEqual([first.id, second.id].sort())
 
   await toolbar.getByRole('button', { name: 'Clear overrides' }).click()
-  await expect.poll(async () => (await storedLabel(first.id)).font_size, { timeout: 5_000 }).toBeNull()
+  await pollField(first.id, 'font_size', null)
   expect((await storedLabel(first.id)).text_override).toBeNull()
 
   // Escape clears the selection.
@@ -110,11 +114,11 @@ test('toolbar, wheel, double-click and pins edit the selected labels', async ({ 
   await page.mouse.down()
   await page.mouse.move(first.x + 40, first.y + 30, { steps: 5 })
   await page.mouse.up()
-  await expect.poll(async () => (await storedLabel(first.id)).pinned, { timeout: 5_000 }).toBe(true)
+  await pollField(first.id, 'pinned', true)
   const dragged = await storedLabel(first.id)
   expect([dragged.x, dragged.y]).not.toEqual([first.wx, first.wy]) // the drag really moved it
   await toolbar.getByRole('button', { name: 'Reset position' }).click()
-  await expect.poll(async () => (await storedLabel(first.id)).pinned, { timeout: 5_000 }).toBe(false)
+  await pollField(first.id, 'pinned', false)
   // Unpinning is only half of it: the placer has to have put the label somewhere else again.
   const replaced = await storedLabel(first.id)
   expect([replaced.x, replaced.y]).not.toEqual([dragged.x, dragged.y])

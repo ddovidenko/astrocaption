@@ -1,6 +1,6 @@
 import { expect, test } from './fixtures'
 import type { StyleConfig } from '../src/api'
-import { ensureSetUpAndSignedIn, ensureSolvedImage, fetchAnnotations } from './helpers'
+import { currentImageId, ensureSetUpAndSignedIn, ensureSolvedImage, fetchAnnotations } from './helpers'
 
 // Style tab (SPEC § 6.3): a number field commits its debounced value and autosaves it, Ctrl+Z
 // (from outside any input, since the canvas key handler ignores focused fields) takes it back,
@@ -13,9 +13,8 @@ test('the Style tab changes the font size live, autosaves it, and Ctrl+Z takes i
   // The hook is published once the preview bitmap has loaded (EditorCanvas.tsx).
   await page.waitForFunction(() => window.__astrocaptionEditor?.labelPositions !== undefined)
 
-  const imageId = /\/images\/([^/?#]+)/.exec(page.url())?.[1]
-  expect(imageId, `no image id in ${page.url()}`).toBeTruthy()
-  const stored = () => fetchAnnotations(page, imageId!)
+  const imageId = currentImageId(page)
+  const stored = () => fetchAnnotations(page, imageId)
   const before = await stored()
 
   await page.getByRole('tab', { name: 'Style' }).click()

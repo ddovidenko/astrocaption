@@ -154,6 +154,15 @@ export async function ensureExported(card: Locator, title = 'Orion'): Promise<st
   return img.evaluate((e: HTMLImageElement) => e.src)
 }
 
+/** The image id from the editor URL the page is on (`/images/<id>`). The assertion is the point:
+ *  a spec that read `undefined` here would go on to call `/api/images/undefined/...` and fail
+ *  somewhere far less obvious. Call it once the editor has actually opened. */
+export function currentImageId(page: Page): string {
+  const imageId = /\/images\/([^/?#]+)/.exec(page.url())?.[1]
+  expect(imageId, `no image id in ${page.url()}`).toBeTruthy()
+  return imageId!
+}
+
 /** The annotations the server holds for `imageId`, through the signed-in page's cookies. */
 export async function fetchAnnotations(page: Page, imageId: string): Promise<Annotations> {
   const res = await page.request.get(`/api/images/${imageId}/annotations`)
