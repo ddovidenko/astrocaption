@@ -71,6 +71,7 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
 
 - Python 3.13+ (dev host, CI and the Docker image run 3.14 via python:3.14-slim), type hints everywhere, ruff defaults, pytest. Pydantic models for every request/response.
 - TypeScript strict. Function components + hooks. Zustand for editor state. No Redux.
+- Component tests are `*.test.tsx` next to the component, with `// @vitest-environment jsdom` on line 1 (vitest stays in node otherwise); render with Testing Library and assert on the store or the DOM, never on internals.
 - Coordinates: annotation geometry is stored in **original image pixels**, never in screen pixels.
   The canvas applies a single view transform (zoom, pan). Convert at the edges only.
 - Fonts referenced by file name (e.g. `Inter-Regular.ttf`), never by family name, so browser and Pillow agree.

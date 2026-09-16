@@ -24,6 +24,7 @@ const NUMBER_DEBOUNCE_MS = 400
  *  (above). */
 export default function StyleTab() {
   const style = useEditor((s) => s.style)
+  const historySeq = useEditor((s) => s.historySeq)
   const fontsMap = useEditor((s) => s.fonts)
   const imageId = useEditor((s) => s.image?.id ?? null)
   const fallback = useEditor((s) => s.fontFallback)
@@ -51,12 +52,13 @@ export default function StyleTab() {
   }
   const pendingKeys = () => Object.keys(numberTimers.current) as NumberKey[]
 
-  // Cancel on every style change: past a commit, an undo/redo or a reset, a pending value can
-  // only be stale (Undo/Redo/Reset never blur the input, so nothing else would flush it). A timer
-  // that just fired deleted its own entry before calling setStyle, so it never cancels itself.
+  // Cancel when the style changes or history moves (undo/redo), even one that only touched
+  // labels: a value typed before the undo would otherwise land on top of what it restored. A
+  // timer that just fired deleted its own entry before calling setStyle, so it never cancels
+  // itself.
   useEffect(() => {
     for (const key of pendingKeys()) takePending(key)
-  }, [style])
+  }, [style, historySeq])
 
   // Flush on unmount only (a tab switch never blurs the input either): a valid edit still waiting
   // out its debounce commits instead of vanishing. StrictMode's extra pass sees an empty map.
@@ -70,13 +72,22 @@ export default function StyleTab() {
   }, [])
 
   // The store is the source of truth: undo/redo, a reset and every commit re-derive the draft.
+  // historySeq is tracked alongside style: an undo/redo that only touched labels leaves the style
+  // object itself unchanged, but a number field's stale, not-yet-committed draft value must still
+  // be dropped in favour of what history just restored (the cancel effect above only clears the
+  // timer; this is what makes the input stop showing the discarded keystroke).
   // Adjusted during render rather than in an effect (react-hooks/set-state-in-effect; the React
   // docs' "adjusting state when a prop changes" pattern) so the stale draft never paints.
   const [renderedStyle, setRenderedStyle] = useState(style)
-  if (style !== renderedStyle) {
+  const [renderedHistorySeq, setRenderedHistorySeq] = useState(historySeq)
+  if (style !== renderedStyle || historySeq !== renderedHistorySeq) {
+    // A style change clears the notice (a fresh font/value replaces whatever it was about); a
+    // labels-only undo/redo (historySeq moved, style did not) must leave a transient font-load
+    // error notice standing.
+    if (style !== renderedStyle) setFontError(null)
     setRenderedStyle(style)
+    setRenderedHistorySeq(historySeq)
     setDraft(style ? styleFormFromConfig(style) : null)
-    setFontError(null)
   }
 
   if (!style || !draft) return null
