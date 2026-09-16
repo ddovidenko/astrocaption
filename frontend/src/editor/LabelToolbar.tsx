@@ -111,7 +111,13 @@ export default function LabelToolbar({
   // itself: a drag replaces every selected `Label` object on every frame, and keying on them would
   // put a `getBoundingClientRect` — a forced layout — in the middle of each one (#105). The size
   // guard keeps a settled measurement from looping.
-  const contentKey = `${shownSize}|${color === MIXED}|${aliases}|${leader}|${pinLabel}|${editable}`
+  //
+  // The signature covers everything that moves the width: the size field's text and the global
+  // size behind its placeholder (`style`), the swatch's " default"/" mixed" note — which is why
+  // *having* a colour override counts, not which colour it is — the two selects' values, the pin
+  // button's wording and whether there is a toolbar at all. The live picker draft is deliberately
+  // not in it: a drag changes the swatch's hex, not its layout, and would remeasure per frame.
+  const contentKey = `${shownSize}|${color === MIXED}|${shownColor === ''}|${aliases}|${leader}|${pinLabel}|${editable}`
   const ref = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
   useLayoutEffect(() => {
