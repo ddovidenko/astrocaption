@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.layout import autoplace, default_enabled, default_style
-from app.models import Label, SolveObject, primary_name
+from app.models import Label, SolveObject, StyleConfig, primary_name
 from app.objects import objects_from_nova
 from tests.conftest import FONTS_DIR, NOVA_NARROW_FIXTURES, load_fixture
 
@@ -69,3 +69,70 @@ def test_objects_with_no_known_size_are_enabled_but_hd_stars_are_not() -> None:
     assert not default_enabled(small, 3000)  # 5 px is below 0.4 % of 3000
     assert not default_enabled(hd, 3000)
     assert default_enabled(bright, 3000)
+
+
+def _kept_field() -> tuple[list[SolveObject], StyleConfig]:
+    objects = [
+        SolveObject(
+            id=1, catalog_names=["NGC 1976", "M 42"], type="ngc", x=1100, y=1400, radius=130
+        ),
+        SolveObject(id=2, catalog_names=["Alnitak"], type="bright", x=1620, y=550, radius=0),
+        SolveObject(id=3, catalog_names=["NGC 2024"], type="ngc", x=1900, y=900, radius=90),
+    ]
+    return objects, default_style(3000, 2000, FONTS_DIR)
+
+
+def test_autoplace_leaves_a_kept_label_in_a_clean_slot_uncollided() -> None:
+    """A pinned label parked exactly where the placer would have put it stays clean once the
+    others are laid out around it."""
+    objects, style = _kept_field()
+    fresh = autoplace(
+        3000,
+        2000,
+        style,
+        [Label(object_id=o.id, enabled=True, x=o.x, y=o.y) for o in objects],
+        objects,
+        FONTS_DIR,
+    )
+    assert not fresh[0].collided
+    # Object 1 keeps the slot it was just given; the other two start on their objects again, so
+    # the placer has to fit them around it.
+    labels = [
+        fresh[0].model_copy(update={"pinned": True}),
+        *(
+            lab.model_copy(update={"x": o.x, "y": o.y})
+            for lab, o in zip(fresh[1:], objects[1:], strict=True)
+        ),
+    ]
+    out = autoplace(3000, 2000, style, labels, objects, FONTS_DIR, keep=frozenset({1}))
+    assert (out[0].x, out[0].y) == (fresh[0].x, fresh[0].y)
+    assert out[0].pinned is True
+    assert out[0].collided is False
+
+
+def test_autoplace_flags_two_kept_labels_parked_on_top_of_each_other() -> None:
+    objects, style = _kept_field()
+    labels = [
+        Label(object_id=1, enabled=True, x=1400, y=900, pinned=True),
+        Label(object_id=2, enabled=True, x=1405, y=905, pinned=True),
+        Label(object_id=3, enabled=False, x=1900, y=900),
+    ]
+    out = autoplace(3000, 2000, style, labels, objects, FONTS_DIR, keep=frozenset({1, 2}))
+    assert [(lab.x, lab.y) for lab in out[:2]] == [(1400, 900), (1405, 905)]
+    assert [lab.collided for lab in out[:2]] == [True, True]
+    assert out[2].collided is False  # disabled: never touched
+
+
+def test_autoplace_clears_a_kept_labels_stale_collided_flag() -> None:
+    objects = [
+        SolveObject(id=1, catalog_names=["NGC 1976", "M 42"], type="ngc", x=300, y=300, radius=40),
+        SolveObject(id=2, catalog_names=["Alnitak"], type="bright", x=2700, y=1700, radius=0),
+    ]
+    style = default_style(3000, 2000, FONTS_DIR)
+    labels = [
+        Label(object_id=1, enabled=True, x=420, y=290, pinned=True, collided=True),
+        Label(object_id=2, enabled=True, x=2700, y=1700),
+    ]
+    out = autoplace(3000, 2000, style, labels, objects, FONTS_DIR, keep=frozenset({1}))
+    assert (out[0].x, out[0].y) == (420, 290)
+    assert out[0].collided is False

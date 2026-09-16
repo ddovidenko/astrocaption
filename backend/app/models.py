@@ -339,8 +339,9 @@ class Label(BaseModel):
     show_aliases: bool | None = None
     leader: LeaderMode = "auto"
     collided: bool = False
-    # Kept where the owner put it: a drag or a toolbar edit pins a label, and the placer treats
-    # it as a fixed obstacle until Reset position (one label) or Reset positions (all) unpins it.
+    # Kept where the owner put it: a drag, or the toolbar's Pin button, pins a label, and the
+    # placer treats it as a fixed obstacle until Reset position (the toolbar, for the selected
+    # labels) or Reset positions (the layout tab, for all of them) unpins it.
     pinned: bool = False
 
 
