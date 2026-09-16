@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ColorField from './ColorField'
 
@@ -30,8 +30,15 @@ describe('ColorField commits exactly once per close', () => {
     f.open()
     const hex = screen.getByRole('dialog').querySelector('input')!
     hex.focus()
-    fireEvent.mouseDown(document.body)
-    fireEvent.blur(hex, { relatedTarget: document.body })
+    // Both events must share one outer act(): a separate act() per fireEvent flushes and
+    // unmounts the popover after the mousedown alone, so the blur would land on an already
+    // detached node and the test could never see a double commit even with the openRef guard
+    // stripped. One act() defers the re-render so both native handlers run against the still-
+    // mounted popover, reproducing the real single-gesture race the guard defends against.
+    act(() => {
+      fireEvent.mouseDown(document.body)
+      fireEvent.blur(hex, { relatedTarget: document.body })
+    })
     expect(f.dialog()).toBeNull()
     expect(f.onCommit).toHaveBeenCalledTimes(1)
   })
