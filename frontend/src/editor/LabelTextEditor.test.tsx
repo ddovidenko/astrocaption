@@ -56,6 +56,20 @@ describe('LabelTextEditor', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('clearing a field that never had an override closes quietly', () => {
+    // The commit is a real no-op against the stored document (already null), which is not a
+    // refusal: nothing may be said, and the field must close.
+    const onClose = vi.fn()
+    render(<LabelTextEditor id={1} x={1552} y={970} width={120} fontSize={24} onClose={onClose} />)
+    expect(input().value).toBe('M 42')
+    fireEvent.change(input(), { target: { value: '' } })
+    fireEvent.keyDown(input(), { key: 'Enter' })
+    expect(useEditor.getState().labels.get(1)!.text_override).toBeNull()
+    expect(useEditor.getState().undo).toHaveLength(0)
+    expect(screen.queryByText(/could not be changed/)).toBeNull()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('a refused commit keeps the field open and says why', () => {
     const onClose = vi.fn()
     render(<LabelTextEditor id={1} x={1552} y={970} width={120} fontSize={24} onClose={onClose} />)
@@ -68,6 +82,9 @@ describe('LabelTextEditor', () => {
     expect(onClose).not.toHaveBeenCalled()
     expect(input().value).toBe('Renamed')
     expect(screen.getByText('The name could not be changed while the image is being solved.')).toBeTruthy()
+    // The next keystroke is another try: the message goes.
+    fireEvent.change(input(), { target: { value: 'Renamed again' } })
+    expect(screen.queryByText(/could not be changed/)).toBeNull()
   })
 
   it('closes itself when the label leaves the document', () => {

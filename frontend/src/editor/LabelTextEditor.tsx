@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { fontFamilyFor, labelText } from './metrics'
-import { useEditor } from './store'
+import { isEditable, useEditor } from './store'
 import { toScreen } from './view'
 
 interface Props {
@@ -30,8 +30,9 @@ export default function LabelTextEditor({ id, x, y, width, fontSize, onClose }: 
   const initialRef = useRef(initial)
   // Whether a commit or a cancel already closed us: the blur that follows must not commit again.
   const doneRef = useRef(false)
-  // The store refused the commit (a solve started while the field was open). The field stays open
-  // with what was typed still in it, rather than closing as though the name had been stored.
+  // The document turned read-only while the field was open (a solve started), so the rename could
+  // not be stored. The field stays open with what was typed still in it, rather than closing as
+  // though the name had stuck. Cleared by the next keystroke: the owner is trying again.
   const [refused, setRefused] = useState(false)
 
   useEffect(() => {
@@ -52,14 +53,14 @@ export default function LabelTextEditor({ id, x, y, width, fontSize, onClose }: 
     if (doneRef.current) return
     const text = draft.trim()
     if (commit && text !== initialRef.current.trim()) {
-      const before = useEditor.getState().changeSeq
-      useEditor.getState().updateLabels([id], { text_override: text === '' ? null : text })
-      if (useEditor.getState().changeSeq === before) {
-        // The editable gate turned it down. Say so in plain language and keep the field open: a
-        // silent close would look exactly like a rename that stuck.
+      // Ask the gate outright rather than watching `changeSeq` for a change that did not happen:
+      // a commit can legitimately be a no-op against the stored document (clearing a field on a
+      // label that never had an override), and that must close quietly, not claim a refusal.
+      if (!isEditable(useEditor.getState())) {
         setRefused(true)
         return
       }
+      useEditor.getState().updateLabels([id], { text_override: text === '' ? null : text })
     }
     doneRef.current = true
     onClose()
@@ -73,7 +74,10 @@ export default function LabelTextEditor({ id, x, y, width, fontSize, onClose }: 
         className="label-text-editor"
         aria-label="Label text"
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => {
+          setDraft(e.target.value)
+          setRefused(false)
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault()
