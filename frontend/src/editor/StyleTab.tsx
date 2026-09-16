@@ -81,10 +81,13 @@ export default function StyleTab() {
   const [renderedStyle, setRenderedStyle] = useState(style)
   const [renderedHistorySeq, setRenderedHistorySeq] = useState(historySeq)
   if (style !== renderedStyle || historySeq !== renderedHistorySeq) {
+    // A style change clears the notice (a fresh font/value replaces whatever it was about); a
+    // labels-only undo/redo (historySeq moved, style did not) must leave a transient font-load
+    // error notice standing.
+    if (style !== renderedStyle) setFontError(null)
     setRenderedStyle(style)
     setRenderedHistorySeq(historySeq)
     setDraft(style ? styleFormFromConfig(style) : null)
-    setFontError(null)
   }
 
   if (!style || !draft) return null

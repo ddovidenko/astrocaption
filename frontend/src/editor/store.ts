@@ -161,7 +161,8 @@ function swapHistory(s: EditorState, direction: 'undo' | 'redo'): Partial<Editor
   const pushed = [...to, s.committed]
   const history = direction === 'undo' ? { undo: popped, redo: pushed } : { undo: pushed, redo: popped }
   // historySeq moves on every undo/redo, even one that only touched labels (style unchanged) —
-  // StyleTab keys its pending-debounce cancel effect on it for exactly that case (#defect).
+  // StyleTab keys its pending-debounce cancel effect on it for exactly that case (found by the
+  // component tests, #95).
   return { ...patch, ...history, ...committed(s, snapshot), historySeq: s.historySeq + 1 }
 }
 

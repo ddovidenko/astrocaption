@@ -436,6 +436,8 @@ describe('undo/redo', () => {
     expect(useEditor.getState().historySeq).toBe(2)
     useEditor.getState().load(makeDoc())
     expect(useEditor.getState().historySeq).toBe(0)
+    useEditor.getState().reset()
+    expect(useEditor.getState().historySeq).toBe(0)
   })
 })
 
