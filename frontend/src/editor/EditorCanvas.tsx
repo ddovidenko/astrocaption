@@ -4,8 +4,10 @@ import Konva from 'konva'
 import { useShallow } from 'zustand/react/shallow'
 import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
 import { LabelTextShape } from './LabelTextShape'
-import { getMeasurer, isEditable, toggleWithPlacement } from './editing'
+import { disableAll, getMeasurer, isEditable, toggleWithPlacement } from './editing'
 import {
+  MAX_FONT_SIZE,
+  MIN_FONT_SIZE,
   labelText,
   leaderSegment,
   leaderVisible,
@@ -36,6 +38,8 @@ export interface EditorTestHook {
   labelCount: number
   /** Where the drawn labels sit, in original image pixels — what a drag has to move. */
   labelPositions(): { id: number; x: number; y: number }[]
+  /** The selected object ids, for the spec that drives clicks and shift-clicks. */
+  selectedIds(): number[]
   renderAt(scale: number): string
 }
 
@@ -98,7 +102,8 @@ interface EntryProps {
   style: StyleConfig
   font: FontOut
   editable: boolean
-  select: (id: number | null) => void
+  onPress: (id: number, shift: boolean) => void
+  onDoubleClick: (id: number) => void
   moveLabel: (id: number, x: number, y: number, commit?: boolean) => void
   /** Whether Space is held: a pan gesture, which wins over selecting or dragging a label. Held in
    *  React state so `draggable` can turn off before Konva sees the press. */
@@ -115,7 +120,8 @@ const LabelEntry = memo(function LabelEntry({
   style,
   font,
   editable,
-  select,
+  onPress,
+  onDoubleClick,
   moveLabel,
   spacePan,
   onDrawError,
@@ -154,9 +160,16 @@ const LabelEntry = memo(function LabelEntry({
           // stage records it and `movedRef` can tell a later click from a drag; the stage does not
           // pan for it because the target is this group, not the stage.
           if (spacePan || e.evt.button === 1) return
-          select(label.object_id)
+          onPress(label.object_id, e.evt.shiftKey)
         }}
-        onDragStart={() => select(label.object_id)}
+        onDblClick={(e) => {
+          if (e.evt.button === 0 && !spacePan) onDoubleClick(label.object_id)
+        }}
+        onDragStart={() => {
+          // A drag begun without a press we saw (a synthetic one) still selects the label.
+          const s = useEditor.getState()
+          if (!s.selectedIds.has(label.object_id)) s.select(label.object_id)
+        }}
         onDragMove={(e) => moveLabel(label.object_id, e.target.x(), e.target.y(), false)}
         onDragEnd={(e) => moveLabel(label.object_id, e.target.x(), e.target.y())}
       >
@@ -211,10 +224,9 @@ export default function EditorCanvas() {
   const view = useEditor((s) => s.view)
   const viewport = useEditor((s) => s.viewport)
   const hoveredId = useEditor((s) => s.hoveredId)
-  const selectedId = useEditor((s) => s.selectedId)
+  const selectedIds = useEditor((s) => s.selectedIds)
   const setView = useEditor((s) => s.setView)
   const hover = useEditor((s) => s.hover)
-  const select = useEditor((s) => s.select)
   const moveLabel = useEditor((s) => s.moveLabel)
   // A conflict keeps editing local (design § 5): only the saves stop, not the page.
   const editable = useEditor(isEditable)
@@ -236,6 +248,9 @@ export default function EditorCanvas() {
   // after mouseup for the gesture to be a drag: a pan, or a label drag that happened to end over
   // a marker, is not the click that deselects or toggles.
   const movedRef = useRef(false)
+  // The label under a held left button, for wheel-to-resize (SPEC § 6.2): set by the label's
+  // mousedown, cleared (and the size preview committed) on the window's mouseup.
+  const pressRef = useRef<number | null>(null)
   const [spacePan, setSpacePan] = useState(false)
 
   // Keyed by the URL it was loaded from, so a second image opened without unmounting can never
@@ -340,6 +355,23 @@ export default function EditorCanvas() {
     setDrawError((prev) => prev ?? message)
   }, [])
 
+  // A press selects: plain replaces the selection unless the label is already in it (so a drag
+  // of one selected label moves the whole group), shift toggles membership.
+  const onLabelPress = useCallback((id: number, shift: boolean) => {
+    const s = useEditor.getState()
+    if (shift) s.toggleSelect(id)
+    else if (!s.selectedIds.has(id)) s.select(id)
+    pressRef.current = id
+  }, [])
+
+  // Which label a double-click opened for inline text editing; the editor itself lands in a later
+  // PR 4 task, which reads this and drops the `void` below.
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const onLabelDoubleClick = useCallback((id: number) => {
+    setEditingId(id)
+  }, [])
+  void editingId
+
   // 5. Keys, ignored while a form field has the focus.
   useEffect(() => {
     // `f` and `1` must keep working after a toolbar button was clicked, so a focused BUTTON only
@@ -380,9 +412,10 @@ export default function EditorCanvas() {
         // swallowed here whether or not there is a selection to disable.
         e.preventDefault()
         const s = useEditor.getState()
-        if (s.selectedId === null || !isEditable(s)) return
-        toggleWithPlacement(s.selectedId)
-        s.select(null)
+        if (s.selectedIds.size === 0 || !isEditable(s)) return
+        // One commit for the whole selection (SPEC § 6.1). applyLabels drops them from the
+        // selection itself, so nothing is left behind to toggle back on.
+        disableAll([...s.selectedIds])
       }
     }
     const up = (e: KeyboardEvent) => {
@@ -456,6 +489,7 @@ export default function EditorCanvas() {
       },
       labelPositions: () =>
         entriesRef.current.map((e) => ({ id: e.label.object_id, x: e.label.x, y: e.label.y })),
+      selectedIds: () => [...useEditor.getState().selectedIds],
       renderAt,
     }
     return () => {
@@ -465,9 +499,9 @@ export default function EditorCanvas() {
     // published again when that first measurement arrives.
   }, [image, renderAt, viewport, preview, previewError])
 
-  const selected = useMemo(
-    () => entries.find((e) => e.label.object_id === selectedId) ?? null,
-    [entries, selectedId],
+  const selectedEntries = useMemo(
+    () => entries.filter((e) => selectedIds.has(e.label.object_id)),
+    [entries, selectedIds],
   )
 
   // The hit targets for hover and the toggle: one transparent circle per object, rebuilt only when
@@ -504,12 +538,22 @@ export default function EditorCanvas() {
   // A click on the empty background (never on a label or a marker) clears the selection; a click
   // that ended a pan does not.
   const onStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (e.target === stageRef.current && !movedRef.current) select(null)
+    if (e.target === stageRef.current && !movedRef.current) useEditor.getState().select(null)
   }
 
-  // 7. Wheel zoom about the cursor.
+  // 7. Wheel: resize the pressed label (left button held), otherwise zoom about the cursor.
   const onWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault()
+    const pressed = pressRef.current
+    if (pressed !== null && (e.evt.buttons & 1) === 1) {
+      const s = useEditor.getState()
+      const label = s.labels.get(pressed)
+      if (!label || !s.style) return
+      const current = label.font_size ?? s.style.font_size
+      const size = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, current + (e.evt.deltaY < 0 ? 1 : -1)))
+      s.updateLabels([pressed], { font_size: size }, false)
+      return
+    }
     const stage = stageRef.current
     const pointer = stage?.getPointerPosition()
     if (!pointer) return
@@ -560,6 +604,19 @@ export default function EditorCanvas() {
     window.addEventListener('mouseup', stopPan)
     return () => window.removeEventListener('mouseup', stopPan)
   }, [panning, stopPan])
+
+  // The wheel-resize preview is committed when the button comes up, wherever that happens.
+  // Konva's own window listener fires first, so a drag-end commit has already folded the size
+  // into its entry by then and commitPreview finds nothing left to record.
+  useEffect(() => {
+    const up = () => {
+      if (pressRef.current === null) return
+      pressRef.current = null
+      useEditor.getState().commitPreview()
+    }
+    window.addEventListener('mouseup', up)
+    return () => window.removeEventListener('mouseup', up)
+  }, [])
 
   if (!image || !style || !font) return null
 
@@ -613,7 +670,8 @@ export default function EditorCanvas() {
               style={style}
               font={font}
               editable={editable}
-              select={select}
+              onPress={onLabelPress}
+              onDoubleClick={onLabelDoubleClick}
               moveLabel={moveLabel}
               spacePan={spacePan}
               onDrawError={onDrawError}
@@ -622,17 +680,18 @@ export default function EditorCanvas() {
             {/* Chrome only, and none of it listens: `renderAt` hides this layer to diff the
                 canvas against the server's render. */}
             <Layer ref={overlayRef} listening={false}>
-              {selected && (
+              {selectedEntries.map(({ label, box }) => (
                 <Rect
-                  x={selected.label.x}
-                  y={selected.label.y}
-                  width={selected.box.width}
-                  height={selected.box.height}
+                  key={label.object_id}
+                  x={label.x}
+                  y={label.y}
+                  width={box.width}
+                  height={box.height}
                   stroke={HOVER_COLOR}
                   strokeWidth={1 / view.scale}
                   listening={false}
                 />
-              )}
+              ))}
               {hovered && (
                 <Circle
                   x={hovered.x}
