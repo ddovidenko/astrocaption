@@ -107,6 +107,8 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
 .editor-canvas { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #000; cursor: grab; }
 .editor-canvas.panning { cursor: grabbing; }
 .editor-tooltip { position: absolute; pointer-events: none; padding: 0.15rem 0.5rem; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; white-space: nowrap; }
+/* The double-click text editor: absolutely placed over the label by LabelTextEditor. */
+.label-text-editor { position: absolute; z-index: 5; padding: 0 4px; line-height: 1.2; background: rgba(0, 0, 0, 0.85); color: var(--text); border: 1px solid var(--accent); border-radius: 3px; }
 
 /* Editor side panel (milestone 3 PR 5): a fixed column beside the canvas, or a strip when closed. */
 /* The editor is the one page that must not scroll, and it is now the one page with a column whose

@@ -3,6 +3,7 @@ import { Circle, Group, Image as KImage, Layer, Line, Rect, Stage, Text } from '
 import Konva from 'konva'
 import { useShallow } from 'zustand/react/shallow'
 import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
+import LabelTextEditor from './LabelTextEditor'
 import { LabelTextShape } from './LabelTextShape'
 import { disableAll, getMeasurer, isEditable, toggleWithPlacement } from './editing'
 import {
@@ -366,13 +367,11 @@ export default function EditorCanvas() {
     pressRef.current = useEditor.getState().selectedIds.has(id) ? id : null
   }, [])
 
-  // Which label a double-click opened for inline text editing; the editor itself lands in a later
-  // PR 4 task, which reads this and drops the `void` below.
+  // Which label a double-click opened for inline text editing.
   const [editingId, setEditingId] = useState<number | null>(null)
   const onLabelDoubleClick = useCallback((id: number) => {
     setEditingId(id)
   }, [])
-  void editingId
 
   // 5. Keys, ignored while a form field has the focus.
   useEffect(() => {
@@ -633,6 +632,7 @@ export default function EditorCanvas() {
 
   const hovered = hoveredId === null ? null : (objects.get(hoveredId) ?? null)
   const tip = hovered ? toScreen(view, hovered.x, hovered.y) : null
+  const editing = editingId === null ? null : (entries.find((e) => e.label.object_id === editingId) ?? null)
 
   const notices: { text: string; error: boolean }[] = []
   if (previewError) notices.push({ text: previewError, error: true })
@@ -720,6 +720,17 @@ export default function EditorCanvas() {
           <div className="editor-tooltip" style={{ left: tip.x + 12, top: tip.y + 12 }}>
             {hovered.primary_name}
           </div>
+        )}
+        {editing && (
+          <LabelTextEditor
+            key={editing.label.object_id}
+            id={editing.label.object_id}
+            x={editing.label.x}
+            y={editing.label.y}
+            width={editing.box.width}
+            fontSize={editing.box.primarySize}
+            onClose={() => setEditingId(null)}
+          />
         )}
       </div>
     </>
