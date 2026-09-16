@@ -3,7 +3,7 @@ import type { Page, TestInfo } from '@playwright/test'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { AnnotationsUpdate, Label } from '../src/api'
+import type { Annotations, AnnotationsUpdate, Label } from '../src/api'
 import {
   ensureExported,
   ensureSetUpAndSignedIn,
@@ -235,18 +235,43 @@ test('the stage matches the preview for a document with per-label overrides and 
       return l
     }),
   }
-  const stored = await putAnnotations(page, imageId!, overridden)
-  const previewUrl = await exportImage(page, imageId!)
+  // Everything that can leave the shared document overridden happens inside the try — the PUT
+  // itself included — so the restore below always runs, whatever fails.
+  let stored: Annotations | null = null
+  let failed: unknown = null
   try {
+    stored = await putAnnotations(page, imageId!, overridden)
+    // The overrides have to be in the document the server renders from, or the diff below would
+    // be comparing two plain documents and would pass without testing anything.
+    const byId = new Map(stored.labels.map((l) => [l.object_id, l]))
+    expect(byId.get(a.object_id)).toMatchObject({ font_size: original.style.font_size * 2, color: '#ff8800' })
+    expect(byId.get(b.object_id)).toMatchObject({ text_override: 'Overridden name', show_aliases: true })
+    expect(byId.get(c.object_id)).toMatchObject({ pinned: true, leader: 'on', x: c.x + 60, y: c.y + 40 })
+    const previewUrl = await exportImage(page, imageId!)
     // Reload so the editor draws the stored document, then diff.
     await page.reload()
     await page.waitForFunction(() => window.__astrocaptionEditor?.labelCount !== undefined)
     await expectStageMatchesPreview(page, previewUrl, testInfo, 'overrides')
-  } finally {
-    // Put the shared fixture image back the way it was (and re-export it) so the other specs, and
-    // a re-run on the same data dir, compare against a matching export. In a `finally`: a blown
-    // budget (or any failure above) must not leave the shared document overridden behind it.
-    await putAnnotations(page, imageId!, { style: original.style, labels: original.labels, version: stored.version })
-    await exportImage(page, imageId!)
+  } catch (e) {
+    failed = e
   }
+  // Put the shared fixture image back the way it was (and re-export it) so the other specs, and a
+  // re-run on the same data dir, compare against a matching export: a blown budget (or any
+  // failure above) must not leave the shared document overridden behind it. Hence the catch above
+  // rather than a plain throw — and hence this restore, not a `finally` (ESLint's
+  // `no-unsafe-finally` forbids the rethrow one would need). A restore that fails on its own is
+  // the real failure; one that fails after the body already threw is only logged, so the original
+  // failure is what the report shows.
+  try {
+    await putAnnotations(page, imageId!, {
+      style: original.style,
+      labels: original.labels,
+      version: stored?.version ?? original.version,
+    })
+    await exportImage(page, imageId!)
+  } catch (e) {
+    if (!failed) throw e
+    console.error(`[parity] restore failed: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  if (failed) throw failed
 })
