@@ -86,6 +86,9 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
    container (POPOVER_WIDTH there matches this rule's min-width, above) — not by grid column
    parity, which a `.span2` row ahead of a field can throw off. */
 .popover-right { left: auto; right: 0; }
+/* Likewise for the vertical axis (POPOVER_HEIGHT there): above the swatch when the container —
+   the floating label toolbar's clipping .editor-canvas, say — has no room below it. */
+.popover-up { top: auto; bottom: calc(100% + 0.4rem); }
 .popover-row { display: flex; gap: 0.5rem; align-items: center; }
 .popover-row button { white-space: nowrap; }
 .popover-row input { width: 6.5rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 0.35rem 0.5rem; font: inherit; font-variant-numeric: tabular-nums; }

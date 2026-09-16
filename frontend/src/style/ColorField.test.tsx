@@ -3,7 +3,22 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ColorField from './ColorField'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
+
+/** jsdom measures everything as 0x0, so the open-time measurement has to be fed by hand: the
+ *  wrapper (`.color-field`) is the swatch's row, everything else — here the bound `openPicker`
+ *  falls back to, `document.documentElement` — is the container it is measured against. */
+function mockRects(wrap: { left: number; bottom: number }, bound: { right: number; bottom: number }) {
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    const r = this.classList.contains('color-field')
+      ? { left: wrap.left, right: wrap.left + 120, top: wrap.bottom - 30, bottom: wrap.bottom }
+      : { left: 0, right: bound.right, top: 0, bottom: bound.bottom }
+    return { ...r, x: r.left, y: r.top, width: r.right - r.left, height: r.bottom - r.top, toJSON: () => r } as DOMRect
+  })
+}
 
 function mount(over: Partial<Parameters<typeof ColorField>[0]> = {}) {
   const onChange = vi.fn()
@@ -84,6 +99,32 @@ describe('ColorField typed hex', () => {
     expect(f.onCommit).toHaveBeenCalledTimes(1)
     expect(f.onCommit).toHaveBeenLastCalledWith('#ff8800')
     expect(f.dialog()).not.toBeNull()
+  })
+})
+
+describe('ColorField placement', () => {
+  it('opens below and left-aligned when the container has room', () => {
+    mockRects({ left: 10, bottom: 100 }, { right: 1000, bottom: 800 })
+    const f = mount()
+    f.open()
+    expect(screen.getByRole('dialog').className).toBe('popover')
+  })
+
+  it('opens upwards when the popover would not fit below the container', () => {
+    // 232 px of popover under a swatch row ending 40 px above the container's bottom edge: in the
+    // editor's canvas, which clips its overflow, that popover would simply not be seen.
+    mockRects({ left: 10, bottom: 760 }, { right: 1000, bottom: 800 })
+    const f = mount()
+    f.open()
+    expect(screen.getByRole('dialog').className).toContain('popover-up')
+    expect(screen.getByRole('dialog').className).not.toContain('popover-right')
+  })
+
+  it('opens upwards and right-aligned when neither edge has room', () => {
+    mockRects({ left: 900, bottom: 760 }, { right: 1000, bottom: 800 })
+    const f = mount()
+    f.open()
+    expect(screen.getByRole('dialog').className).toBe('popover popover-right popover-up')
   })
 })
 
