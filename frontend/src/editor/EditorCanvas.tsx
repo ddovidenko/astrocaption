@@ -406,8 +406,10 @@ export default function EditorCanvas() {
 
   // 5. Keys, ignored while a form field has the focus.
   useEffect(() => {
-    // `f` and `1` must keep working after a toolbar button was clicked, so a focused BUTTON only
-    // blocks Space (which a focused button would take as a click).
+    // `f` and `1` must keep working after a toolbar button was clicked, so a focused BUTTON out in
+    // the page only blocks Space (which a focused button would take as a click). The label
+    // toolbar is the exception: everything in it — the number field and the colour swatch above
+    // all — keeps every key, so Escape and Delete stay with the control that has the focus.
     const inField = (withButton = false) => {
       const el = document.activeElement
       if (!el) return false
@@ -675,20 +677,32 @@ export default function EditorCanvas() {
   // in store.ts), so committing them here produces exactly the label `dragend` would have
   // committed, and whichever runs second finds the maps identical and records nothing.
   useEffect(() => {
+    // The button really came up, or the pointer was taken away: the gesture is over either way.
     const up = () => {
       if (pressRef.current === null) return
       pressRef.current = null
       useEditor.getState().commitPreview()
     }
+    // Losing the focus or the tab is only the end of the gesture when Konva is not mid-drag: the
+    // button is still down there, dragmove and dragend are still coming, and committing now would
+    // split one drag into two undo entries and take the pressed label away from the wheel for the
+    // rest of the press. A wheel-only press has no Konva drag, so it still commits here.
+    const away = () => {
+      if (!Konva.isDragging()) up()
+    }
+    // `visibilitychange` fires on the way back too; only the tab going away ends anything.
+    const hidden = () => {
+      if (document.visibilityState === 'hidden') away()
+    }
     window.addEventListener('mouseup', up)
-    window.addEventListener('blur', up)
     window.addEventListener('pointercancel', up)
-    document.addEventListener('visibilitychange', up)
+    window.addEventListener('blur', away)
+    document.addEventListener('visibilitychange', hidden)
     return () => {
       window.removeEventListener('mouseup', up)
-      window.removeEventListener('blur', up)
       window.removeEventListener('pointercancel', up)
-      document.removeEventListener('visibilitychange', up)
+      window.removeEventListener('blur', away)
+      document.removeEventListener('visibilitychange', hidden)
       // Unmounting mid-gesture (the route changed under a held button) must not lose the preview
       // either: `up` is a no-op unless a label is still pressed.
       up()
@@ -699,7 +713,14 @@ export default function EditorCanvas() {
 
   const hovered = hoveredId === null ? null : (objects.get(hoveredId) ?? null)
   const tip = hovered ? toScreen(view, hovered.x, hovered.y) : null
+  // A label disabled or removed while the text editor is open (an undo, a re-solve) stops being
+  // drawn, so this resolves to null and the child unmounts — before its own close effect can run.
+  // `editingId` would then stay set and pop the editor open again the moment an undo brought the
+  // label back. Adjusting state during render is React's own answer to derived state that has gone
+  // stale (an effect would be `set-state-in-effect`, which lint refuses): the re-render happens
+  // before anything is committed to the DOM.
   const editing = editingId === null ? null : (entries.find((e) => e.label.object_id === editingId) ?? null)
+  if (editingId !== null && editing === null) setEditingId(null)
 
   const notices: { text: string; error: boolean }[] = []
   if (previewError) notices.push({ text: previewError, error: true })
