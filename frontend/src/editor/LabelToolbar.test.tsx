@@ -1,10 +1,24 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import LabelToolbar from './LabelToolbar'
 import { useEditor } from './store'
 import { makeDoc } from './testDoc'
 import { toScreen } from './view'
+
+// `Reset position` runs the browser placer, which measures text on a real canvas — vitest has
+// none, so the failing path is reached by making the module throw on demand.
+const placer = vi.hoisted(() => ({ throws: false }))
+vi.mock('./editing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./editing')>()
+  return {
+    ...actual,
+    resetPositions: (...args: Parameters<typeof actual.resetPositions>) => {
+      if (placer.throws) throw new Error('this browser could not open a canvas to measure text with')
+      return actual.resetPositions(...args)
+    },
+  }
+})
 
 const box = { left: 1552, top: 970, right: 1700, bottom: 1000 }
 const state = () => useEditor.getState()
@@ -17,7 +31,11 @@ beforeEach(() => {
   state().toggleObject(2, { x: 100, y: 100 })
   state().select(1)
 })
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  placer.throws = false
+  vi.restoreAllMocks()
+})
 
 const size = () => screen.getByLabelText('Font size') as HTMLInputElement
 
@@ -214,6 +232,47 @@ describe('LabelToolbar', () => {
     const flipped = render(<LabelToolbar box={top} />).container.querySelector('.label-toolbar') as HTMLElement
     expect(parseFloat(flipped.style.left)).toBeCloseTo(100, 3)
     expect(parseFloat(flipped.style.top)).toBeCloseTo(38, 3) // bottom 30 + the 8 px margin
+  })
+
+  it('a Reset position that throws reports it and changes nothing', () => {
+    placer.throws = true
+    const onError = vi.fn()
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    render(<LabelToolbar box={box} onError={onError} />)
+    const before = state().labels
+    fireEvent.click(screen.getByRole('button', { name: 'Reset position' }))
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(onError).toHaveBeenCalledWith('The labels could not be placed again; nothing was moved.')
+    expect(state().labels).toBe(before)
+    expect(logged).toHaveBeenCalledTimes(1)
+  })
+
+  it('an unparseable number (badInput) is ignored instead of read as a clear', () => {
+    state().updateLabels([1], { font_size: 40 })
+    render(<LabelToolbar box={box} />)
+    expect(size().value).toBe('40')
+    // Chromium hands over an empty string with `validity.badInput` set for 'e' or a lone '-'.
+    Object.defineProperty(size(), 'validity', { value: { badInput: true }, configurable: true })
+    fireEvent.change(size(), { target: { value: '' } })
+    expect(size().value).toBe('40')
+    fireEvent.blur(size())
+    expect(label(1).font_size).toBe(40)
+  })
+
+  it('a mixed colour says so, and "Use default" clears the whole selection at once', () => {
+    state().updateLabels([1], { color: '#112233' })
+    state().updateLabels([2], { color: '#445566' })
+    state().toggleSelect(2)
+    render(<LabelToolbar box={box} />)
+    const swatch = screen.getByRole('button', { name: /Text colour/ })
+    expect(swatch.textContent).toContain('mixed')
+    expect(swatch.textContent).not.toContain('default')
+    fireEvent.click(swatch)
+    const entries = state().undo.length
+    fireEvent.click(screen.getByRole('button', { name: 'Use default' }))
+    expect(label(1).color).toBeNull()
+    expect(label(2).color).toBeNull()
+    expect(state().undo).toHaveLength(entries + 1)
   })
 
   it('is disabled while a solve is running', () => {

@@ -152,6 +152,18 @@ describe('ColorField rendering', () => {
     expect(f.onClear).toHaveBeenCalledTimes(1)
     expect(f.onCommit).toHaveBeenCalledTimes(1)
   })
+  it('mixed says "mixed" instead of "default" and leaves Use default clickable', () => {
+    // The caller's selection holds several colours, so the blank value means "they differ" —
+    // there is something to clear, unlike a blank that means "no override".
+    const f = mount({ allowDefault: true, value: '', mixed: true })
+    expect(screen.getByText('mixed')).toBeTruthy()
+    expect(screen.queryByText('default')).toBeNull()
+    f.open()
+    const useDefault = screen.getByRole('button', { name: 'Use default' })
+    expect(useDefault).toHaveProperty('disabled', false)
+    fireEvent.click(useDefault)
+    expect(f.onClear).toHaveBeenCalledTimes(1)
+  })
   it('disabled disables the swatch', () => {
     const f = mount({ disabled: true })
     expect(f.swatch).toHaveProperty('disabled', true)

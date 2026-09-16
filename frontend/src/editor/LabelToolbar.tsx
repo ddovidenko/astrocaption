@@ -20,7 +20,15 @@ function common<T>(labels: Label[], pick: (l: Label) => T): T | typeof MIXED {
  *  applies to every selected label and commits one history entry per interaction; a control whose
  *  values differ shows blank (the stepper) or "mixed" (the selects). The buttons never take the
  *  focus (`onMouseDown` preventDefault), so the canvas shortcuts keep working after a click. */
-export default function LabelToolbar({ box }: { box: Box }) {
+export default function LabelToolbar({
+  box,
+  onError,
+}: {
+  box: Box
+  /** A toolbar action that failed outright; the canvas shows it as one of its notices. The
+   *  toolbar itself has no room for an error line. */
+  onError?: (message: string) => void
+}) {
   const selectedIds = useEditor((s) => s.selectedIds)
   const labels = useEditor((s) => s.labels)
   const style = useEditor((s) => s.style)
@@ -135,7 +143,14 @@ export default function LabelToolbar({ box }: { box: Box }) {
         max={MAX_FONT_SIZE}
         placeholder={String(style.font_size)}
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => {
+          // Chromium reports an empty value for a number input holding something it cannot parse
+          // ('e', a lone '-'), with `badInput` set. Reading that as a cleared field would wipe the
+          // selection's size overrides on a keystroke; keeping the last draft leaves the typing
+          // where it was.
+          if (e.target.validity.badInput) return
+          setDraft(e.target.value)
+        }}
         onBlur={commitSize}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
@@ -158,6 +173,7 @@ export default function LabelToolbar({ box }: { box: Box }) {
         label="Text colour"
         value={colorDraft ?? shownColor}
         fallback={style.text_color}
+        mixed={color === MIXED}
         onChange={(hex) => setPicked({ from: shownColor, ids: selectedIds, hex })}
         onCommit={(hex) => {
           // A clear is immediately followed by the popover's own close, which calls the *previous*
@@ -218,7 +234,17 @@ export default function LabelToolbar({ box }: { box: Box }) {
         className="secondary"
         title="Place again with the placer and unpin"
         onMouseDown={noFocus}
-        onClick={() => resetPositions(ids)}
+        onClick={() => {
+          try {
+            resetPositions(ids)
+          } catch (err) {
+            // The placer measures text, so a browser that cannot open a 2D context (or a font
+            // that fails to load) throws here. Nothing was written: `resetPositions` applies its
+            // labels in one store change at the very end.
+            console.error('reset position failed', err)
+            onError?.('The labels could not be placed again; nothing was moved.')
+          }
+        }}
       >
         Reset position
       </button>

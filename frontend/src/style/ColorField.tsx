@@ -22,6 +22,7 @@ export default function ColorField({
   fallback,
   allowDefault = true,
   disabled = false,
+  mixed = false,
   onChange,
   onCommit,
   onClear,
@@ -35,6 +36,10 @@ export default function ColorField({
    *  "Use default" button. Off in values mode, where every field always holds a concrete colour. */
   allowDefault?: boolean
   disabled?: boolean
+  /** The caller's selection holds more than one colour, so `value` is blank for "differs", not
+   *  for "no override". The swatch says "mixed" instead of "default", and "Use default" stays
+   *  enabled: there *is* something to clear. */
+  mixed?: boolean
   onChange: (hex: string) => void
   /** A colour picker closed or a hex was typed — commit the current value. A typed commit carries
    *  the just-typed hex, since the draft `onChange` set a moment earlier has not necessarily
@@ -145,7 +150,7 @@ export default function ColorField({
         <span className="swatch-chip" style={{ background: shown }} />
         <span className="swatch-hex" id={valueId}>
           {shown.toUpperCase()}
-          {allowDefault && !value && <span className="swatch-note"> default</span>}
+          {allowDefault && !value && <span className="swatch-note">{mixed ? ' mixed' : ' default'}</span>}
         </span>
       </button>
       {open && (
@@ -161,7 +166,7 @@ export default function ColorField({
               <button
                 type="button"
                 className="secondary"
-                disabled={!value}
+                disabled={!value && !mixed}
                 onClick={() => {
                   onChange('')
                   onClear?.()
