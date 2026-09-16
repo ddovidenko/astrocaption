@@ -57,6 +57,21 @@ describe('LabelToolbar', () => {
     expect(label(1).font_size).toBe(23)
   })
 
+  it('a blur with nothing typed leaves a mixed selection alone', () => {
+    // The field is blank because the sizes differ, not because anyone cleared it: committing that
+    // blank would wipe label 1's override on a stray focus.
+    state().updateLabels([1], { font_size: 40 })
+    state().toggleSelect(2)
+    render(<LabelToolbar box={box} />)
+    const entries = state().undo.length
+    expect(size().value).toBe('')
+    fireEvent.focus(size())
+    fireEvent.blur(size())
+    expect(label(1).font_size).toBe(40)
+    expect(label(2).font_size).toBeNull()
+    expect(state().undo).toHaveLength(entries)
+  })
+
   it('a mixed selection shows a blank size and "mixed" selects', () => {
     state().updateLabels([1], { font_size: 40, leader: 'on' })
     state().toggleSelect(2)
@@ -162,6 +177,17 @@ describe('LabelToolbar', () => {
     fireEvent.blur(size())
     expect(label(1).font_size).toBeNull()
     expect(state().undo).toHaveLength(entries)
+  })
+
+  it('− / + drop a draft typed against a blank field', () => {
+    state().updateLabels([1], { font_size: 40 })
+    state().toggleSelect(2)
+    render(<LabelToolbar box={box} />)
+    fireEvent.change(size(), { target: { value: '99' } })
+    fireEvent.click(screen.getByLabelText('Larger'))
+    expect(label(1).font_size).toBe(41)
+    expect(label(2).font_size).toBe(25)
+    expect(size().value).toBe('') // still mixed: the 99 went with the step
   })
 
   it('+ at the maximum records nothing', () => {

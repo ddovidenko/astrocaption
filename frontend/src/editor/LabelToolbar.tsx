@@ -73,6 +73,14 @@ export default function LabelToolbar({ box }: { box: Box }) {
   const update = useEditor.getState().updateLabels
 
   const commitSize = () => {
+    // Nothing was typed against what the field already shows (a focus and a blur, say): there is
+    // no edit to commit. Without this, a blur on a mixed selection — whose field shows blank
+    // because the sizes differ, not because anyone cleared it — would read as a clear and wipe
+    // every override in the selection.
+    if (draft === shownSize) {
+      setTyped(null)
+      return
+    }
     const text = draft.trim()
     // Committed, reverted or ignored, the draft is spent either way: the field goes back to
     // mirroring the store.
@@ -86,6 +94,9 @@ export default function LabelToolbar({ box }: { box: Box }) {
     update(ids, { font_size: n })
   }
   const step = (delta: number) => {
+    // The stepper acts on the stored sizes, so a draft typed against them is spent — and a draft
+    // left standing would keep showing over a `shownSize` that stays blank on a mixed selection.
+    setTyped(null)
     const s = useEditor.getState()
     // One commit for the set: each label steps from its own effective size.
     const updated = selected.map((l) => ({
