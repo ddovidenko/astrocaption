@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import LabelToolbar from './LabelToolbar'
 import { useEditor } from './store'
 import { makeDoc } from './testDoc'
+import { toScreen } from './view'
 
 const box = { left: 1552, top: 970, right: 1700, bottom: 1000 }
 const state = () => useEditor.getState()
@@ -98,6 +99,22 @@ describe('LabelToolbar', () => {
     expect(swatch().textContent).toContain(label(1).color!.toUpperCase())
   })
 
+  it('"Use default" after a drag clears the override instead of committing the draft', () => {
+    state().updateLabels([1], { color: '#123456' }) // something to clear
+    render(<LabelToolbar box={box} />)
+    const entries = state().undo.length
+    fireEvent.click(screen.getByRole('button', { name: /Text colour/ }))
+    const surface = screen.getByRole('dialog').querySelector('.react-colorful__interactive')!
+    fireEvent.mouseDown(surface, { clientX: 10, clientY: 10 })
+    fireEvent.mouseMove(document, { clientX: 20, clientY: 20 })
+    fireEvent.mouseUp(document)
+    // ColorField clears, then closes itself: the close's onCommit still closes over the drag's
+    // draft, and must not put it back.
+    fireEvent.click(screen.getByRole('button', { name: 'Use default' }))
+    expect(label(1).color).toBeNull()
+    expect(state().undo).toHaveLength(entries + 1)
+  })
+
   it('a close with no drag commits nothing', () => {
     render(<LabelToolbar box={box} />)
     fireEvent.click(screen.getByRole('button', { name: /Text colour/ }))
@@ -131,6 +148,46 @@ describe('LabelToolbar', () => {
     state().updateLabels([1], { font_size: 40, color: '#123456', text_override: 'X', leader: 'on', show_aliases: false, pinned: true })
     fireEvent.click(screen.getByRole('button', { name: 'Clear overrides' }))
     expect(label(1)).toMatchObject({ font_size: null, color: null, text_override: null, leader: 'auto', show_aliases: null, pinned: true })
+  })
+
+  it('an undo of a committed size clears the draft with it', () => {
+    render(<LabelToolbar box={box} />)
+    fireEvent.change(size(), { target: { value: '30' } })
+    fireEvent.keyDown(size(), { key: 'Enter' })
+    expect(label(1).font_size).toBe(30)
+    act(() => state().undoLast())
+    const entries = state().undo.length
+    expect(label(1).font_size).toBeNull()
+    expect(size().value).toBe('') // not the 30 that was just undone
+    fireEvent.blur(size())
+    expect(label(1).font_size).toBeNull()
+    expect(state().undo).toHaveLength(entries)
+  })
+
+  it('+ at the maximum records nothing', () => {
+    state().updateLabels([1], { font_size: 200 })
+    render(<LabelToolbar box={box} />)
+    const entries = state().undo.length
+    fireEvent.click(screen.getByLabelText('Larger'))
+    expect(label(1).font_size).toBe(200)
+    expect(state().undo).toHaveLength(entries)
+  })
+
+  it('sits above the box, and below it when there is no room above', () => {
+    const { container } = render(<LabelToolbar box={box} />)
+    const el = container.querySelector('.label-toolbar') as HTMLElement
+    const at = toScreen(state().view, box.left, box.top)
+    // jsdom measures every element as 0x0, so the toolbar's own height drops out of `top`.
+    expect(parseFloat(el.style.left)).toBeCloseTo(at.x, 3)
+    expect(parseFloat(el.style.top)).toBeCloseTo(at.y - 8, 3)
+    cleanup()
+
+    // Against the top edge (world y 0 at screen y 0) there is no room above: it flips below.
+    state().setView({ scale: 1, x: 0, y: 0 })
+    const top = { left: 100, top: 0, right: 200, bottom: 30 }
+    const flipped = render(<LabelToolbar box={top} />).container.querySelector('.label-toolbar') as HTMLElement
+    expect(parseFloat(flipped.style.left)).toBeCloseTo(100, 3)
+    expect(parseFloat(flipped.style.top)).toBeCloseTo(38, 3) // bottom 30 + the 8 px margin
   })
 
   it('is disabled while a solve is running', () => {

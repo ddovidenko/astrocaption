@@ -35,7 +35,8 @@ export default function LabelToolbar({ box }: { box: Box }) {
 
   // Own size, for the clamping below. Measured after layout and re-measured when what the toolbar
   // shows could have changed width: `selected` drives the pin label and the "mixed" options,
-  // `style` the size placeholder. The guard keeps a settled measurement from looping.
+  // `style` the size placeholder, and `editable` whether there is anything to measure at all.
+  // The guard keeps a settled measurement from looping.
   const ref = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
   useLayoutEffect(() => {
@@ -43,13 +44,14 @@ export default function LabelToolbar({ box }: { box: Box }) {
     if (!el) return
     const rect = el.getBoundingClientRect()
     if (rect.width !== size.w || rect.height !== size.h) setSize({ w: rect.width, h: rect.height })
-  }, [size.w, size.h, selected, style])
+  }, [size.w, size.h, selected, style, editable])
 
-  // The size field is a draft: committed on Enter or blur, reverted on an invalid value. It
-  // follows the selection: a new selection (or an undo) shows the stored value again. The draft
-  // carries what it was typed against instead of being reset from an effect
-  // (react-hooks/set-state-in-effect): once the selection or the stored size moves on, the draft
-  // is stale and the stored value shows again, with no extra render.
+  // The size field is a draft: committed on Enter or blur, reverted on an invalid value. Rather
+  // than being reset from an effect (react-hooks/set-state-in-effect) it carries the selection and
+  // the stored size it was typed against, so it goes stale — and the stored value shows again —
+  // the moment either moves on. Every path that acts on the draft drops it (`setTyped(null)`),
+  // because the tag alone cannot: an undo that puts the stored size back where the draft started
+  // would match the tag again and revive a draft the owner has already committed and undone.
   const fontSize = selected.length > 0 ? common(selected, (l) => l.font_size) : MIXED
   const shownSize = fontSize === MIXED || fontSize === null ? '' : String(fontSize)
   const [typed, setTyped] = useState<{ from: string; ids: ReadonlySet<number>; text: string } | null>(null)
@@ -62,6 +64,8 @@ export default function LabelToolbar({ box }: { box: Box }) {
   const shownColor = color === MIXED ? '' : (color ?? '')
   const [picked, setPicked] = useState<{ from: string; ids: ReadonlySet<number>; hex: string } | null>(null)
   const colorDraft = picked && picked.from === shownColor && picked.ids === selectedIds ? picked.hex : null
+  // Set by "Use default", consumed by the close that ColorField fires right after it (see onCommit).
+  const clearedRef = useRef(false)
 
   if (!style || !editable || selected.length === 0) return null
 
@@ -70,15 +74,15 @@ export default function LabelToolbar({ box }: { box: Box }) {
 
   const commitSize = () => {
     const text = draft.trim()
+    // Committed, reverted or ignored, the draft is spent either way: the field goes back to
+    // mirroring the store.
+    setTyped(null)
     if (text === '') {
       update(ids, { font_size: null })
       return
     }
     const n = Number(text)
-    if (!Number.isInteger(n) || n < MIN_FONT_SIZE || n > MAX_FONT_SIZE) {
-      setTyped(null) // back to the stored value
-      return
-    }
+    if (!Number.isInteger(n) || n < MIN_FONT_SIZE || n > MAX_FONT_SIZE) return
     update(ids, { font_size: n })
   }
   const step = (delta: number) => {
@@ -88,6 +92,10 @@ export default function LabelToolbar({ box }: { box: Box }) {
       ...l,
       font_size: Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, (l.font_size ?? s.style!.font_size) + delta)),
     }))
+    // At the clamp every label already holds the size it would step to. `applyLabels` has no
+    // same-value dedupe of its own, so committing here would be an undo entry and a save for a
+    // click that changed nothing.
+    if (updated.every((l, i) => l.font_size === selected[i]!.font_size)) return
     s.applyLabels(updated)
   }
 
@@ -133,18 +141,26 @@ export default function LabelToolbar({ box }: { box: Box }) {
           it as one entry (a close with no drag carries no draft and commits nothing, and a draft
           that landed back on the stored colour is a patch `updateLabels` drops). A typed hex
           arrives with the commit and is committed on the keystroke; "Use default" clears the
-          override. Either way the draft is dropped, so the stored value shows again. */}
+          override and cancels the draft outright. Every path drops the draft, so the stored value
+          shows again. */}
       <ColorField
         label="Text colour"
         value={colorDraft ?? shownColor}
         fallback={style.text_color}
         onChange={(hex) => setPicked({ from: shownColor, ids: selectedIds, hex })}
         onCommit={(hex) => {
+          // A clear is immediately followed by the popover's own close, which calls the *previous*
+          // render's onCommit — one that still closes over the drag's draft. `clearedRef` makes
+          // that trailing bare close a no-op, so "Use default" cannot resurrect what it cleared.
+          const cleared = clearedRef.current
+          clearedRef.current = false
+          if (cleared && hex === undefined) return
           const next = hex ?? colorDraft
           if (next) update(ids, { color: next })
           setPicked(null)
         }}
         onClear={() => {
+          clearedRef.current = true
           setPicked(null)
           update(ids, { color: null })
         }}
