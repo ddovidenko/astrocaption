@@ -41,7 +41,7 @@ export default function LayoutTab() {
       // The placer answers about the document as it was sent. A drag during the round trip would
       // be silently undone by applying it, so the answer is dropped instead.
       const seq = useEditor.getState().changeSeq
-      const res = await api.autoarrange(imageId, documentForSave(useEditor.getState()))
+      const res = await api.autoarrange(imageId, documentForSave(useEditor.getState()), what === 'reset')
       if (useEditor.getState().changeSeq !== seq) {
         setError('Labels moved while the layout was being arranged; nothing was changed. Try again.')
         return
@@ -69,10 +69,9 @@ export default function LayoutTab() {
     }
   }
 
-  // In M3 this is Auto-arrange behind a confirmation: the server's placer ignores the positions of
-  // the labels it places, so "putting them back" first changed nothing it could see. M4's pinned
-  // labels are what will make Reset different — it will discard the pins. The confirmation is in
-  // the page, like the card's Delete, not a browser dialog (SPEC § 5.2).
+  // Reset positions discards every pin (design § A): the server unpins first and places all
+  // enabled labels; Auto-arrange keeps pinned labels where they are and places the rest around
+  // them. The confirmation is in the page, like the card's Delete, not a browser dialog (SPEC § 5.2).
   const reset = () => {
     setConfirming(false)
     void arrange('reset')
@@ -81,8 +80,9 @@ export default function LayoutTab() {
   return (
     <div className="tab-body">
       <p className="field-note">
-        Auto-arrange places every enabled label from scratch; nothing is pinned. Individual labels
-        you have dragged are moved too.
+        Auto-arrange places every enabled label from scratch, except pinned ones (a label you have
+        dragged, or pinned from its toolbar), which stay put and are placed around. Reset positions
+        unpins everything first.
       </p>
       <div className="tab-actions">
         <button
@@ -94,7 +94,7 @@ export default function LayoutTab() {
         </button>
         {confirming ? (
           <ConfirmInline
-            question="Discard the positions you have dragged and place every enabled label from scratch?"
+            question="Unpin every label and place every enabled label from scratch?"
             confirmLabel="Reset positions"
             onConfirm={reset}
             onCancel={() => setConfirming(false)}
