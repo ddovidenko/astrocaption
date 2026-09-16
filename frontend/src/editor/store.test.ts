@@ -483,7 +483,9 @@ describe('selection and per-label editing', () => {
     useEditor.getState().toggleSelect(2)
     const entries = useEditor.getState().undo.length
     useEditor.getState().moveLabel(1, one.x + 5, one.y + 7, false)
-    expect(useEditor.getState().labels.get(2)).toMatchObject({ x: 105, y: 107, pinned: false })
+    // The preview frame already carries the pin, so commitPreview and Konva's dragend commit the
+    // same label whichever lands first.
+    expect(useEditor.getState().labels.get(2)).toMatchObject({ x: 105, y: 107, pinned: true })
     useEditor.getState().moveLabel(1, one.x + 10, one.y + 14)
     expect(useEditor.getState().labels.get(1)).toMatchObject({ x: one.x + 10, y: one.y + 14, pinned: true })
     expect(useEditor.getState().labels.get(2)).toMatchObject({ x: 110, y: 114, pinned: true })
@@ -563,6 +565,33 @@ describe('selection and per-label editing', () => {
     useEditor.getState().commitPreview()
     expect(useEditor.getState().undo).toHaveLength(1)
     expect(useEditor.getState().labels.get(1)).toMatchObject({ font_size: 25, pinned: false })
+  })
+
+  it('a drag records one entry whether commitPreview or the drag-end commit lands first', () => {
+    // The two window mouseup listeners (the canvas's own and Konva's) fire in an order neither
+    // owns, so both orders have to end at the same document and the same single undo entry.
+    const run = (previewFirst: boolean) => {
+      const s = useEditor.getState()
+      s.load(doc)
+      const { x, y } = useEditor.getState().labels.get(1)!
+      useEditor.getState().select(1)
+      useEditor.getState().moveLabel(1, x + 20, y + 30, false) // dragmove
+      if (previewFirst) {
+        useEditor.getState().commitPreview()
+        useEditor.getState().moveLabel(1, x + 20, y + 30) // Konva's dragend, after the commit
+      } else {
+        useEditor.getState().moveLabel(1, x + 20, y + 30)
+        useEditor.getState().commitPreview()
+      }
+      const after = useEditor.getState()
+      return { label: after.labels.get(1)!, entries: after.undo.length, seq: after.changeSeq }
+    }
+    const a = run(true)
+    const b = run(false)
+    expect(a).toEqual(b)
+    expect(a.entries).toBe(1)
+    expect(a.seq).toBe(1)
+    expect(a.label).toMatchObject({ pinned: true, collided: false })
   })
 
   it('a disabled label leaves the selection', () => {

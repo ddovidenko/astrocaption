@@ -321,7 +321,10 @@ export const useEditor = create<EditorState>()((set) => ({
           const restored = { ...cur, x: was.x, y: was.y, collided: was.collided, pinned: was.pinned }
           labels.set(mid, sameLabel(restored, was) ? was : restored)
         } else {
-          labels.set(mid, { ...cur, x: was.x + dx, y: was.y + dy, collided: false, pinned: commit ? true : was.pinned })
+          // The pin rides on the preview frames too, not only on the commit: `commitPreview`
+          // (the window mouseup) and Konva's own `dragend` then produce the same committed
+          // label whichever of the two fires first, so their order stops mattering.
+          labels.set(mid, { ...cur, x: was.x + dx, y: was.y + dy, collided: false, pinned: true })
         }
       }
       if (!commit) return changedDoc(s, { labels }, false) ?? {}

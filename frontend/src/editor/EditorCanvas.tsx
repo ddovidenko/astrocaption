@@ -165,14 +165,18 @@ const LabelEntry = memo(function LabelEntry({
           // press bubbles to the stage, which starts the pan. A plain press also bubbles, so the
           // stage records it and `movedRef` can tell a later click from a drag; the stage does not
           // pan for it because the target is this group, not the stage.
-          if (spacePan || e.evt.button === 1) return
+          // Left button only: the middle button pans, and the right button opens the context
+          // menu, whose swallowed mouseup would leave the label pressed for the wheel to resize.
+          if (spacePan || e.evt.button !== 0) return
           onPress(label.object_id, e.evt.shiftKey)
         }}
         onClick={(e) => {
           if (e.evt.button === 0 && !spacePan) onClick(label.object_id, e.evt.shiftKey)
         }}
         onDblClick={(e) => {
-          if (e.evt.button === 0 && !spacePan) onDoubleClick(label.object_id)
+          // Gated on `editable` like every other document change: a read-only document has no
+          // text editor to open, and the store would refuse the commit anyway.
+          if (editable && e.evt.button === 0 && !spacePan) onDoubleClick(label.object_id)
         }}
         onDragStart={() => {
           // A drag begun without a press we saw (a synthetic one) still selects the label.
@@ -271,6 +275,10 @@ export default function EditorCanvas() {
     error: string | null
   } | null>(null)
   const [drawError, setDrawError] = useState<string | null>(null)
+  // A toolbar action that threw (the placer measures text, so Reset position can fail). Tagged
+  // with the selection it was raised for, the way LabelToolbar tags its drafts, so it clears
+  // itself the moment the selection moves on — an effect would be `set-state-in-effect`.
+  const [toolbarError, setToolbarError] = useState<{ ids: ReadonlySet<number>; text: string } | null>(null)
   const [sizeError, setSizeError] = useState<string | null>(null)
   const [panning, setPanning] = useState(false)
 
@@ -364,6 +372,10 @@ export default function EditorCanvas() {
     setDrawError((prev) => prev ?? message)
   }, [])
 
+  const onToolbarError = useCallback((text: string) => {
+    setToolbarError({ ids: useEditor.getState().selectedIds, text })
+  }, [])
+
   // A press selects: plain replaces the selection unless the label is already in it (so a drag
   // of one selected label moves the whole group), shift toggles membership.
   const onLabelPress = useCallback((id: number, shift: boolean) => {
@@ -390,6 +402,7 @@ export default function EditorCanvas() {
   const onLabelDoubleClick = useCallback((id: number) => {
     setEditingId(id)
   }, [])
+  const closeEditing = useCallback(() => setEditingId(null), [])
 
   // 5. Keys, ignored while a form field has the focus.
   useEffect(() => {
@@ -397,8 +410,13 @@ export default function EditorCanvas() {
     // blocks Space (which a focused button would take as a click).
     const inField = (withButton = false) => {
       const el = document.activeElement
+      if (!el) return false
+      // Everything inside the floating toolbar counts as a field, whatever it is: the colour
+      // swatch and the picker are buttons and inputs, and Escape there closes the popover while
+      // Delete/Backspace edits a hex — neither may clear the selection or disable its labels.
+      if (el.closest('.label-toolbar')) return true
       const tags = withButton ? ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'] : ['INPUT', 'TEXTAREA', 'SELECT']
-      return !!el && tags.includes(el.tagName)
+      return tags.includes(el.tagName)
     }
     const down = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
@@ -581,6 +599,9 @@ export default function EditorCanvas() {
     e.evt.preventDefault()
     const pressed = pressRef.current
     if (pressed !== null && (e.evt.buttons & 1) === 1) {
+      // A horizontal trackpad swipe reports deltaY 0; reading it as a notch down would shrink
+      // the label on a gesture that never asked for a resize.
+      if (e.evt.deltaY === 0) return
       const s = useEditor.getState()
       const label = s.labels.get(pressed)
       if (!label || !s.style) return
@@ -597,6 +618,11 @@ export default function EditorCanvas() {
 
   // 8. Pan: empty canvas, the middle button, or space held down.
   const onMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    // Konva fires on the shape first and bubbles up to the stage, so a label's own mousedown has
+    // already recorded the press by the time this runs: only a press that can never start a
+    // wheel-resize may clear it. A right-click's mouseup is swallowed by the context menu, which
+    // would otherwise leave the previous press standing.
+    if (e.evt.button !== 0) pressRef.current = null
     const stage = stageRef.current
     if (!stage) return
     movedRef.current = false
@@ -640,25 +666,32 @@ export default function EditorCanvas() {
     return () => window.removeEventListener('mouseup', stopPan)
   }, [panning, stopPan])
 
-  // The wheel-resize preview is committed when the button comes up, wherever that happens.
-  // Deferred past the current event dispatch rather than run inline, because the order of this
-  // listener against Konva's own window mouseup is not ours to pick: the Stage mounts only once
-  // the container has been measured, so this one is usually registered first. Committing inline
-  // would then beat Konva's `dragend`, which would find nothing left to move and would never
-  // record the pin a committed move carries. By the time the timeout runs, Konva's synchronous
-  // drag-end commit has folded any wheel size into that same entry, so this is a no-op after a
-  // drag and still the commit for a wheel-only resize.
+  // The wheel-resize preview is committed when the button comes up, wherever that happens — and
+  // when the pointer or the focus is lost instead, because a release outside the window fires no
+  // mouseup here and would strand the preview on the canvas under a "Saved" status.
+  //
+  // Run inline: whether this listener or Konva's own window mouseup (which fires `dragend`) gets
+  // there first no longer matters. A drag's *preview* frames already carry the pin (`moveLabel`
+  // in store.ts), so committing them here produces exactly the label `dragend` would have
+  // committed, and whichever runs second finds the maps identical and records nothing.
   useEffect(() => {
-    let timer = 0
     const up = () => {
       if (pressRef.current === null) return
       pressRef.current = null
-      timer = window.setTimeout(() => useEditor.getState().commitPreview(), 0)
+      useEditor.getState().commitPreview()
     }
     window.addEventListener('mouseup', up)
+    window.addEventListener('blur', up)
+    window.addEventListener('pointercancel', up)
+    document.addEventListener('visibilitychange', up)
     return () => {
-      window.clearTimeout(timer)
       window.removeEventListener('mouseup', up)
+      window.removeEventListener('blur', up)
+      window.removeEventListener('pointercancel', up)
+      document.removeEventListener('visibilitychange', up)
+      // Unmounting mid-gesture (the route changed under a held button) must not lose the preview
+      // either: `up` is a no-op unless a label is still pressed.
+      up()
     }
   }, [])
 
@@ -672,6 +705,7 @@ export default function EditorCanvas() {
   if (previewError) notices.push({ text: previewError, error: true })
   if (sizeError) notices.push({ text: sizeError, error: true })
   if (drawError) notices.push({ text: `Some labels could not be drawn: ${drawError}`, error: true })
+  if (toolbarError && toolbarError.ids === selectedIds) notices.push({ text: toolbarError.text, error: true })
   if (orphans > 0) {
     notices.push({
       text: `${orphans} label(s) refer to objects this image no longer has; they are not shown.`,
@@ -757,7 +791,7 @@ export default function EditorCanvas() {
           </div>
         )}
         {/* Hidden while the text editor is open, so the two overlays never stack. */}
-        {selectionBox && editing === null && <LabelToolbar box={selectionBox} />}
+        {selectionBox && editing === null && <LabelToolbar box={selectionBox} onError={onToolbarError} />}
         {editing && (
           <LabelTextEditor
             key={editing.label.object_id}
@@ -766,7 +800,7 @@ export default function EditorCanvas() {
             y={editing.label.y}
             width={editing.box.width}
             fontSize={editing.box.primarySize}
-            onClose={() => setEditingId(null)}
+            onClose={closeEditing}
           />
         )}
       </div>

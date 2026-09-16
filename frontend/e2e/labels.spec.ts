@@ -43,8 +43,8 @@ test('toolbar, wheel, double-click and pins edit the selected labels', async ({ 
   await size.press('Enter')
   await expect.poll(async () => (await storedLabel(first.id)).font_size, { timeout: 5_000 }).toBe(31)
 
-  // Wheel with the button held: one notch up = +1, committed on release. The canvas commits that
-  // preview one macrotask after the mouseup (EditorCanvas.tsx), so poll the stored document.
+  // Wheel with the button held: one notch up = +1, committed on the mouseup (EditorCanvas.tsx),
+  // then autosaved — so poll the stored document rather than assert straight away.
   //
   // The wheel goes out over raw CDP rather than through `page.mouse.wheel`, which dispatches
   // `Input.dispatchMouseEvent` with x/y/modifiers/deltas and no `buttons` field at all
@@ -111,7 +111,12 @@ test('toolbar, wheel, double-click and pins edit the selected labels', async ({ 
   await page.mouse.move(first.x + 40, first.y + 30, { steps: 5 })
   await page.mouse.up()
   await expect.poll(async () => (await storedLabel(first.id)).pinned, { timeout: 5_000 }).toBe(true)
+  const dragged = await storedLabel(first.id)
+  expect([dragged.x, dragged.y]).not.toEqual([first.wx, first.wy]) // the drag really moved it
   await toolbar.getByRole('button', { name: 'Reset position' }).click()
   await expect.poll(async () => (await storedLabel(first.id)).pinned, { timeout: 5_000 }).toBe(false)
+  // Unpinning is only half of it: the placer has to have put the label somewhere else again.
+  const replaced = await storedLabel(first.id)
+  expect([replaced.x, replaced.y]).not.toEqual([dragged.x, dragged.y])
   await expect(page.locator('.save-status')).toHaveText('Saved')
 })
