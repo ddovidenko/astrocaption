@@ -1,18 +1,62 @@
 import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import type { Label, LeaderMode } from '../api'
 import ColorField from '../style/ColorField'
+import { parseNumberField } from '../style/styleForm'
 import { isEditable, resetPositions } from './editing'
 import { MAX_FONT_SIZE, MIN_FONT_SIZE, type Box } from './metrics'
 import { useEditor } from './store'
+import { useTaggedDraft } from './taggedDraft'
 import { toScreen } from './view'
 
 const MARGIN = 8
 const MIXED = 'mixed'
 
+const ALIAS_OPTIONS = [
+  { value: 'inherit', label: 'inherit' },
+  { value: 'on', label: 'on' },
+  { value: 'off', label: 'off' },
+]
+const LEADER_OPTIONS = [
+  { value: 'auto', label: 'auto' },
+  { value: 'on', label: 'on' },
+  { value: 'off', label: 'off' },
+]
+
 /** One value when every selected label agrees, MIXED otherwise. */
 function common<T>(labels: Label[], pick: (l: Label) => T): T | typeof MIXED {
   const first = pick(labels[0]!)
   return labels.every((l) => pick(l) === first) ? first : MIXED
+}
+
+/** A toolbar select over a selection that may disagree: the "mixed" sentinel is an option only
+ *  while it is the value, so the owner can never pick it, and it disappears once they have. Every
+ *  option reads "<field>: <choice>", which is also the field's accessible name. */
+function MixedSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  /** One of `options`, or MIXED while the selection disagrees. */
+  value: string
+  options: { value: string; label: string }[]
+  onChange: (value: string) => void
+}) {
+  return (
+    <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
+      {value === MIXED && (
+        <option value={MIXED} disabled>
+          {`${label}: ${MIXED}`}
+        </option>
+      )}
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {`${label}: ${o.label}`}
+        </option>
+      ))}
+    </select>
+  )
 }
 
 /** The floating per-label toolbar (SPEC § 6.2, design § A): an HTML overlay above the selection's
@@ -40,11 +84,34 @@ export default function LabelToolbar({
     () => [...selectedIds].map((id) => labels.get(id)).filter((l): l is Label => l !== undefined && l.enabled),
     [selectedIds, labels],
   )
+  const empty = selected.length === 0
+
+  // The size field is a draft: committed on Enter or blur, reverted on an invalid value. It is
+  // tagged with the selection and the stored size it was typed against (see `useTaggedDraft`), so
+  // the stored value shows again the moment either moves on, and every path that acts on it drops
+  // it (`dropTyped`).
+  const fontSize = empty ? MIXED : common(selected, (l) => l.font_size)
+  const shownSize = fontSize === MIXED || fontSize === null ? '' : String(fontSize)
+  const [typed, setTyped, dropTyped] = useTaggedDraft<string>([shownSize, selectedIds])
+  const draft = typed ?? shownSize
+
+  // The colour is a draft too, tagged the same way, so the picker surface follows the pointer
+  // while a drag is in flight and only the close commits it (StyleTab's shape).
+  const color = empty ? MIXED : common(selected, (l) => l.color)
+  const shownColor = color === MIXED ? '' : (color ?? '')
+  const [colorDraft, setPicked, dropPicked] = useTaggedDraft<string>([shownColor, selectedIds])
+
+  const aliases = empty ? MIXED : common(selected, (l) => l.show_aliases)
+  const leader = empty ? MIXED : common(selected, (l) => l.leader)
+  const pinned = empty ? MIXED : common(selected, (l) => l.pinned)
+  const pinLabel = pinned === MIXED ? 'Pin (mixed)' : pinned ? 'Pinned' : 'Pin'
 
   // Own size, for the clamping below. Measured after layout and re-measured when what the toolbar
-  // shows could have changed width: `selected` drives the pin label and the "mixed" options,
-  // `style` the size placeholder, and `editable` whether there is anything to measure at all.
-  // The guard keeps a settled measurement from looping.
+  // shows could have changed width. The trigger is a signature of that content, not `selected`
+  // itself: a drag replaces every selected `Label` object on every frame, and keying on them would
+  // put a `getBoundingClientRect` — a forced layout — in the middle of each one (#105). The size
+  // guard keeps a settled measurement from looping.
+  const contentKey = `${shownSize}|${color === MIXED}|${aliases}|${leader}|${pinLabel}|${editable}`
   const ref = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
   useLayoutEffect(() => {
@@ -52,30 +119,9 @@ export default function LabelToolbar({
     if (!el) return
     const rect = el.getBoundingClientRect()
     if (rect.width !== size.w || rect.height !== size.h) setSize({ w: rect.width, h: rect.height })
-  }, [size.w, size.h, selected, style, editable])
+  }, [size.w, size.h, contentKey, style])
 
-  // The size field is a draft: committed on Enter or blur, reverted on an invalid value. Rather
-  // than being reset from an effect (react-hooks/set-state-in-effect) it carries the selection and
-  // the stored size it was typed against, so it goes stale — and the stored value shows again —
-  // the moment either moves on. Every path that acts on the draft drops it (`setTyped(null)`),
-  // because the tag alone cannot: an undo that puts the stored size back where the draft started
-  // would match the tag again and revive a draft the owner has already committed and undone.
-  const fontSize = selected.length > 0 ? common(selected, (l) => l.font_size) : MIXED
-  const shownSize = fontSize === MIXED || fontSize === null ? '' : String(fontSize)
-  const [typed, setTyped] = useState<{ from: string; ids: ReadonlySet<number>; text: string } | null>(null)
-  const draft = typed && typed.from === shownSize && typed.ids === selectedIds ? typed.text : shownSize
-  const setDraft = (text: string) => setTyped({ from: shownSize, ids: selectedIds, text })
-
-  // The colour is a draft too, tagged the same way, so the picker surface follows the pointer
-  // while a drag is in flight and only the close commits it (StyleTab's shape).
-  const color = selected.length > 0 ? common(selected, (l) => l.color) : MIXED
-  const shownColor = color === MIXED ? '' : (color ?? '')
-  const [picked, setPicked] = useState<{ from: string; ids: ReadonlySet<number>; hex: string } | null>(null)
-  const colorDraft = picked && picked.from === shownColor && picked.ids === selectedIds ? picked.hex : null
-  // Set by "Use default", consumed by the close that ColorField fires right after it (see onCommit).
-  const clearedRef = useRef(false)
-
-  if (!style || !editable || selected.length === 0) return null
+  if (!style || !editable || empty) return null
 
   const ids = selected.map((l) => l.object_id)
   const update = useEditor.getState().updateLabels
@@ -86,25 +132,26 @@ export default function LabelToolbar({
     // because the sizes differ, not because anyone cleared it — would read as a clear and wipe
     // every override in the selection.
     if (draft === shownSize) {
-      setTyped(null)
+      dropTyped()
       return
     }
     const text = draft.trim()
     // Committed, reverted or ignored, the draft is spent either way: the field goes back to
     // mirroring the store.
-    setTyped(null)
+    dropTyped()
     if (text === '') {
       update(ids, { font_size: null })
       return
     }
-    const n = Number(text)
-    if (!Number.isInteger(n) || n < MIN_FONT_SIZE || n > MAX_FONT_SIZE) return
+    // The same bounds the Style tab's own size field enforces; out of them, the edit is dropped.
+    const n = parseNumberField('font_size', text)
+    if (n === null) return
     update(ids, { font_size: n })
   }
   const step = (delta: number) => {
     // The stepper acts on the stored sizes, so a draft typed against them is spent — and a draft
     // left standing would keep showing over a `shownSize` that stays blank on a mixed selection.
-    setTyped(null)
+    dropTyped()
     const s = useEditor.getState()
     // One commit for the set: each label steps from its own effective size.
     const updated = selected.map((l) => ({
@@ -117,11 +164,6 @@ export default function LabelToolbar({
     if (updated.every((l, i) => l.font_size === selected[i]!.font_size)) return
     s.applyLabels(updated)
   }
-
-  const aliases = common(selected, (l) => l.show_aliases)
-  const leader = common(selected, (l) => l.leader)
-  const pinned = common(selected, (l) => l.pinned)
-  const pinLabel = pinned === MIXED ? 'Pin (mixed)' : pinned ? 'Pinned' : 'Pin'
 
   // Above the union box, inside the canvas; below it when there is no room above.
   const topLeft = toScreen(view, box.left, box.top)
@@ -149,7 +191,7 @@ export default function LabelToolbar({
           // selection's size overrides on a keystroke; keeping the last draft leaves the typing
           // where it was.
           if (e.target.validity.badInput) return
-          setDraft(e.target.value)
+          setTyped(e.target.value)
         }}
         onBlur={commitSize}
         onKeyDown={(e) => {
@@ -167,58 +209,37 @@ export default function LabelToolbar({
           it as one entry (a close with no drag carries no draft and commits nothing, and a draft
           that landed back on the stored colour is a patch `updateLabels` drops). A typed hex
           arrives with the commit and is committed on the keystroke; "Use default" clears the
-          override and cancels the draft outright. Every path drops the draft, so the stored value
-          shows again. */}
+          override and cancels the draft outright — ColorField fires one terminal callback per
+          close, so a clear never also arrives here as a commit. Every path drops the draft, so
+          the stored value shows again. */}
       <ColorField
         label="Text colour"
         value={colorDraft ?? shownColor}
         fallback={style.text_color}
         mixed={color === MIXED}
-        onChange={(hex) => setPicked({ from: shownColor, ids: selectedIds, hex })}
+        onChange={setPicked}
         onCommit={(hex) => {
-          // A clear is immediately followed by the popover's own close, which calls the *previous*
-          // render's onCommit — one that still closes over the drag's draft. `clearedRef` makes
-          // that trailing bare close a no-op, so "Use default" cannot resurrect what it cleared.
-          const cleared = clearedRef.current
-          clearedRef.current = false
-          if (cleared && hex === undefined) return
           const next = hex ?? colorDraft
           if (next) update(ids, { color: next })
-          setPicked(null)
+          dropPicked()
         }}
         onClear={() => {
-          clearedRef.current = true
-          setPicked(null)
+          dropPicked()
           update(ids, { color: null })
         }}
       />
-      <select
-        aria-label="Aliases"
+      <MixedSelect
+        label="Aliases"
         value={aliases === MIXED ? MIXED : aliases === null ? 'inherit' : aliases ? 'on' : 'off'}
-        onChange={(e) => {
-          const v = e.target.value
-          update(ids, { show_aliases: v === 'inherit' ? null : v === 'on' })
-        }}
-      >
-        {aliases === MIXED && (
-          <option value={MIXED} disabled>
-            Aliases: mixed
-          </option>
-        )}
-        <option value="inherit">Aliases: inherit</option>
-        <option value="on">Aliases: on</option>
-        <option value="off">Aliases: off</option>
-      </select>
-      <select aria-label="Leader" value={leader} onChange={(e) => update(ids, { leader: e.target.value as LeaderMode })}>
-        {leader === MIXED && (
-          <option value={MIXED} disabled>
-            Leader: mixed
-          </option>
-        )}
-        <option value="auto">Leader: auto</option>
-        <option value="on">Leader: on</option>
-        <option value="off">Leader: off</option>
-      </select>
+        options={ALIAS_OPTIONS}
+        onChange={(v) => update(ids, { show_aliases: v === 'inherit' ? null : v === 'on' })}
+      />
+      <MixedSelect
+        label="Leader"
+        value={leader}
+        options={LEADER_OPTIONS}
+        onChange={(v) => update(ids, { leader: v as LeaderMode })}
+      />
       <button
         type="button"
         className="secondary"

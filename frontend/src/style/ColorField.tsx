@@ -15,7 +15,11 @@ export const POPOVER_WIDTH_WITH_DEFAULT = 248
  *  or late, never off-screen. */
 export const POPOVER_HEIGHT = 232
 
-/** A colour override: a swatch that opens an in-page picker, never the OS dialog. */
+/** A colour override: a swatch that opens an in-page picker, never the OS dialog.
+ *
+ *  Exactly one terminal callback leaves this component per interaction: `onCommit` for every
+ *  close and for a typed hex, `onClear` for "Use default" — never both, so a caller with a live
+ *  draft needs no one-shot flag of its own to tell a clear from the close that follows it. */
 export default function ColorField({
   label,
   value,
@@ -47,7 +51,9 @@ export default function ColorField({
    *  close carries nothing, so the caller commits whatever it already has. */
   onCommit?: (hex?: string) => void
   /** "Use default" was clicked (allowDefault only). Without it the caller sees `onChange('')`
-   *  followed by a bare `onCommit()`, which a stateless caller cannot tell from a plain close. */
+   *  followed by a bare `onCommit()`, which a stateless caller cannot tell from a plain close.
+   *  It is the *only* terminal callback for that click: the close it triggers is silent, so a
+   *  caller holding a draft never has to guess which of the two to believe. */
   onClear?: () => void
 }) {
   const [open, setOpen] = useState(false)
@@ -98,13 +104,16 @@ export default function ColorField({
       setAlignUp(wrapRect.bottom + POPOVER_HEIGHT > bound.bottom)
     }
   }
-  /** Every way out of the picker: once per close, whichever event gets there first. */
-  const closePicker = (refocus: boolean) => {
+  /** Every way out of the picker: exactly one terminal callback per close, whichever event gets
+   *  there first. `silent` is for the close that follows a callback of its own ("Use default",
+   *  which has already fired `onClear`): a trailing bare `onCommit()` there would reach a caller
+   *  that still closes over this render's draft and put back what was just cleared. */
+  const closePicker = (refocus: boolean, { silent = false }: { silent?: boolean } = {}) => {
     if (!openRef.current) return
     openRef.current = false
     setOpen(false)
     if (refocus) swatch.current?.focus() // a keyboard user lands back where they started
-    onCommitRef.current?.()
+    if (!silent) onCommitRef.current?.()
   }
 
   useEffect(() => {
@@ -170,7 +179,7 @@ export default function ColorField({
                 onClick={() => {
                   onChange('')
                   onClear?.()
-                  closePicker(true)
+                  closePicker(true, { silent: true })
                 }}
               >
                 Use default

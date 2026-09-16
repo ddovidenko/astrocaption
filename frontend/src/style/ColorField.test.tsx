@@ -147,10 +147,11 @@ describe('ColorField rendering', () => {
     expect(screen.queryByText('default')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Use default' }))
     expect(f.onChange).toHaveBeenCalledWith('')
-    // onClear names the clear, which a bare onCommit() (a plain close) cannot: LabelToolbar has
-    // no draft of its own and commits `color: null` from this alone.
+    // onClear names the clear, which a bare onCommit() (a plain close) cannot — and it is the
+    // only callback for this click: the close it triggers is silent, so a caller holding a picker
+    // draft (LabelToolbar) cannot have it put back over the clear it just asked for.
     expect(f.onClear).toHaveBeenCalledTimes(1)
-    expect(f.onCommit).toHaveBeenCalledTimes(1)
+    expect(f.onCommit).not.toHaveBeenCalled()
   })
   it('mixed says "mixed" instead of "default" and leaves Use default clickable', () => {
     // The caller's selection holds several colours, so the blank value means "they differ" —

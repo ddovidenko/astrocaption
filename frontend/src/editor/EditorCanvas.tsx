@@ -24,6 +24,7 @@ import {
   type TextMeasurer,
 } from './metrics'
 import { enabledLabels, fontFor, useEditor } from './store'
+import { useTaggedDraft } from './taggedDraft'
 import { toScreen, zoomAt } from './view'
 
 /** What the parity spec (PR 4's Playwright test) drives the canvas with. `renderAt` returns a PNG
@@ -276,9 +277,9 @@ export default function EditorCanvas() {
   } | null>(null)
   const [drawError, setDrawError] = useState<string | null>(null)
   // A toolbar action that threw (the placer measures text, so Reset position can fail). Tagged
-  // with the selection it was raised for, the way LabelToolbar tags its drafts, so it clears
-  // itself the moment the selection moves on — an effect would be `set-state-in-effect`.
-  const [toolbarError, setToolbarError] = useState<{ ids: ReadonlySet<number>; text: string } | null>(null)
+  // with the selection it was raised for, the same hook the toolbar's own drafts use, so it
+  // clears itself the moment the selection moves on.
+  const [toolbarError, setToolbarError] = useTaggedDraft<string>([selectedIds])
   const [sizeError, setSizeError] = useState<string | null>(null)
   const [panning, setPanning] = useState(false)
 
@@ -370,10 +371,6 @@ export default function EditorCanvas() {
   // The first draw failure of any label becomes one notice; the shape itself stops drawing.
   const onDrawError = useCallback((message: string) => {
     setDrawError((prev) => prev ?? message)
-  }, [])
-
-  const onToolbarError = useCallback((text: string) => {
-    setToolbarError({ ids: useEditor.getState().selectedIds, text })
   }, [])
 
   // A press selects: plain replaces the selection unless the label is already in it (so a drag
@@ -726,7 +723,7 @@ export default function EditorCanvas() {
   if (previewError) notices.push({ text: previewError, error: true })
   if (sizeError) notices.push({ text: sizeError, error: true })
   if (drawError) notices.push({ text: `Some labels could not be drawn: ${drawError}`, error: true })
-  if (toolbarError && toolbarError.ids === selectedIds) notices.push({ text: toolbarError.text, error: true })
+  if (toolbarError) notices.push({ text: toolbarError, error: true })
   if (orphans > 0) {
     notices.push({
       text: `${orphans} label(s) refer to objects this image no longer has; they are not shown.`,
@@ -812,7 +809,7 @@ export default function EditorCanvas() {
           </div>
         )}
         {/* Hidden while the text editor is open, so the two overlays never stack. */}
-        {selectionBox && editing === null && <LabelToolbar box={selectionBox} onError={onToolbarError} />}
+        {selectionBox && editing === null && <LabelToolbar box={selectionBox} onError={setToolbarError} />}
         {editing && (
           <LabelTextEditor
             key={editing.label.object_id}
