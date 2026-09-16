@@ -237,13 +237,16 @@ test('the stage matches the preview for a document with per-label overrides and 
   }
   const stored = await putAnnotations(page, imageId!, overridden)
   const previewUrl = await exportImage(page, imageId!)
-  // Reload so the editor draws the stored document, then diff.
-  await page.reload()
-  await page.waitForFunction(() => window.__astrocaptionEditor?.labelCount !== undefined)
-  await expectStageMatchesPreview(page, previewUrl, testInfo, 'overrides')
-
-  // Put the shared fixture image back the way it was (and re-export it) so the other specs, and
-  // a re-run on the same data dir, compare against a matching export.
-  await putAnnotations(page, imageId!, { style: original.style, labels: original.labels, version: stored.version })
-  await exportImage(page, imageId!)
+  try {
+    // Reload so the editor draws the stored document, then diff.
+    await page.reload()
+    await page.waitForFunction(() => window.__astrocaptionEditor?.labelCount !== undefined)
+    await expectStageMatchesPreview(page, previewUrl, testInfo, 'overrides')
+  } finally {
+    // Put the shared fixture image back the way it was (and re-export it) so the other specs, and
+    // a re-run on the same data dir, compare against a matching export. In a `finally`: a blown
+    // budget (or any failure above) must not leave the shared document overridden behind it.
+    await putAnnotations(page, imageId!, { style: original.style, labels: original.labels, version: stored.version })
+    await exportImage(page, imageId!)
+  }
 })
