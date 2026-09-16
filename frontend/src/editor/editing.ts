@@ -82,6 +82,25 @@ export function enableWithPlacement(ids: number[], measure?: TextMeasurer): void
   if (updated.length > 0) state.applyLabels(updated)
 }
 
+/** The toolbar's Reset position: every enabled id in `ids` is placed again by the browser placer
+ *  (each around every other enabled label's box and marker, and around the ids placed before it)
+ *  and unpinned, in one store change. */
+export function resetPositions(ids: number[], measure?: TextMeasurer): void {
+  const state = useEditor.getState()
+  if (!isEditable(state)) return
+  const wanted = ids.filter((id) => state.labels.get(id)?.enabled && state.objects.has(id))
+  if (wanted.length === 0) return
+  const placed = placeNewLabels(state, measure ?? getMeasurer(), wanted)
+  const updated: Label[] = []
+  for (const id of wanted) {
+    const label = state.labels.get(id)
+    const p = placed.get(id)
+    if (!label || !p) continue
+    updated.push({ ...label, x: p.x, y: p.y, collided: p.collided, pinned: false })
+  }
+  if (updated.length > 0) state.applyLabels(updated)
+}
+
 /** "Disable shown": every enabled id in `ids` is disabled in one store change; positions stay. */
 export function disableAll(ids: number[]): void {
   const state = useEditor.getState()
