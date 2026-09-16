@@ -181,6 +181,7 @@ describe('render vectors', () => {
       show_aliases: null,
       leader: mode,
       collided: false,
+      pinned: false,
     })
     expect(scaleUnit(3000, 2000)).toBe(vectors.leaders[0]!.s)
     for (const c of vectors.leaders) {

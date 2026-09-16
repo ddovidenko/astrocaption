@@ -83,6 +83,9 @@ export interface Label {
   show_aliases: boolean | null
   leader: LeaderMode
   collided: boolean
+  /** Kept where the owner put it: a drag pins; Reset position / Reset positions unpin. The
+   *  server's placer treats a pinned label as a fixed obstacle. */
+  pinned: boolean
 }
 
 export interface Annotations {
@@ -371,9 +374,10 @@ export const api = {
   saveAnnotations: (id: string, doc: AnnotationsUpdate) =>
     request<Annotations>(`/api/images/${id}/annotations`, json('PUT', doc)),
   /** A 409 (ApiError.status) means the save was refused; show err.message: either the stored
-   *  version moved (reload) or a solve is running. */
-  autoarrange: (id: string, doc: AnnotationsUpdate) =>
-    request<Annotations>(`/api/images/${id}/autoarrange`, json('POST', doc)),
+   *  version moved (reload) or a solve is running. `reset` unpins every label first (the Layout
+   *  tab's Reset positions). */
+  autoarrange: (id: string, doc: AnnotationsUpdate, reset = false) =>
+    request<Annotations>(`/api/images/${id}/autoarrange`, json('POST', { ...doc, reset })),
   /** `quality` null = match the original JPEG's tables and subsampling (the default). */
   exportImage: (id: string, quality: number | null, scale: number) =>
     request<ExportOut>(`/api/images/${id}/export`, json('POST', { quality, scale })),

@@ -69,6 +69,7 @@ export function makeDoc(): LoadedDocument {
         show_aliases: null,
         leader: 'auto',
         collided: false,
+        pinned: false,
       },
       {
         object_id: 2,
@@ -81,6 +82,7 @@ export function makeDoc(): LoadedDocument {
         show_aliases: null,
         leader: 'auto',
         collided: false,
+        pinned: false,
       },
     ],
     version: 1,

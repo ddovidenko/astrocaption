@@ -57,9 +57,9 @@ describe('editor store', () => {
 
   it('select and hover set and clear ids', () => {
     useEditor.getState().select(1)
-    expect(useEditor.getState().selectedId).toBe(1)
+    expect([...useEditor.getState().selectedIds]).toEqual([1])
     useEditor.getState().select(null)
-    expect(useEditor.getState().selectedId).toBeNull()
+    expect(useEditor.getState().selectedIds.size).toBe(0)
 
     useEditor.getState().hover(2)
     expect(useEditor.getState().hoveredId).toBe(2)
@@ -80,7 +80,7 @@ describe('editor store', () => {
     expect(state.labels.size).toBe(0)
     expect(state.version).toBe(0)
     expect(state.fonts.size).toBe(0)
-    expect(state.selectedId).toBeNull()
+    expect(state.selectedIds.size).toBe(0)
     expect(state.hoveredId).toBeNull()
     expect(state.save).toEqual({ status: 'saved', message: null })
   })
@@ -142,24 +142,24 @@ describe('document actions', () => {
     s.load(doc)
     s.select(1)
     s.toggleObject(1) // off: nothing left on the canvas to select
-    expect(useEditor.getState().selectedId).toBeNull()
+    expect(useEditor.getState().selectedIds.has(1)).toBe(false)
     s.select(1)
     useEditor.getState().toggleObject(1) // on again
-    expect(useEditor.getState().selectedId).toBe(1)
+    expect(useEditor.getState().selectedIds.has(1)).toBe(true)
   })
   it('toggleObject leaves another label\'s selection alone', () => {
     const s = useEditor.getState()
     s.load(doc)
     s.select(1)
     s.toggleObject(2, { x: 1, y: 2 })
-    expect(useEditor.getState().selectedId).toBe(1)
+    expect([...useEditor.getState().selectedIds]).toEqual([1])
   })
   it('moveLabel sets the position and clears collided', () => {
     const s = useEditor.getState()
     s.load(doc)
     s.applyLabels([{ ...useEditor.getState().labels.get(1)!, collided: true }])
     s.moveLabel(1, 10, 20)
-    expect(useEditor.getState().labels.get(1)).toMatchObject({ x: 10, y: 20, collided: false })
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ x: 10, y: 20, collided: false, pinned: true })
   })
   it('moveLabel to the current position changes nothing', () => {
     const s = useEditor.getState()
@@ -400,7 +400,7 @@ describe('undo/redo', () => {
     s.toggleObject(2, { x: 1, y: 2 }) // enables 2
     s.select(2)
     useEditor.getState().undoLast() // back to 2 disabled
-    expect(useEditor.getState().selectedId).toBeNull()
+    expect(useEditor.getState().selectedIds.size).toBe(0)
   })
 
   it('undoLast leaves a selection alone when the restored snapshot keeps it enabled', () => {
@@ -409,7 +409,7 @@ describe('undo/redo', () => {
     s.select(1) // label 1 is enabled in both the current and the restored snapshot
     s.toggleObject(2, { x: 1, y: 2 })
     useEditor.getState().undoLast()
-    expect(useEditor.getState().selectedId).toBe(1)
+    expect([...useEditor.getState().selectedIds]).toEqual([1])
   })
 
   it('a drag that ends where it began restores the committed document and records nothing', () => {
@@ -447,5 +447,131 @@ describe('isEditable', () => {
       useEditor.getState().load({ ...doc, image: { ...doc.image, solve_status: status } })
       expect(isEditable(useEditor.getState())).toBe(want)
     }
+  })
+})
+
+describe('selection and per-label editing', () => {
+  it('toggleSelect adds and removes one id; select replaces the set', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(2, { x: 100, y: 100 })
+    s.toggleSelect(1)
+    useEditor.getState().toggleSelect(2)
+    expect([...useEditor.getState().selectedIds].sort()).toEqual([1, 2])
+    useEditor.getState().toggleSelect(1)
+    expect([...useEditor.getState().selectedIds]).toEqual([2])
+    useEditor.getState().select(1)
+    expect([...useEditor.getState().selectedIds]).toEqual([1])
+    useEditor.getState().select(null)
+    expect(useEditor.getState().selectedIds.size).toBe(0)
+  })
+
+  it('a drag commit pins the moved label', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.moveLabel(1, 10, 20)
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ x: 10, y: 20, pinned: true, collided: false })
+    expect(useEditor.getState().undo).toHaveLength(1)
+  })
+
+  it('dragging a selected label moves every selected label by the same delta, as one commit', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(2, { x: 100, y: 100 })
+    const one = useEditor.getState().labels.get(1)!
+    useEditor.getState().select(1)
+    useEditor.getState().toggleSelect(2)
+    const entries = useEditor.getState().undo.length
+    useEditor.getState().moveLabel(1, one.x + 5, one.y + 7, false)
+    expect(useEditor.getState().labels.get(2)).toMatchObject({ x: 105, y: 107, pinned: false })
+    useEditor.getState().moveLabel(1, one.x + 10, one.y + 14)
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ x: one.x + 10, y: one.y + 14, pinned: true })
+    expect(useEditor.getState().labels.get(2)).toMatchObject({ x: 110, y: 114, pinned: true })
+    expect(useEditor.getState().undo).toHaveLength(entries + 1)
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().labels.get(2)).toMatchObject({ x: 100, y: 100, pinned: false })
+  })
+
+  it('dragging an unselected label moves only that label', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(2, { x: 100, y: 100 })
+    useEditor.getState().select(2)
+    const one = useEditor.getState().labels.get(1)!
+    useEditor.getState().moveLabel(1, one.x + 5, one.y)
+    expect(useEditor.getState().labels.get(2)).toMatchObject({ x: 100, y: 100 })
+  })
+
+  it('updateLabels patches every id as one commit and skips a patch that changes nothing', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(2, { x: 100, y: 100 })
+    const entries = useEditor.getState().undo.length
+    useEditor.getState().updateLabels([1, 2], { font_size: 30, color: '#ff0000' })
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ font_size: 30, color: '#ff0000' })
+    expect(useEditor.getState().labels.get(2)).toMatchObject({ font_size: 30, color: '#ff0000' })
+    expect(useEditor.getState().undo).toHaveLength(entries + 1)
+    useEditor.getState().updateLabels([1, 2], { font_size: 30 })
+    expect(useEditor.getState().undo).toHaveLength(entries + 1)
+    useEditor.getState().updateLabels([999], { font_size: 12 })
+    expect(useEditor.getState().undo).toHaveLength(entries + 1)
+  })
+
+  it('updateLabels is refused while a solve is running', () => {
+    const s = useEditor.getState()
+    s.load({ ...doc, image: { ...doc.image, solve_status: 'solving' } })
+    s.updateLabels([1], { font_size: 30 })
+    expect(useEditor.getState().labels.get(1)!.font_size).toBeNull()
+  })
+
+  it('a wheel resize previews frames and commitPreview records one entry', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const seq = useEditor.getState().changeSeq
+    s.updateLabels([1], { font_size: 25 }, false)
+    useEditor.getState().updateLabels([1], { font_size: 26 }, false)
+    expect(useEditor.getState().labels.get(1)!.font_size).toBe(26)
+    expect(useEditor.getState().changeSeq).toBe(seq)
+    expect(useEditor.getState().undo).toHaveLength(0)
+    useEditor.getState().commitPreview()
+    expect(useEditor.getState().changeSeq).toBe(seq + 1)
+    expect(useEditor.getState().undo).toHaveLength(1)
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().labels.get(1)!.font_size).toBeNull()
+  })
+
+  it('commitPreview after a resize back to the starting size records nothing', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const committedLabels = useEditor.getState().labels
+    s.updateLabels([1], { font_size: 25 }, false)
+    useEditor.getState().updateLabels([1], { font_size: null }, false)
+    useEditor.getState().commitPreview()
+    expect(useEditor.getState().labels).toBe(committedLabels)
+    expect(useEditor.getState().undo).toHaveLength(0)
+  })
+
+  it('a drag that ends where it began keeps a live wheel-resize preview', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const { x, y } = useEditor.getState().labels.get(1)!
+    s.updateLabels([1], { font_size: 25 }, false)
+    useEditor.getState().moveLabel(1, x + 3, y, false)
+    useEditor.getState().moveLabel(1, x, y)
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ x, y, font_size: 25, pinned: false })
+    expect(useEditor.getState().undo).toHaveLength(0)
+    useEditor.getState().commitPreview()
+    expect(useEditor.getState().undo).toHaveLength(1)
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ font_size: 25, pinned: false })
+  })
+
+  it('a disabled label leaves the selection', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.toggleObject(2, { x: 100, y: 100 })
+    useEditor.getState().select(1)
+    useEditor.getState().toggleSelect(2)
+    useEditor.getState().applyLabels([{ ...useEditor.getState().labels.get(2)!, enabled: false }])
+    expect([...useEditor.getState().selectedIds]).toEqual([1])
   })
 })
