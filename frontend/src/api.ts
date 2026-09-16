@@ -91,6 +91,9 @@ export interface Annotations {
   labels: Label[]
   version: number
   updated_at: string
+  /** Set when the stored style names a font file the server no longer bundles: the server
+   *  already served the default in its place, and this names the one it replaced. */
+  font_fallback: string | null
 }
 
 /** What the editor sends back: its document minus the server-owned fields. Mirrors AnnotationsUpdate. */
@@ -348,6 +351,9 @@ export const api = {
   updateConfig: (body: ConfigUpdate) => request<ConfigOut>('/api/config', json('PUT', body)),
   listImages: () => request<ImageOut[]>('/api/images'),
   image: (id: string) => request<ImageOut>(`/api/images/${id}`),
+  /** The style an image would use with no owner overrides: the site defaults with the config's
+   *  `default_style` applied. Used to preview or reset a per-image style in the Style tab. */
+  imageDefaultStyle: (id: string) => request<StyleConfig>(`/api/images/${id}/default-style`),
   upload(file: File, title: string, onProgress?: UploadProgress): Promise<ImageOut> {
     const form = new FormData()
     form.append('file', file)

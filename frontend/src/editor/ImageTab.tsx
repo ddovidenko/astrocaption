@@ -2,11 +2,13 @@ import { useState } from 'react'
 import { api, formatBytes, pageError, type ExportOut } from '../api'
 import { flushSave } from './autosave'
 import { useEditor } from './store'
+import { fallbackSentence } from './styleTab'
 
 /** Read-only solve facts plus the export button (design § 5). Publish, re-solve and delete stay
  *  on the image card. */
 export default function ImageTab() {
   const image = useEditor((s) => s.image)
+  const fallback = useEditor((s) => s.fontFallback)
   // Not `isEditable`: that also allows a failed re-solve, which the editor may still edit and save
   // but the export endpoint refuses ("Image is not solved yet."). The button says so by being
   // disabled rather than by failing.
@@ -47,6 +49,7 @@ export default function ImageTab() {
 
   return (
     <div className="tab-body">
+      {fallback && <p className="notice">{fallbackSentence(fallback)}</p>}
       <dl className="facts">
         <dt>Field centre</dt>
         <dd>{cal ? `RA ${cal.ra.toFixed(3)}°, Dec ${cal.dec.toFixed(3)}°` : '—'}</dd>

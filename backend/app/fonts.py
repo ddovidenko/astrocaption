@@ -39,22 +39,20 @@ def font_path(fonts_dir: Path, file: str) -> Path:
 
 @lru_cache(maxsize=512)
 def resolve_font_file(fonts_dir: Path, file: str) -> str:
-    """``file`` if it is a bundled font, else the built-in default with a warning.
+    """``file`` if it is a usable bundled font, else the built-in default with a warning.
 
-    Stored styles outlive the bundle (a family can be dropped in an upgrade); rendering and
-    placement must keep working, and the warning names the file so the owner can pick another.
-    Cached so a stored style with a gone font logs once per process, not once per request.
+    One predicate decides usability — ``list_fonts`` (readable at every size, so the ascent
+    table exists) — for rendering, placement and the API alike (#63). Stored styles outlive
+    the bundle; the warning names the file so the owner can pick another. Cached so a stored
+    style with a gone font logs once per process.
     """
-    try:
-        font_path(fonts_dir, file)
-    except FontNotFoundError:
-        log.warning("font %r is not bundled; using %s", file, DEFAULT_FONT_FILE)
-        try:
-            font_path(fonts_dir, DEFAULT_FONT_FILE)
-        except FontNotFoundError:
-            log.error("default font %s is missing from the fonts directory", DEFAULT_FONT_FILE)
-        return DEFAULT_FONT_FILE
-    return file
+    usable = {f.file for f in list_fonts(fonts_dir)}
+    if file in usable:
+        return file
+    log.warning("font %r is not bundled; using %s", file, DEFAULT_FONT_FILE)
+    if DEFAULT_FONT_FILE not in usable:
+        log.error("default font %s is missing from the fonts directory", DEFAULT_FONT_FILE)
+    return DEFAULT_FONT_FILE
 
 
 def resolved_style(fonts_dir: Path, style: StyleConfig) -> StyleConfig:

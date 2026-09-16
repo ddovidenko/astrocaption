@@ -2,11 +2,13 @@ import { useState } from 'react'
 import ImageTab from './ImageTab'
 import LayoutTab from './LayoutTab'
 import ObjectsTab from './ObjectsTab'
+import StyleTab from './StyleTab'
 
-type Tab = 'objects' | 'layout' | 'image'
+type Tab = 'objects' | 'style' | 'layout' | 'image'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'objects', label: 'Objects' },
+  { id: 'style', label: 'Style' },
   { id: 'layout', label: 'Layout' },
   { id: 'image', label: 'Image' },
 ]
@@ -52,6 +54,7 @@ export default function SidePanel({ open, onToggle }: { open: boolean; onToggle:
       {open && (
         <div id="side-panel-body" role="tabpanel" aria-labelledby={`tab-${tab}`} className="side-panel-body">
           {tab === 'objects' && <ObjectsTab />}
+          {tab === 'style' && <StyleTab />}
           {tab === 'layout' && <LayoutTab />}
           {tab === 'image' && <ImageTab />}
         </div>

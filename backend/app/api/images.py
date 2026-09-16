@@ -19,7 +19,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from ..config import Settings, SettingsSource
 from ..db import Database
 from ..fonts import list_fonts, resolved_style
-from ..layout import autoplace
+from ..layout import autoplace, default_style
 from ..models import (
     Annotations,
     AnnotationsUpdate,
@@ -32,6 +32,7 @@ from ..models import (
     SolveHints,
     SolveObject,
     SolveStatus,
+    StyleConfig,
     utcnow_iso,
 )
 from ..render import render_annotated
@@ -348,7 +349,17 @@ async def get_annotations(image_id: str, settings: SettingsDep, db: DbDep) -> An
     ann = db.get_annotations(image_id)
     if ann is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_SOLVED_MESSAGE)
-    return ann.model_copy(update={"style": resolved_style(settings.fonts_dir, ann.style)})
+    resolved = resolved_style(settings.fonts_dir, ann.style)
+    fallback = ann.style.font_file if resolved.font_file != ann.style.font_file else None
+    return ann.model_copy(update={"style": resolved, "font_fallback": fallback})
+
+
+@router.get("/{image_id}/default-style")
+async def image_default_style(image_id: str, settings: SettingsDep, db: DbDep) -> StyleConfig:
+    """The style a fresh solve of this image would get: size-relative built-ins with the site's
+    ``default_style`` on top. The Style tab's "Reset to site defaults" (SPEC § 6.3)."""
+    rec = _get_or_404(db, image_id)
+    return default_style(rec.width, rec.height, settings.fonts_dir, settings.default_style)
 
 
 SOLVING_MESSAGE = "The image is still being solved; try again when it is done."

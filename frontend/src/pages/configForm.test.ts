@@ -1,15 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ConfigOut } from '../api'
-import {
-  buildUpdate,
-  normalizeHex,
-  otherPreference,
-  overridesFromStyleForm,
-  PREFERENCE_LABELS,
-  sameOverrides,
-  styleFormFromOverrides,
-  type StyleForm,
-} from './configForm'
+import { normalizeHex, type StyleForm } from '../style/styleForm'
+import { buildUpdate, sameOverrides } from './configForm'
 
 const empty: StyleForm = {
   font_file: '',
@@ -28,35 +20,6 @@ const empty: StyleForm = {
 }
 
 describe('config form helpers', () => {
-  it('round-trips overrides through the form', () => {
-    const o = { font_file: 'Roboto-Bold.ttf', font_size: 30, halo: false, text_color: '#ff8800' }
-    const form = styleFormFromOverrides(o)
-    expect(form).toEqual({ ...empty, font_file: 'Roboto-Bold.ttf', font_size: '30', halo: 'off', text_color: '#ff8800' })
-    expect(overridesFromStyleForm(form)).toEqual(o)
-  })
-
-  it('treats blanks as "use the default" and drops them', () => {
-    expect(overridesFromStyleForm(empty)).toEqual({})
-    expect(overridesFromStyleForm({ ...empty, font_size: '  ', halo: 'on' })).toEqual({ halo: true })
-  })
-
-  it('treats a non-numeric size as unset', () => {
-    expect(overridesFromStyleForm({ ...empty, marker_width: 'abc' })).toEqual({})
-  })
-
-  it('round-trips max_aliases and drops it when blank', () => {
-    expect(styleFormFromOverrides({ max_aliases: 3 }).max_aliases).toBe('3')
-    expect(overridesFromStyleForm({ ...styleFormFromOverrides({}), max_aliases: '0' })).toEqual({ max_aliases: 0 })
-    expect(overridesFromStyleForm({ ...styleFormFromOverrides({}), max_aliases: '' })).toEqual({})
-  })
-
-  it('names the other preference and labels both', () => {
-    expect(otherPreference('popular')).toBe('ngc_ic')
-    expect(otherPreference('ngc_ic')).toBe('popular')
-    expect(PREFERENCE_LABELS.popular).toContain('Messier')
-    expect(PREFERENCE_LABELS.ngc_ic).toContain('NGC')
-  })
-
   it('compares override sets regardless of key order', () => {
     expect(sameOverrides({ halo: false, font_size: 30 }, { font_size: 30, halo: false })).toBe(true)
     expect(sameOverrides({}, {})).toBe(true)

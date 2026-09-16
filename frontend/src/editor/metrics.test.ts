@@ -109,6 +109,7 @@ describe('render vectors', () => {
     expect(vectors.labels.length).toBeGreaterThan(0)
   })
 
+
   it('rounds halves to even like Python', () => {
     expect(roundHalfEven(10.5)).toBe(10)
     expect(roundHalfEven(17.5)).toBe(18)

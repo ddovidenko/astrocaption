@@ -347,6 +347,8 @@ class Annotations(BaseModel):
     labels: list[Label]
     version: int = 1
     updated_at: str = Field(default_factory=utcnow_iso)
+    # the stored font_file when `style.font_file` had to be replaced by the default (GET only)
+    font_fallback: str | None = None
 
 
 class AnnotationsUpdate(BaseModel):
@@ -365,6 +367,9 @@ class AnnotationsUpdate(BaseModel):
     style: StyleConfig
     labels: list[Label] = Field(max_length=MAX_LABELS)
     version: int = Field(ge=1)
+    font_fallback: str | None = (
+        None  # the server's; accepted so a GET body can be sent back, never read
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -85,13 +85,14 @@ export function makeDoc(): LoadedDocument {
     ],
     version: 1,
     updated_at: '2026-01-01T00:00:00Z',
+    font_fallback: null,
   }
 
   const fonts: FontOut[] = [
     { file: 'Inter-Regular.ttf', family: 'Inter', weight: '400', sample: 'Aa', ascents: new Array(195).fill(20) },
   ]
 
-  return { image, objects, annotations, fonts }
+  return { image, objects, annotations, fonts, fontFallback: null }
 }
 
 /** Adds a third object to a `makeDoc()` document with a disabled label; the label sits on the

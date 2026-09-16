@@ -189,6 +189,44 @@ describe('document actions', () => {
     const out = documentForSave(useEditor.getState())
     expect(out.labels.map((l) => l.object_id)).toEqual([1, 2])
   })
+  it('carries the font fallback and clears it on save or on a font change', () => {
+    const s = useEditor.getState()
+    s.load({ ...doc, fontFallback: { stored: 'Gone.ttf', used: 'Inter-Regular.ttf' } })
+    expect(useEditor.getState().fontFallback).toEqual({ stored: 'Gone.ttf', used: 'Inter-Regular.ttf' })
+    s.markSaving()
+    s.markSaved(2, 't')
+    expect(useEditor.getState().fontFallback).toBeNull()
+    useEditor.getState().load({ ...doc, fontFallback: { stored: 'Gone.ttf', used: 'Inter-Regular.ttf' } })
+    useEditor.getState().setStyle({ font_size: 30 })
+    expect(useEditor.getState().fontFallback).not.toBeNull()
+    // A genuine font change (not the same file the style already holds): setStyle's no-op guard
+    // (below) must not swallow this, since it is a real change, not a same-value patch.
+    useEditor.getState().setStyle({ font_file: 'Lato-Regular.ttf' })
+    expect(useEditor.getState().fontFallback).toBeNull()
+
+    // A refused change (document not editable) must not clear the notice either.
+    useEditor.getState().load({
+      ...doc,
+      image: { ...doc.image, solve_status: 'solving' },
+      fontFallback: { stored: 'Gone.ttf', used: 'Inter-Regular.ttf' },
+    })
+    const styleBefore = useEditor.getState().style
+    // A genuine change again (not a same-value patch): otherwise the no-op guard above would
+    // refuse it for that reason, not for the not-editable reason this block means to test.
+    useEditor.getState().setStyle({ font_file: 'Lato-Regular.ttf' })
+    expect(useEditor.getState().fontFallback).toEqual({ stored: 'Gone.ttf', used: 'Inter-Regular.ttf' })
+    expect(useEditor.getState().style).toBe(styleBefore)
+  })
+
+  it('setStyle commits a font_file patch equal to the current font while a fallback is pending', () => {
+    useEditor.getState().load({ ...doc, fontFallback: { stored: 'Gone.ttf', used: doc.annotations.style.font_file } })
+    useEditor.getState().setStyle({ font_file: doc.annotations.style.font_file })
+    const state = useEditor.getState()
+    expect(state.undo).toHaveLength(1)
+    expect(state.save.status).toBe('dirty')
+    expect(state.fontFallback).toBeNull()
+  })
+
   it('applyLabels throws on an id the store does not have', () => {
     const s = useEditor.getState()
     s.load(doc)
@@ -328,6 +366,15 @@ describe('undo/redo', () => {
     expect(useEditor.getState().style?.font_size).toBe(30)
     useEditor.getState().undoLast()
     expect(useEditor.getState().style?.font_size).toBe(24)
+  })
+
+  it('setStyle skips a commit that matches the current style (no history, no dirty)', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.setStyle({ font_size: 24 })
+    const state = useEditor.getState()
+    expect(state.undo).toEqual([])
+    expect(state.save.status).toBe('saved')
   })
 
   it('a drag coalesces into one undo entry: preview frames record nothing, drag-end commits', () => {

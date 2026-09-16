@@ -8,6 +8,14 @@ export interface LoadedDocument {
   objects: ObjectOut[]
   annotations: Annotations
   fonts: FontOut[]
+  fontFallback: FontFallback | null
+}
+
+/** A stored font file the server no longer bundles, resolved to the default in its place:
+ *  `stored` is what the document asked for, `used` is what actually loaded. */
+export interface FontFallback {
+  stored: string
+  used: string
 }
 
 export type SaveStatus = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict'
@@ -30,6 +38,7 @@ export interface EditorState {
   version: number
   updatedAt: string
   fonts: Map<string, FontOut> // by file
+  fontFallback: FontFallback | null // set by load when the stored font was swapped for the default
   selectedId: number | null
   hoveredId: number | null
   view: View
@@ -72,6 +81,7 @@ const initial = {
   version: 0,
   updatedAt: '',
   fonts: new Map<string, FontOut>(),
+  fontFallback: null as FontFallback | null,
   selectedId: null,
   hoveredId: null,
   view: { scale: 1, x: 0, y: 0 } as View,
@@ -164,6 +174,7 @@ export const useEditor = create<EditorState>()((set) => ({
       version: doc.annotations.version,
       updatedAt: doc.annotations.updated_at,
       fonts: new Map(doc.fonts.map((f) => [f.file, f])),
+      fontFallback: doc.fontFallback,
       selectedId: null,
       hoveredId: null,
       save: { status: 'saved', message: null },
@@ -256,12 +267,32 @@ export const useEditor = create<EditorState>()((set) => ({
       }
       return changedDoc(s, { labels }) ?? {}
     }),
-  setStyle: (patch) => set((s) => (s.style ? (changedDoc(s, { style: { ...s.style, ...patch } }) ?? {}) : {})),
+  setStyle: (patch) =>
+    set((s) => {
+      const current = s.style
+      if (!current) return {}
+      // A patch that changes nothing (every key already holds that value) commits no history and
+      // marks nothing dirty — a debounced number commit that lands after its field was already
+      // undone back to the same value, or a reset clicked when already at the defaults, must not
+      // manufacture an undo entry or a save.
+      const changed = (Object.keys(patch) as (keyof StyleConfig)[]).some((k) => patch[k] !== current[k])
+      // A font_file patch that resolves to the font already in the document is still a real change
+      // while a fallback notice is pending: the stored row still names the gone font, so the
+      // document differs from it even though nothing here looks different. Let it through so the
+      // resolved font is committed (autosaved) and the notice clears below, as it promises.
+      // (StyleTab.changeFont skips its own same-font early return in that case for the same reason.)
+      const hasFontPatch = 'font_file' in patch
+      if (!changed && !(hasFontPatch && s.fontFallback !== null)) return {}
+      const next = changedDoc(s, { style: { ...current, ...patch } })
+      if (!next) return {}
+      return { ...next, ...(hasFontPatch ? { fontFallback: null } : {}) }
+    }),
   markSaving: () => set({ pendingChanges: 0, save: { status: 'saving', message: null } }),
   markSaved: (version, updatedAt) =>
     set((s) => ({
       version,
       updatedAt,
+      fontFallback: null,
       save: s.pendingChanges > 0 ? { status: 'dirty', message: null } : { status: 'saved', message: null },
     })),
   markSaveError: (message) => set({ save: { status: 'error', message } }),

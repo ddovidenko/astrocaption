@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from starlette.requests import Request
 
+from app import layout
 from app.api.images import (
     ALREADY_SOLVED_MESSAGE,
     IN_PROGRESS_MESSAGE,
@@ -25,6 +26,7 @@ from app.layout import SIZE_RELATIVE
 from app.main import create_app, font_not_found_error
 from app.models import MAX_FONT_SIZE, MIN_FONT_SIZE, StyleConfig
 from tests.conftest import (
+    ENV_ISOLATED,
     FONTS_DIR,
     NOVA_NARROW_FIXTURES,
     TEST_PASSWORD_HASH,
@@ -342,6 +344,51 @@ def test_export_and_annotations_survive_a_dropped_font(
 
     stored = db.get_annotations(image_id)
     assert stored is not None and stored.style.font_file == "Lato-Regular.ttf"
+
+    served = client.get(f"/api/images/{image_id}/annotations").json()
+    assert served["style"]["font_file"] == "Inter-Regular.ttf"
+    assert served["font_fallback"] == "Lato-Regular.ttf"
+    # A GET body goes straight back: the server ignores font_fallback and stores the resolved font.
+    saved = client.put(f"/api/images/{image_id}/annotations", json=served)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["font_fallback"] is None
+    updated = db.get_annotations(image_id)
+    assert updated is not None and updated.style.font_file == "Inter-Regular.ttf"
+    assert client.get(f"/api/images/{image_id}/annotations").json()["font_fallback"] is None
+
+
+def test_default_style_for_an_image_is_size_relative_with_the_site_overrides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sample_jpeg: Path
+) -> None:
+    """``PUT /api/config``'s ``default_style`` must reach the very next request with no
+    restart. The ``client``/``settings`` fixtures hand the app a fixed ``Settings`` that never
+    re-reads config.json (built for speed, not for this), so this test builds its own app the
+    way ``env_client`` does, with a ``FakeSolver`` so the image can still be solved."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    monkeypatch.setenv("ASTROCAPTION_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("ASTROCAPTION_FONTS_DIR", str(FONTS_DIR))
+    for name in ENV_ISOLATED:
+        monkeypatch.delenv(name, raising=False)
+    (data_dir / "config.json").write_text(
+        json.dumps({"password_hash": TEST_PASSWORD_HASH, "session_secret": "s"})
+    )
+    app = create_app(solver_factory=lambda: FakeSolver(), poll_interval=0.01, solve_timeout=10)
+    with TestClient(app) as client:
+        login(client)
+        body = upload(client, sample_jpeg)
+        image_id = body["id"]
+        solved = wait_for_status(client, image_id, {"solved", "failed"})
+        assert solved["solve_status"] == "solved", solved["solve_error"]
+
+        overrides = {"text_color": "#ff8800", "max_aliases": 4}
+        assert client.put("/api/config", json={"default_style": overrides}).status_code == 200
+        resp = client.get(f"/api/images/{image_id}/default-style")
+        assert resp.status_code == 200, resp.text
+        rec = client.get(f"/api/images/{image_id}").json()
+        expected = layout.default_style(rec["width"], rec["height"], FONTS_DIR, overrides)
+        assert resp.json() == expected.model_dump()
+        assert client.get("/api/images/nope/default-style").status_code == 404
 
 
 def test_font_not_found_error_is_a_plain_500(caplog: pytest.LogCaptureFixture) -> None:

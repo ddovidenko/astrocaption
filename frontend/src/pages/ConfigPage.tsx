@@ -1,14 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api, pageError, type ConfigOut, type FontOut, type HealthOut } from '../api'
-import ColorField from './ColorField'
-import { MAX_ALIASES } from '../editor/names'
-import { buildUpdate, otherPreference, PREFERENCE_LABELS, styleFormFromOverrides, type StyleForm, type Tri } from './configForm'
-import LabelPreview from './LabelPreview'
+import StyleForm from '../style/StyleForm'
+import { styleFormFromOverrides, type StyleForm as StyleFormValues } from '../style/styleForm'
+import { buildUpdate } from './configForm'
 
-type ColorKey = 'text_color' | 'marker_color' | 'leader_color' | 'halo_color'
-type NumberKey = 'font_size' | 'halo_width' | 'marker_width' | 'marker_min_radius' | 'max_aliases'
-
-const FONTS_UNAVAILABLE = 'The font list could not be loaded; the saved font is kept.'
 const HEADER_NOT_REFRESHED = 'Saved, but the page header could not be refreshed; reload to see the new title.'
 
 export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Promise<HealthOut | null> }) {
@@ -17,7 +12,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
   const [siteTitle, setSiteTitle] = useState('')
   const [uploadMb, setUploadMb] = useState('')
   const [novaKey, setNovaKey] = useState('')
-  const [style, setStyle] = useState<StyleForm>(styleFormFromOverrides({}))
+  const [style, setStyle] = useState<StyleFormValues>(styleFormFromOverrides({}))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
@@ -44,16 +39,14 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
 
   if (!config) return error ? <p className="error">{error}</p> : <p className="meta">Loading…</p>
 
-  const fontList = fonts ?? []
-  const fontsLoaded = fonts !== null
   const locked = (field: string) => config.locked.includes(field)
   const lockedNote = (field: string) => `Set by ${config.locked_by[field] ?? 'the environment'}`
   const edit = <T,>(set: (value: T) => void, value: T) => {
     setSaved(null) // any edit makes "Saved." stale
     set(value)
   }
-  const setField = <K extends keyof StyleForm>(key: K, value: StyleForm[K]) =>
-    edit((v: StyleForm[K]) => setStyle((s) => ({ ...s, [key]: v })), value)
+  const setField = <K extends keyof StyleFormValues>(key: K, value: StyleFormValues[K]) =>
+    edit((v: StyleFormValues[K]) => setStyle((s) => ({ ...s, [key]: v })), value)
 
   /** Apply a saved config to every piece of form state. */
   function adopt(fresh: ConfigOut) {
@@ -100,32 +93,6 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
   }
 
   const d = config.style_defaults
-  const sizeField = (label: string, key: NumberKey, min: number, max: number, placeholder = 'auto') => (
-    <label className="field" key={key}>
-      <span className="field-label">{label}</span>
-      <input
-        type="number"
-        min={min}
-        max={max}
-        placeholder={placeholder}
-        value={style[key]}
-        onChange={(e) => setField(key, e.target.value)}
-      />
-    </label>
-  )
-  const triField = (label: string, key: 'halo' | 'show_aliases') => (
-    <label className="field" key={key}>
-      <span className="field-label">{label}</span>
-      <select value={style[key]} onChange={(e) => setField(key, e.target.value as Tri)}>
-        <option value="">Default ({d[key] ? 'on' : 'off'})</option>
-        <option value="on">On</option>
-        <option value="off">Off</option>
-      </select>
-    </label>
-  )
-  const colorField = (label: string, key: ColorKey) => (
-    <ColorField key={key} label={label} value={style[key]} fallback={d[key]} onChange={(hex) => setField(key, hex)} />
-  )
 
   return (
     <form className="config" onSubmit={save}>
@@ -190,51 +157,12 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
 
       <section className="panel">
         <h2>Default label style</h2>
-        <LabelPreview style={style} defaults={d} />
-        <p className="field-note">
-          Applies to newly solved images. Blank fields keep the built-in defaults; the four sizes then scale with each image.
-          The preview is drawn at one fixed text size, so widths show their proportion to the font.
-        </p>
-        <div className="grid3">
-          <label className="field span2">
-            <span className="field-label">Font</span>
-            <select value={style.font_file} disabled={!fontsLoaded} onChange={(e) => setField('font_file', e.target.value)}>
-              <option value="">Default ({d.font_file})</option>
-              {/* The saved font always has an option of its own, so the select is never blank. */}
-              {style.font_file && !fontList.some((f) => f.file === style.font_file) && (
-                <option value={style.font_file}>{fontsLoaded ? `${style.font_file} (not installed)` : style.font_file}</option>
-              )}
-              {fontList.map((f) => (
-                <option key={f.file} value={f.file}>
-                  {f.family} {f.weight}
-                </option>
-              ))}
-            </select>
-            {!fontsLoaded && <span className="field-note">{FONTS_UNAVAILABLE}</span>}
-          </label>
-          {sizeField('Font size (px)', 'font_size', 6, 200)}
-          <label className="field span2">
-            <span className="field-label">Primary name</span>
-            <select value={style.name_preference} onChange={(e) => setField('name_preference', e.target.value as StyleForm['name_preference'])}>
-              <option value="">Default ({PREFERENCE_LABELS[d.name_preference]})</option>
-              {/* A stored override equal to the default keeps an option, so the select is never blank. */}
-              {style.name_preference === d.name_preference && (
-                <option value={style.name_preference}>{PREFERENCE_LABELS[style.name_preference]} (same as default)</option>
-              )}
-              <option value={otherPreference(d.name_preference)}>{PREFERENCE_LABELS[otherPreference(d.name_preference)]}</option>
-            </select>
-          </label>
-          {triField('Alias line', 'show_aliases')}
-          {sizeField('Aliases shown (max)', 'max_aliases', 0, MAX_ALIASES, `Default (${d.max_aliases})`)}
-          {colorField('Text colour', 'text_color')}
-          {colorField('Marker colour', 'marker_color')}
-          {colorField('Leader colour', 'leader_color')}
-          {sizeField('Marker line width (px)', 'marker_width', 1, 40)}
-          {sizeField('Marker min radius (px)', 'marker_min_radius', 1, 400)}
-          {triField('Halo', 'halo')}
-          {colorField('Halo colour', 'halo_color')}
-          {sizeField('Halo width (px)', 'halo_width', 0, 40)}
-        </div>
+        <StyleForm mode="overrides" values={style} defaults={d} fonts={fonts} onChange={setField}>
+          <p className="field-note">
+            Applies to newly solved images. Blank fields keep the built-in defaults; the four sizes then scale with each image.
+            The preview draws the text near its real size and every width in proportion to it.
+          </p>
+        </StyleForm>
       </section>
 
       <div className="actions">
