@@ -153,7 +153,7 @@ select/drag, the autosave and the side panel (§ 6.3).
 - Hovering an object's position highlights it (subtle ring + name tooltip), whether or not it is enabled.
 - **Click** a hovered object: toggles it enabled. Its label appears at its default position.
 - **Click** a label: selects it (shows a selection outline). Clicking empty canvas deselects.
-- Keyboard: `Esc` deselect, `Delete`/`Backspace` disable the selected label, `F` fit to view, `1` 100 %.
+- Keyboard: `Esc` clears the selection, `Delete`/`Backspace` disable every selected label (one change), `F` fit to view, `1` 100 %.
 - `Ctrl+Z` undo, `Ctrl+Y` / `Ctrl+Shift+Z` redo (`Cmd` on macOS), also as toolbar buttons. The history is per editing session (lost on reload and cleared by a conflict), capped at 100 entries; a drag is one entry, a bulk enable is one entry, an auto-arrange is one entry. Keys are ignored while a form field has the focus.
 
 ### 6.2 Labels (call-outs)
@@ -174,15 +174,11 @@ Every enabled object has:
 
 Interactions:
 
-- **Left-drag** a label: moves it. Snaps nothing; free placement.
-- **Mouse wheel while holding left button on a label**: changes that label's font size (± 1 px per notch, clamped 6–200 px in original-pixel units). Wheel does *not* zoom during this.
-- **Double-click** a label: edit its text inline (override name). Blank resets to catalogue name.
-- Selected label shows a small toolbar: font size, colour override, hide aliases, reset position.
-- Shift-click to multi-select; dragging moves the group; panel edits apply to all.
-
-*M3 note:* this milestone ships single select (click) and left-drag move only. Wheel-to-resize,
-double-click text edit, the per-label toolbar and shift-click multi-select arrive with milestone 4
-(§ 13), alongside per-label overrides.
+- **Left-drag** a label: moves it — and every other selected label by the same amount, as one change. Snaps nothing; free placement. A dragged label is **pinned** (§ 6.3 Layout).
+- **Mouse wheel while holding left button on a label**: changes that label's font size (± 1 px per notch, clamped 6–200 px in original-pixel units), shown live and committed as one change when the button is released. Wheel does *not* zoom during this.
+- **Double-click** a label: edit its text inline (override name), in the label's font at its on-screen size. Enter or leaving the field commits the trimmed text; blank resets to the catalogue name; `Esc` cancels.
+- **Click** selects one label; **shift-click** toggles a label in or out of the selection; clicking empty canvas or `Esc` clears it.
+- The selection shows a floating toolbar above its bounding box, kept inside the canvas. Every control applies to every selected label and is one change (one undo entry): font size (stepper and field, 6–200, blank = the global size and blank when the selection is mixed), text colour (picker; "Use default" clears the override), aliases (inherit / on / off), leader (auto / on / off), Pin, Reset position (places the label again with the browser placer around every other enabled label and marker, and unpins it), Clear overrides (size, colour, aliases, leader and text). Selects read "mixed" when the selected labels differ.
 
 ### 6.3 Side panel
 
@@ -205,7 +201,7 @@ Tabs:
    Each is one change: the labels being enabled are placed one after another, each around the ones before it, and applied together, so a batch is one undo entry and one save.
 *M3 note:* the type filter uses nova's own annotation types — `NGC`, `IC`, `Bright stars`, `HD stars`, `Other` — rather than the galaxy/nebula/cluster/star buckets above; the richer OpenNGC types arrive in milestone 4. `HD stars` starts unchecked (#37): a narrow field can return dozens of duplicate HD rows, most of them a brighter object's twin. The min-size slider is not built.
 2. **Style** — global defaults: font (dropdown of bundled fonts, live preview), font size, text colour, marker colour, leader colour, halo (stroke) on/off + colour, marker line width, alias line on/off, max aliases (0–5), **name preference** (`popular`: Messier/Caldwell/Sharpless/Barnard, then NGC, then IC, then other catalogues, then common names; `ngc_ic`: NGC/IC designations first; stars: proper name, then Bayer, then Flamsteed). Every edit is one change (one undo entry, autosaved); a font is applied once the browser has loaded it; colours apply when the picker closes. 'Reset to site defaults' applies the size-relative built-ins with `config.default_style` on top (`GET /images/{id}/default-style`). When the stored font is no longer bundled, the tab and the Image tab say so and the default is used until a font is picked.
-3. **Layout** — "Auto-arrange" button: flushes any pending save, then runs the collision-avoidance placer on all enabled labels (same algorithm as the initial placement); "Reset positions" asks for confirmation, then does the same. In M3 no label is pinned, so the two differ only by the confirmation — M4's pinned labels will make Reset discard pins. Neither touches the document until the placed labels come back; both then mark it dirty for the autosave to pick up. A 409 shows as the toolbar's Reload state, with one line in the tab saying the layout was not arranged; a label dragged while the request was in flight drops the answer rather than undoing the drag.
+3. **Layout** — "Auto-arrange" button: flushes any pending save, then runs the collision-avoidance placer on every enabled label that is not pinned (same algorithm as the initial placement); pinned labels (dragged, or pinned from the toolbar) stay where they are and the others are placed around them. "Reset positions" asks for confirmation, unpins every label, then places all of them. Neither touches the document until the placed labels come back; both then mark it dirty for the autosave to pick up. A 409 shows as the toolbar's Reload state, with one line in the tab saying the layout was not arranged; a label dragged while the request was in flight drops the answer rather than undoing the drag.
 4. **Image** — read-only solve facts (nova job link, field centre/size/rotation, pixel scale, image size) and the **Export** button (full resolution, matching the original JPEG's encoding). *M3 note:* re-solve, publish toggle and delete stay on the image card, not this tab.
 
 ### 6.4 Auto-placement algorithm (initial and on demand)
@@ -267,7 +263,7 @@ objects (per image, from nova; immutable after solve)
 annotations (per image; the editable layout)
   image_id
   style         json  (global StyleConfig; includes max_aliases since M4)
-  labels        json  [{object_id, enabled, x, y, font_size?, text_override?, color?, show_aliases?, leader: auto|on|off, collided}]
+  labels        json  [{object_id, enabled, x, y, font_size?, text_override?, color?, show_aliases?, leader: auto|on|off, collided, pinned}]
   version       int   (bumped on every save; the editor's conflict check)
 ```
 
@@ -320,9 +316,7 @@ Owner (cookie session):
   the built-in default (§ 9), so the editor's next autosave stores the resolved name.
   `font_fallback`: the stored `font_file` when the served style's font was replaced by the default, else null
 - `GET /images/{id}/default-style` → StyleConfig
-- `POST /images/{id}/autoarrange` → the same document with every enabled label re-placed by the placer (§ 6.4, no
-  fixed labels), same version, not stored; the editor applies it and autosaves. Validated like `PUT`, including the
-  version check (409).
+- `POST /images/{id}/autoarrange` {…document…, reset: bool = false} → the same document with every enabled, unpinned label re-placed by the placer (§ 6.4; pinned labels are fixed obstacles), same version, not stored; `reset: true` unpins every label first. The editor applies it and autosaves. Validated like `PUT`, including the version check (409). `reset` is refused by `PUT`.
 - `POST /images/{id}/export` {quality: int|null, scale} → {export_url, annotated_preview_url, width, height, bytes, exported_at, encoding};
   `quality: null` (the default) reuses the source JPEG's quantisation tables (§ 5.4). `GET /images/{id}/export` → file
 - `GET /images/{id}/files/{original|preview|thumb|annotated-preview}` → the file itself
