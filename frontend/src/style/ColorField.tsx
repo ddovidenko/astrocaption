@@ -18,6 +18,7 @@ export default function ColorField({
   disabled = false,
   onChange,
   onCommit,
+  onClear,
 }: {
   label: string
   /** The override, or '' for "use the built-in default". */
@@ -34,6 +35,9 @@ export default function ColorField({
    *  reached the caller's own state yet (StyleTab reads `draft` a render behind a keystroke); a
    *  close carries nothing, so the caller commits whatever it already has. */
   onCommit?: (hex?: string) => void
+  /** "Use default" was clicked (allowDefault only). Without it the caller sees `onChange('')`
+   *  followed by a bare `onCommit()`, which a stateless caller cannot tell from a plain close. */
+  onClear?: () => void
 }) {
   const [open, setOpen] = useState(false)
   // Whether the popover would run off the right edge of its container (the side panel, a config
@@ -141,6 +145,7 @@ export default function ColorField({
                 disabled={!value}
                 onClick={() => {
                   onChange('')
+                  onClear?.()
                   closePicker(true)
                 }}
               >

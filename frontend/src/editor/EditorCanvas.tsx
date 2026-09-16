@@ -4,6 +4,7 @@ import Konva from 'konva'
 import { useShallow } from 'zustand/react/shallow'
 import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
 import LabelTextEditor from './LabelTextEditor'
+import LabelToolbar from './LabelToolbar'
 import { LabelTextShape } from './LabelTextShape'
 import { disableAll, getMeasurer, isEditable, toggleWithPlacement } from './editing'
 import {
@@ -16,6 +17,7 @@ import {
   markerStrokeRadius,
   measureLabel,
   scaleUnit,
+  type Box,
   type LabelBox,
   type LabelLines,
   type LeaderSegment,
@@ -505,6 +507,22 @@ export default function EditorCanvas() {
     [entries, selectedIds],
   )
 
+  // The union of the selected labels' text boxes, in original pixels: where the toolbar sits.
+  const selectionBox = useMemo<Box | null>(() => {
+    if (selectedEntries.length === 0) return null
+    let left = Infinity
+    let top = Infinity
+    let right = -Infinity
+    let bottom = -Infinity
+    for (const { label, box } of selectedEntries) {
+      left = Math.min(left, label.x)
+      top = Math.min(top, label.y)
+      right = Math.max(right, label.x + box.width)
+      bottom = Math.max(bottom, label.y + box.height)
+    }
+    return { left, top, right, bottom }
+  }, [selectedEntries])
+
   // The hit targets for hover and the toggle: one transparent circle per object, rebuilt only when
   // the objects, the marker sizes or the zoom (the 8 px floor is in screen pixels) change — not on
   // every pan. They sit on their own layer *below* the labels, so a label drawn inside a big
@@ -721,6 +739,8 @@ export default function EditorCanvas() {
             {hovered.primary_name}
           </div>
         )}
+        {/* Hidden while the text editor is open, so the two overlays never stack. */}
+        {selectionBox && editingId === null && <LabelToolbar box={selectionBox} />}
         {editing && (
           <LabelTextEditor
             key={editing.label.object_id}

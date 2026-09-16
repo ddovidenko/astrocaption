@@ -158,3 +158,12 @@ body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
 .facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.35rem 0.75rem; margin: 0; font-size: 0.9rem; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; }
+
+/* The floating per-label toolbar (LabelToolbar.tsx): placed by the component, never wraps. */
+.label-toolbar { position: absolute; z-index: 6; display: flex; align-items: center; gap: 0.35rem; padding: 0.3rem 0.4rem; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); white-space: nowrap; }
+.label-toolbar button, .label-toolbar select, .label-toolbar input { font-size: 0.8rem; padding: 0.2rem 0.45rem; }
+.label-toolbar input[type='number'] { width: 4.5rem; }
+.label-toolbar .color-field { display: flex; align-items: center; gap: 0.3rem; }
+.label-toolbar .color-field .field-label { display: none; }
+.label-toolbar .swatch { width: auto; padding: 0.2rem 0.4rem; }
+.label-toolbar .swatch-chip { width: 1rem; height: 1rem; }

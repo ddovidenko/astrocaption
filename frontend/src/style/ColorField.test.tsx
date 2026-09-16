@@ -8,11 +8,21 @@ afterEach(cleanup)
 function mount(over: Partial<Parameters<typeof ColorField>[0]> = {}) {
   const onChange = vi.fn()
   const onCommit = vi.fn()
+  const onClear = vi.fn()
   render(
-    <ColorField label="Text colour" value="#ffffff" fallback="#000000" allowDefault={false} onChange={onChange} onCommit={onCommit} {...over} />,
+    <ColorField
+      label="Text colour"
+      value="#ffffff"
+      fallback="#000000"
+      allowDefault={false}
+      onChange={onChange}
+      onCommit={onCommit}
+      onClear={onClear}
+      {...over}
+    />,
   )
   const swatch = screen.getByRole('button', { name: /Text colour/ })
-  return { onChange, onCommit, swatch, open: () => fireEvent.click(swatch), dialog: () => screen.queryByRole('dialog') }
+  return { onChange, onCommit, onClear, swatch, open: () => fireEvent.click(swatch), dialog: () => screen.queryByRole('dialog') }
 }
 
 describe('ColorField commits exactly once per close', () => {
@@ -96,6 +106,9 @@ describe('ColorField rendering', () => {
     expect(screen.queryByText('default')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Use default' }))
     expect(f.onChange).toHaveBeenCalledWith('')
+    // onClear names the clear, which a bare onCommit() (a plain close) cannot: LabelToolbar has
+    // no draft of its own and commits `color: null` from this alone.
+    expect(f.onClear).toHaveBeenCalledTimes(1)
     expect(f.onCommit).toHaveBeenCalledTimes(1)
   })
   it('disabled disables the swatch', () => {
