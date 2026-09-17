@@ -571,8 +571,10 @@ async def download_export(image_id: str, settings: SettingsDep, db: DbDep) -> Fi
 
 # GET and HEAD: a failed <img> in the editor carries no status, so it probes this URL again with
 # HEAD (notices.ts `probeStatus`) — without it FastAPI would answer 405 before the session check.
-# FileResponse serves a HEAD as headers only.
-@router.api_route("/{image_id}/files/{kind}", methods=["GET", "HEAD"])
+# FileResponse serves a HEAD as headers only. Two routes rather than one with both methods: FastAPI
+# would give them the same operation id and warn that the OpenAPI schema has a duplicate.
+@router.get("/{image_id}/files/{kind}")
+@router.head("/{image_id}/files/{kind}", include_in_schema=False)
 async def image_file(
     image_id: str, kind: FileKind, settings: SettingsDep, db: DbDep
 ) -> FileResponse:
