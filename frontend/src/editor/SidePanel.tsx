@@ -59,6 +59,9 @@ export default function SidePanel({ open, onToggle }: { open: boolean; onToggle:
         </button>
         {open && (
           <div className="tabs" role="tablist" onKeyDown={onKeyDown}>
+            {/* A mouse click selects without moving the focus (the project's onMouseDown pattern),
+                so a tab reached by keyboard can end up with tabIndex -1; the arrows still work,
+                because the focus stays inside the tablist and its handler reads `tab`. */}
             {TABS.map(({ id, label }) => (
               <button
                 key={id}

@@ -109,7 +109,7 @@ describe('enableWithPlacement / disableAll', () => {
     const state = useEditor.getState()
     const label2 = state.labels.get(2)!
     const obj2 = state.objects.get(2)!
-    const unblocked = placeNewLabel(state, measure, 2)!
+    const unblocked = placeNewLabel(state, measure, 2)
     expect([label2.x, label2.y]).toEqual([obj2.x, obj2.y])
 
     // 3 was dragged off its object (disabled) to exactly where 2 would otherwise land.
@@ -134,7 +134,7 @@ describe('resetPositions', () => {
     const label = useEditor.getState().labels.get(1)!
     expect(label.pinned).toBe(false)
     expect([label.x, label.y]).not.toEqual([5, 5])
-    expect([label.x, label.y]).toEqual([placeNewLabel(useEditor.getState(), measure, 1)!.x, placeNewLabel(useEditor.getState(), measure, 1)!.y])
+    expect([label.x, label.y]).toEqual([placeNewLabel(useEditor.getState(), measure, 1).x, placeNewLabel(useEditor.getState(), measure, 1).y])
     expect(useEditor.getState().undo).toHaveLength(entries + 1)
   })
 

@@ -33,7 +33,7 @@ frontend/src/App.tsx ──fetch──▶ /api/images ...           (backend/app
 | `app/solver/` | `Solver` protocol (`submit` / `poll_submission` / `poll_job` / `fetch_result`) and the nova client. |
 | `app/worker.py` | Serialised solve queue; persists nova ids so a solve resumes after restart. |
 | `app/objects.py` | nova annotations → objects in original pixels; splits star names; stable ids. |
-| `app/catalog/` | OpenNGC-derived `names.json` (CC BY-SA 4.0) adding Messier/Caldwell/common names to NGC/IC designations. |
+| `app/catalog/` | OpenNGC-derived `names.json` (CC BY-SA 4.0) adding Messier/Caldwell/common names to NGC/IC designations, and OpenNGC's object types, folded into the kind (galaxy / nebula / cluster) that `ObjectOut.kind` reports. |
 | `app/placement.py` | Deterministic auto-placer. Shared vectors in `tests/fixtures/placement/`. |
 | `app/layout.py` | Default style per image size, enabled rule, placement glue, re-solve rematch. |
 | `app/render.py` | Pillow text metrics and the export renderer. Its layout rules are the parity contract for the canvas. |
