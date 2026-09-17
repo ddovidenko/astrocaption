@@ -18,7 +18,16 @@ from .models import (
     SolveObject,
     StyleConfig,
 )
-from .placement import Box, Circle, PlacementItem, place_labels, scale_unit
+from .placement import (
+    PAD_FACTOR,
+    Box,
+    Circle,
+    PlacementItem,
+    box_crosses_ring,
+    boxes_overlap,
+    place_labels,
+    scale_unit,
+)
 from .render import marker_radius, measure_label
 
 log = logging.getLogger(__name__)
@@ -103,21 +112,30 @@ def autoplace(
     *,
     keep: frozenset[int] = frozenset(),
 ) -> list[Label]:
-    """Run the placer on every enabled label not in ``keep``; others become obstacles."""
+    """Run the placer on every enabled label not in ``keep``; others become obstacles.
+
+    A kept label keeps its position and its pin, but ``collided`` is recomputed for it against
+    the freshly laid-out document: the labels around it have just moved, so a stored verdict
+    would be stale in both directions.
+    """
     style = resolved_style(fonts_dir, style)
     by_id = {o.id: o for o in objects}
     items: list[PlacementItem] = []
     fixed_boxes: list[Box] = []
     fixed_circles: list[Circle] = []
+    sizes: dict[int, tuple[float, float]] = {}
+    markers: dict[int, Circle] = {}
     for label in labels:
         obj = by_id.get(label.object_id)
         if obj is None or not label.enabled:
             continue
         r = marker_radius(obj, style)
         box = measure_label(fonts_dir, style, label, obj)
+        sizes[label.object_id] = (box.width, box.height)
+        markers[label.object_id] = Circle(obj.x, obj.y, r)
         if label.object_id in keep:
             fixed_boxes.append(Box(label.x, label.y, label.x + box.width, label.y + box.height))
-            fixed_circles.append(Circle(obj.x, obj.y, r))
+            fixed_circles.append(markers[label.object_id])
         else:
             items.append(PlacementItem(label.object_id, obj.x, obj.y, r, box.width, box.height))
     placed = {
@@ -126,14 +144,41 @@ def autoplace(
             width, height, items, fixed_boxes=fixed_boxes, fixed_circles=fixed_circles
         )
     }
+    # Where every enabled label ends up — the ones just placed and the kept ones alike. This is
+    # what the kept labels' ``collided`` is recomputed against below.
+    final: dict[int, Box] = {}
+    for label in labels:
+        size = sizes.get(label.object_id)
+        if size is None:
+            continue
+        p = placed.get(label.object_id)
+        x, y = (p.x, p.y) if p is not None else (label.x, label.y)
+        final[label.object_id] = Box(x, y, x + size[0], y + size[1])
+    pad = PAD_FACTOR * scale_unit(width, height)
     out: list[Label] = []
     for label in labels:
-        p = placed.get(label.object_id)
-        if p is None:
-            out.append(label)
-        else:
+        oid = label.object_id
+        p = placed.get(oid)
+        if p is not None:
             out.append(label.model_copy(update={"x": p.x, "y": p.y, "collided": p.collided}))
+        elif oid in final:
+            # A kept label is not moved and stays pinned, but its stored verdict is from whenever
+            # it was last placed: everything around it has just been laid out afresh, so the badge
+            # would otherwise lie in both directions. Same pad as the placer's own search.
+            out.append(label.model_copy(update={"collided": _collides(oid, final, markers, pad)}))
+        else:
+            out.append(label)
     return out
+
+
+def _collides(
+    oid: int, boxes: Mapping[int, Box], markers: Mapping[int, Circle], pad: float
+) -> bool:
+    """Whether ``oid``'s box touches any *other* enabled label's box or marker ring."""
+    box = boxes[oid]
+    return any(
+        boxes_overlap(box, other, pad) for other_id, other in boxes.items() if other_id != oid
+    ) or any(box_crosses_ring(box, c, pad) for other_id, c in markers.items() if other_id != oid)
 
 
 def build_default_annotations(

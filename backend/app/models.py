@@ -339,6 +339,10 @@ class Label(BaseModel):
     show_aliases: bool | None = None
     leader: LeaderMode = "auto"
     collided: bool = False
+    # Kept where the owner put it: a drag, or the toolbar's Pin button, pins a label, and the
+    # placer treats it as a fixed obstacle until Reset position (the toolbar, for the selected
+    # labels) or Reset positions (the layout tab, for all of them) unpins it.
+    pinned: bool = False
 
 
 class Annotations(BaseModel):
@@ -370,6 +374,14 @@ class AnnotationsUpdate(BaseModel):
     font_fallback: str | None = (
         None  # the server's; accepted so a GET body can be sent back, never read
     )
+
+
+class AutoarrangeRequest(AnnotationsUpdate):
+    """``POST /autoarrange``: the document, plus whether to discard every pin first (the Layout
+    tab's Reset positions). ``PUT /annotations`` keeps taking the plain document, so ``reset``
+    cannot be stored by accident."""
+
+    reset: bool = False
 
 
 # ---------------------------------------------------------------------------

@@ -285,3 +285,77 @@ def test_put_lost_cas_with_the_row_gone_is_a_404(
     resp = client.put(f"/api/images/{image_id}/annotations", json=ann)
     assert resp.status_code == 404
     assert resp.json() == {"detail": "Image not found."}
+
+
+def _enabled(labels: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [lab for lab in labels if lab["enabled"]]
+
+
+def test_autoarrange_keeps_a_pinned_label_and_places_the_rest_around_it(
+    client: TestClient, sample_jpeg: Path
+) -> None:
+    image_id, ann, _ = solved_image(client, sample_jpeg)
+    a, b = _enabled(ann["labels"])[:2]
+    # Park label a exactly where the placer put label b and pin it there: a must not move, and b
+    # must now land somewhere else because a's box is in the way.
+    pinned = {
+        **ann,
+        "labels": [
+            {**lab, "x": b["x"], "y": b["y"], "pinned": True}
+            if lab["object_id"] == a["object_id"]
+            else {**lab, "x": 0.0, "y": 0.0}
+            for lab in ann["labels"]
+        ],
+    }
+    resp = client.post(f"/api/images/{image_id}/autoarrange", json=pinned)
+    assert resp.status_code == 200, resp.text
+    by_id = {lab["object_id"]: lab for lab in resp.json()["labels"]}
+    kept = by_id[a["object_id"]]
+    assert (kept["x"], kept["y"], kept["pinned"]) == (b["x"], b["y"], True)
+    moved = by_id[b["object_id"]]
+    assert (moved["x"], moved["y"]) not in {(0.0, 0.0), (b["x"], b["y"])}
+    assert moved["pinned"] is False
+    # every other enabled label was placed (none left at the parked origin)
+    others = [lab for lab in _enabled(resp.json()["labels"]) if lab["object_id"] != a["object_id"]]
+    assert others and all((lab["x"], lab["y"]) != (0.0, 0.0) for lab in others)
+
+
+def test_autoarrange_reset_clears_every_pin_and_places_everything(
+    client: TestClient, sample_jpeg: Path
+) -> None:
+    image_id, ann, _ = solved_image(client, sample_jpeg)
+    a = _enabled(ann["labels"])[0]
+    pinned = {
+        **ann,
+        "labels": [
+            {**lab, "x": 0.0, "y": 0.0, "pinned": lab["object_id"] == a["object_id"]}
+            for lab in ann["labels"]
+        ],
+        "reset": True,
+    }
+    resp = client.post(f"/api/images/{image_id}/autoarrange", json=pinned)
+    assert resp.status_code == 200, resp.text
+    placed = resp.json()["labels"]
+    assert all(lab["pinned"] is False for lab in placed)
+    assert all((lab["x"], lab["y"]) != (0.0, 0.0) for lab in _enabled(placed))
+    # the pinned label was placed like the others: back at its original slot
+    by_id = {lab["object_id"]: lab for lab in placed}
+    assert (by_id[a["object_id"]]["x"], by_id[a["object_id"]]["y"]) == (a["x"], a["y"])
+
+
+def test_put_stores_pinned_and_a_get_defaults_it(client: TestClient, sample_jpeg: Path) -> None:
+    image_id, ann, _ = solved_image(client, sample_jpeg)
+    assert all(lab["pinned"] is False for lab in ann["labels"])
+    ann["labels"][0]["pinned"] = True
+    resp = client.put(f"/api/images/{image_id}/annotations", json=ann)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["labels"][0]["pinned"] is True
+    assert client.get(f"/api/images/{image_id}/annotations").json()["labels"][0]["pinned"] is True
+
+
+def test_put_refuses_reset(client: TestClient, sample_jpeg: Path) -> None:
+    """``reset`` belongs to autoarrange only; the document model still forbids unknown fields."""
+    image_id, ann, _ = solved_image(client, sample_jpeg)
+    resp = client.put(f"/api/images/{image_id}/annotations", json={**ann, "reset": True})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "reset: is not a known field"

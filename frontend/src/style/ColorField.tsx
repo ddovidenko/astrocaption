@@ -8,16 +8,28 @@ export const POPOVER_WIDTH = 232
 /** Overrides mode (`allowDefault`) renders an extra "Use default" button beside the hex input, so
  *  `openPicker` below measures against this wider figure there instead of `POPOVER_WIDTH`. */
 export const POPOVER_WIDTH_WITH_DEFAULT = 248
+/** The popover's rendered height, used the same way to decide whether it would run off the bottom
+ *  of its container. From styles.css: 160 px picker + ~34 px `.popover-row` (a 0.45rem-padded
+ *  button on a 16 px line) + 0.6rem grid gap + 2 × 0.75rem padding + 2 × 1 px border ≈ 230 px,
+ *  rounded up. It only has to be close: being a few px out flips the popover one swatch-row early
+ *  or late, never off-screen. */
+export const POPOVER_HEIGHT = 232
 
-/** A colour override: a swatch that opens an in-page picker, never the OS dialog. */
+/** A colour override: a swatch that opens an in-page picker, never the OS dialog.
+ *
+ *  Exactly one terminal callback leaves this component per interaction: `onCommit` for every
+ *  close and for a typed hex, `onClear` for "Use default" — never both, so a caller with a live
+ *  draft needs no one-shot flag of its own to tell a clear from the close that follows it. */
 export default function ColorField({
   label,
   value,
   fallback,
   allowDefault = true,
   disabled = false,
+  mixed = false,
   onChange,
   onCommit,
+  onClear,
 }: {
   label: string
   /** The override, or '' for "use the built-in default". */
@@ -28,12 +40,21 @@ export default function ColorField({
    *  "Use default" button. Off in values mode, where every field always holds a concrete colour. */
   allowDefault?: boolean
   disabled?: boolean
+  /** The caller's selection holds more than one colour, so `value` is blank for "differs", not
+   *  for "no override". The swatch says "mixed" instead of "default", and "Use default" stays
+   *  enabled: there *is* something to clear. */
+  mixed?: boolean
   onChange: (hex: string) => void
   /** A colour picker closed or a hex was typed — commit the current value. A typed commit carries
    *  the just-typed hex, since the draft `onChange` set a moment earlier has not necessarily
    *  reached the caller's own state yet (StyleTab reads `draft` a render behind a keystroke); a
    *  close carries nothing, so the caller commits whatever it already has. */
   onCommit?: (hex?: string) => void
+  /** "Use default" was clicked (allowDefault only). Without it the caller sees `onChange('')`
+   *  followed by a bare `onCommit()`, which a stateless caller cannot tell from a plain close.
+   *  It is the *only* terminal callback for that click: the close it triggers is silent, so a
+   *  caller holding a draft never has to guess which of the two to believe. */
+  onClear?: () => void
 }) {
   const [open, setOpen] = useState(false)
   // Whether the popover would run off the right edge of its container (the side panel, a config
@@ -42,6 +63,10 @@ export default function ColorField({
   // it can shift every field after it into the other column, so column parity does not track
   // which side has room (#94 IMPORTANT 4).
   const [alignRight, setAlignRight] = useState(false)
+  // The same measurement for the other axis: the popover opens upwards when there is no room for
+  // it below the swatch inside that container. The editor's floating label toolbar sits low over a
+  // canvas that clips its overflow, so a downward popover there would simply be cut off.
+  const [alignUp, setAlignUp] = useState(false)
   // Guards against a close reaching us twice for one interaction (mousedown fires on the
   // document before a blur's focusout bubbles), so onCommit fires exactly once per close.
   const openRef = useRef(false)
@@ -69,18 +94,26 @@ export default function ColorField({
     const wrapEl = wrap.current
     if (wrapEl) {
       const wrapRect = wrapEl.getBoundingClientRect()
-      const bound = (wrapEl.closest('.side-panel-body, .panel') ?? document.documentElement).getBoundingClientRect()
+      // `.editor-canvas` is a bound as much as a panel is: it clips its overflow, so a popover
+      // reaching past its edges is invisible, not merely awkward.
+      const bound = (
+        wrapEl.closest('.editor-canvas, .side-panel-body, .panel') ?? document.documentElement
+      ).getBoundingClientRect()
       const width = allowDefault ? POPOVER_WIDTH_WITH_DEFAULT : POPOVER_WIDTH
       setAlignRight(wrapRect.left + width > bound.right)
+      setAlignUp(wrapRect.bottom + POPOVER_HEIGHT > bound.bottom)
     }
   }
-  /** Every way out of the picker: once per close, whichever event gets there first. */
-  const closePicker = (refocus: boolean) => {
+  /** Every way out of the picker: exactly one terminal callback per close, whichever event gets
+   *  there first. `silent` is for the close that follows a callback of its own ("Use default",
+   *  which has already fired `onClear`): a trailing bare `onCommit()` there would reach a caller
+   *  that still closes over this render's draft and put back what was just cleared. */
+  const closePicker = (refocus: boolean, { silent = false }: { silent?: boolean } = {}) => {
     if (!openRef.current) return
     openRef.current = false
     setOpen(false)
     if (refocus) swatch.current?.focus() // a keyboard user lands back where they started
-    onCommitRef.current?.()
+    if (!silent) onCommitRef.current?.()
   }
 
   useEffect(() => {
@@ -126,11 +159,15 @@ export default function ColorField({
         <span className="swatch-chip" style={{ background: shown }} />
         <span className="swatch-hex" id={valueId}>
           {shown.toUpperCase()}
-          {allowDefault && !value && <span className="swatch-note"> default</span>}
+          {allowDefault && !value && <span className="swatch-note">{mixed ? ' mixed' : ' default'}</span>}
         </span>
       </button>
       {open && (
-        <div className={alignRight ? 'popover popover-right' : 'popover'} role="dialog" aria-label={`${label} picker`}>
+        <div
+          className={`popover${alignRight ? ' popover-right' : ''}${alignUp ? ' popover-up' : ''}`}
+          role="dialog"
+          aria-label={`${label} picker`}
+        >
           <HexColorPicker color={shown} onChange={pick} />
           <div className="popover-row">
             <HexColorInput color={shown} onChange={typed} prefixed />
@@ -138,10 +175,11 @@ export default function ColorField({
               <button
                 type="button"
                 className="secondary"
-                disabled={!value}
+                disabled={!value && !mixed}
                 onClick={() => {
                   onChange('')
-                  closePicker(true)
+                  onClear?.()
+                  closePicker(true, { silent: true })
                 }}
               >
                 Use default

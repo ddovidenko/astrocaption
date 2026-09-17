@@ -3,9 +3,13 @@ import { Circle, Group, Image as KImage, Layer, Line, Rect, Stage, Text } from '
 import Konva from 'konva'
 import { useShallow } from 'zustand/react/shallow'
 import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
+import LabelTextEditor from './LabelTextEditor'
+import LabelToolbar from './LabelToolbar'
 import { LabelTextShape } from './LabelTextShape'
-import { getMeasurer, isEditable, toggleWithPlacement } from './editing'
+import { disableAll, getMeasurer, isEditable, toggleWithPlacement } from './editing'
 import {
+  MAX_FONT_SIZE,
+  MIN_FONT_SIZE,
   labelText,
   leaderSegment,
   leaderVisible,
@@ -13,12 +17,14 @@ import {
   markerStrokeRadius,
   measureLabel,
   scaleUnit,
+  type Box,
   type LabelBox,
   type LabelLines,
   type LeaderSegment,
   type TextMeasurer,
 } from './metrics'
 import { enabledLabels, fontFor, useEditor } from './store'
+import { useTaggedDraft } from './taggedDraft'
 import { toScreen, zoomAt } from './view'
 
 /** What the parity spec (PR 4's Playwright test) drives the canvas with. `renderAt` returns a PNG
@@ -36,6 +42,8 @@ export interface EditorTestHook {
   labelCount: number
   /** Where the drawn labels sit, in original image pixels — what a drag has to move. */
   labelPositions(): { id: number; x: number; y: number }[]
+  /** The selected object ids, for the spec that drives clicks and shift-clicks. */
+  selectedIds(): number[]
   renderAt(scale: number): string
 }
 
@@ -98,7 +106,10 @@ interface EntryProps {
   style: StyleConfig
   font: FontOut
   editable: boolean
-  select: (id: number | null) => void
+  onPress: (id: number, shift: boolean) => void
+  /** A press that turned out to be a click, not a drag (the canvas checks `movedRef`). */
+  onClick: (id: number, shift: boolean) => void
+  onDoubleClick: (id: number) => void
   moveLabel: (id: number, x: number, y: number, commit?: boolean) => void
   /** Whether Space is held: a pan gesture, which wins over selecting or dragging a label. Held in
    *  React state so `draggable` can turn off before Konva sees the press. */
@@ -115,7 +126,9 @@ const LabelEntry = memo(function LabelEntry({
   style,
   font,
   editable,
-  select,
+  onPress,
+  onClick,
+  onDoubleClick,
   moveLabel,
   spacePan,
   onDrawError,
@@ -153,10 +166,24 @@ const LabelEntry = memo(function LabelEntry({
           // press bubbles to the stage, which starts the pan. A plain press also bubbles, so the
           // stage records it and `movedRef` can tell a later click from a drag; the stage does not
           // pan for it because the target is this group, not the stage.
-          if (spacePan || e.evt.button === 1) return
-          select(label.object_id)
+          // Left button only: the middle button pans, and the right button opens the context
+          // menu, whose swallowed mouseup would leave the label pressed for the wheel to resize.
+          if (spacePan || e.evt.button !== 0) return
+          onPress(label.object_id, e.evt.shiftKey)
         }}
-        onDragStart={() => select(label.object_id)}
+        onClick={(e) => {
+          if (e.evt.button === 0 && !spacePan) onClick(label.object_id, e.evt.shiftKey)
+        }}
+        onDblClick={(e) => {
+          // Gated on `editable` like every other document change: a read-only document has no
+          // text editor to open, and the store would refuse the commit anyway.
+          if (editable && e.evt.button === 0 && !spacePan) onDoubleClick(label.object_id)
+        }}
+        onDragStart={() => {
+          // A drag begun without a press we saw (a synthetic one) still selects the label.
+          const s = useEditor.getState()
+          if (!s.selectedIds.has(label.object_id)) s.select(label.object_id)
+        }}
         onDragMove={(e) => moveLabel(label.object_id, e.target.x(), e.target.y(), false)}
         onDragEnd={(e) => moveLabel(label.object_id, e.target.x(), e.target.y())}
       >
@@ -211,10 +238,9 @@ export default function EditorCanvas() {
   const view = useEditor((s) => s.view)
   const viewport = useEditor((s) => s.viewport)
   const hoveredId = useEditor((s) => s.hoveredId)
-  const selectedId = useEditor((s) => s.selectedId)
+  const selectedIds = useEditor((s) => s.selectedIds)
   const setView = useEditor((s) => s.setView)
   const hover = useEditor((s) => s.hover)
-  const select = useEditor((s) => s.select)
   const moveLabel = useEditor((s) => s.moveLabel)
   // A conflict keeps editing local (design § 5): only the saves stop, not the page.
   const editable = useEditor(isEditable)
@@ -236,6 +262,9 @@ export default function EditorCanvas() {
   // after mouseup for the gesture to be a drag: a pan, or a label drag that happened to end over
   // a marker, is not the click that deselects or toggles.
   const movedRef = useRef(false)
+  // The label under a held left button, for wheel-to-resize (SPEC § 6.2): set by the label's
+  // mousedown, cleared (and the size preview committed) on the window's mouseup.
+  const pressRef = useRef<number | null>(null)
   const [spacePan, setSpacePan] = useState(false)
 
   // Keyed by the URL it was loaded from, so a second image opened without unmounting can never
@@ -247,6 +276,10 @@ export default function EditorCanvas() {
     error: string | null
   } | null>(null)
   const [drawError, setDrawError] = useState<string | null>(null)
+  // A toolbar action that threw (the placer measures text, so Reset position can fail). Tagged
+  // with the selection it was raised for, the same hook the toolbar's own drafts use, so it
+  // clears itself the moment the selection moves on.
+  const [toolbarError, setToolbarError] = useTaggedDraft<string>([selectedIds])
   const [sizeError, setSizeError] = useState<string | null>(null)
   const [panning, setPanning] = useState(false)
 
@@ -340,14 +373,49 @@ export default function EditorCanvas() {
     setDrawError((prev) => prev ?? message)
   }, [])
 
+  // A press selects: plain replaces the selection unless the label is already in it (so a drag
+  // of one selected label moves the whole group), shift toggles membership.
+  const onLabelPress = useCallback((id: number, shift: boolean) => {
+    const s = useEditor.getState()
+    if (shift) s.toggleSelect(id)
+    else if (!s.selectedIds.has(id)) s.select(id)
+    // Read back, not `id`: a shift-click that *removed* the label leaves it without a selection
+    // outline, and a wheel must not then resize it.
+    pressRef.current = useEditor.getState().selectedIds.has(id) ? id : null
+  }, [])
+
+  // ...and the click that follows narrows: a plain click on a label of a group selection leaves
+  // that one label selected (SPEC § 6.2). It cannot happen on the press, which has to keep the
+  // group so that dragging any of its labels moves them all; and it must not happen after a drag,
+  // which is what `movedRef` rules out.
+  const onLabelClick = useCallback((id: number, shift: boolean) => {
+    if (shift || movedRef.current) return
+    const s = useEditor.getState()
+    if (s.selectedIds.size > 1 && s.selectedIds.has(id)) s.select(id)
+  }, [])
+
+  // Which label a double-click opened for inline text editing.
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const onLabelDoubleClick = useCallback((id: number) => {
+    setEditingId(id)
+  }, [])
+  const closeEditing = useCallback(() => setEditingId(null), [])
+
   // 5. Keys, ignored while a form field has the focus.
   useEffect(() => {
-    // `f` and `1` must keep working after a toolbar button was clicked, so a focused BUTTON only
-    // blocks Space (which a focused button would take as a click).
+    // `f` and `1` must keep working after a toolbar button was clicked, so a focused BUTTON out in
+    // the page only blocks Space (which a focused button would take as a click). The label
+    // toolbar is the exception: everything in it — the number field and the colour swatch above
+    // all — keeps every key, so Escape and Delete stay with the control that has the focus.
     const inField = (withButton = false) => {
       const el = document.activeElement
+      if (!el) return false
+      // Everything inside the floating toolbar counts as a field, whatever it is: the colour
+      // swatch and the picker are buttons and inputs, and Escape there closes the popover while
+      // Delete/Backspace edits a hex — neither may clear the selection or disable its labels.
+      if (el.closest('.label-toolbar')) return true
       const tags = withButton ? ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'] : ['INPUT', 'TEXTAREA', 'SELECT']
-      return !!el && tags.includes(el.tagName)
+      return tags.includes(el.tagName)
     }
     const down = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
@@ -380,9 +448,10 @@ export default function EditorCanvas() {
         // swallowed here whether or not there is a selection to disable.
         e.preventDefault()
         const s = useEditor.getState()
-        if (s.selectedId === null || !isEditable(s)) return
-        toggleWithPlacement(s.selectedId)
-        s.select(null)
+        if (s.selectedIds.size === 0 || !isEditable(s)) return
+        // One commit for the whole selection (SPEC § 6.1). `changedDoc` drops the newly
+        // disabled labels from the selection, so nothing is left behind to toggle back on.
+        disableAll([...s.selectedIds])
       }
     }
     const up = (e: KeyboardEvent) => {
@@ -456,6 +525,7 @@ export default function EditorCanvas() {
       },
       labelPositions: () =>
         entriesRef.current.map((e) => ({ id: e.label.object_id, x: e.label.x, y: e.label.y })),
+      selectedIds: () => [...useEditor.getState().selectedIds],
       renderAt,
     }
     return () => {
@@ -465,10 +535,26 @@ export default function EditorCanvas() {
     // published again when that first measurement arrives.
   }, [image, renderAt, viewport, preview, previewError])
 
-  const selected = useMemo(
-    () => entries.find((e) => e.label.object_id === selectedId) ?? null,
-    [entries, selectedId],
+  const selectedEntries = useMemo(
+    () => entries.filter((e) => selectedIds.has(e.label.object_id)),
+    [entries, selectedIds],
   )
+
+  // The union of the selected labels' text boxes, in original pixels: where the toolbar sits.
+  const selectionBox = useMemo<Box | null>(() => {
+    if (selectedEntries.length === 0) return null
+    let left = Infinity
+    let top = Infinity
+    let right = -Infinity
+    let bottom = -Infinity
+    for (const { label, box } of selectedEntries) {
+      left = Math.min(left, label.x)
+      top = Math.min(top, label.y)
+      right = Math.max(right, label.x + box.width)
+      bottom = Math.max(bottom, label.y + box.height)
+    }
+    return { left, top, right, bottom }
+  }, [selectedEntries])
 
   // The hit targets for hover and the toggle: one transparent circle per object, rebuilt only when
   // the objects, the marker sizes or the zoom (the 8 px floor is in screen pixels) change — not on
@@ -504,12 +590,25 @@ export default function EditorCanvas() {
   // A click on the empty background (never on a label or a marker) clears the selection; a click
   // that ended a pan does not.
   const onStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (e.target === stageRef.current && !movedRef.current) select(null)
+    if (e.target === stageRef.current && !movedRef.current) useEditor.getState().select(null)
   }
 
-  // 7. Wheel zoom about the cursor.
+  // 7. Wheel: resize the pressed label (left button held), otherwise zoom about the cursor.
   const onWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault()
+    const pressed = pressRef.current
+    if (pressed !== null && (e.evt.buttons & 1) === 1) {
+      // A horizontal trackpad swipe reports deltaY 0; reading it as a notch down would shrink
+      // the label on a gesture that never asked for a resize.
+      if (e.evt.deltaY === 0) return
+      const s = useEditor.getState()
+      const label = s.labels.get(pressed)
+      if (!label || !s.style) return
+      const current = label.font_size ?? s.style.font_size
+      const size = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, current + (e.evt.deltaY < 0 ? 1 : -1)))
+      s.updateLabels([pressed], { font_size: size }, false)
+      return
+    }
     const stage = stageRef.current
     const pointer = stage?.getPointerPosition()
     if (!pointer) return
@@ -518,6 +617,11 @@ export default function EditorCanvas() {
 
   // 8. Pan: empty canvas, the middle button, or space held down.
   const onMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    // Konva fires on the shape first and bubbles up to the stage, so a label's own mousedown has
+    // already recorded the press by the time this runs: only a press that can never start a
+    // wheel-resize may clear it. A right-click's mouseup is swallowed by the context menu, which
+    // would otherwise leave the previous press standing.
+    if (e.evt.button !== 0) pressRef.current = null
     const stage = stageRef.current
     if (!stage) return
     movedRef.current = false
@@ -561,15 +665,65 @@ export default function EditorCanvas() {
     return () => window.removeEventListener('mouseup', stopPan)
   }, [panning, stopPan])
 
+  // The wheel-resize preview is committed when the button comes up, wherever that happens — and
+  // when the pointer or the focus is lost instead, because a release outside the window fires no
+  // mouseup here and would strand the preview on the canvas under a "Saved" status.
+  //
+  // Run inline: whether this listener or Konva's own window mouseup (which fires `dragend`) gets
+  // there first no longer matters. A drag's *preview* frames already carry the pin (`moveLabel`
+  // in store.ts), so committing them here produces exactly the label `dragend` would have
+  // committed, and whichever runs second finds the maps identical and records nothing.
+  useEffect(() => {
+    // The button really came up, or the pointer was taken away: the gesture is over either way.
+    const up = () => {
+      if (pressRef.current === null) return
+      pressRef.current = null
+      useEditor.getState().commitPreview()
+    }
+    // Losing the focus or the tab is only the end of the gesture when Konva is not mid-drag: the
+    // button is still down there, dragmove and dragend are still coming, and committing now would
+    // split one drag into two undo entries and take the pressed label away from the wheel for the
+    // rest of the press. A wheel-only press has no Konva drag, so it still commits here.
+    const away = () => {
+      if (!Konva.isDragging()) up()
+    }
+    // `visibilitychange` fires on the way back too; only the tab going away ends anything.
+    const hidden = () => {
+      if (document.visibilityState === 'hidden') away()
+    }
+    window.addEventListener('mouseup', up)
+    window.addEventListener('pointercancel', up)
+    window.addEventListener('blur', away)
+    document.addEventListener('visibilitychange', hidden)
+    return () => {
+      window.removeEventListener('mouseup', up)
+      window.removeEventListener('pointercancel', up)
+      window.removeEventListener('blur', away)
+      document.removeEventListener('visibilitychange', hidden)
+      // Unmounting mid-gesture (the route changed under a held button) must not lose the preview
+      // either: `up` is a no-op unless a label is still pressed.
+      up()
+    }
+  }, [])
+
   if (!image || !style || !font) return null
 
   const hovered = hoveredId === null ? null : (objects.get(hoveredId) ?? null)
   const tip = hovered ? toScreen(view, hovered.x, hovered.y) : null
+  // A label disabled or removed while the text editor is open (an undo, a re-solve) stops being
+  // drawn, so this resolves to null and the child unmounts — before its own close effect can run.
+  // `editingId` would then stay set and pop the editor open again the moment an undo brought the
+  // label back. Adjusting state during render is React's own answer to derived state that has gone
+  // stale (an effect would be `set-state-in-effect`, which lint refuses): the re-render happens
+  // before anything is committed to the DOM.
+  const editing = editingId === null ? null : (entries.find((e) => e.label.object_id === editingId) ?? null)
+  if (editingId !== null && editing === null) setEditingId(null)
 
   const notices: { text: string; error: boolean }[] = []
   if (previewError) notices.push({ text: previewError, error: true })
   if (sizeError) notices.push({ text: sizeError, error: true })
   if (drawError) notices.push({ text: `Some labels could not be drawn: ${drawError}`, error: true })
+  if (toolbarError) notices.push({ text: toolbarError, error: true })
   if (orphans > 0) {
     notices.push({
       text: `${orphans} label(s) refer to objects this image no longer has; they are not shown.`,
@@ -613,7 +767,9 @@ export default function EditorCanvas() {
               style={style}
               font={font}
               editable={editable}
-              select={select}
+              onPress={onLabelPress}
+              onClick={onLabelClick}
+              onDoubleClick={onLabelDoubleClick}
               moveLabel={moveLabel}
               spacePan={spacePan}
               onDrawError={onDrawError}
@@ -622,17 +778,18 @@ export default function EditorCanvas() {
             {/* Chrome only, and none of it listens: `renderAt` hides this layer to diff the
                 canvas against the server's render. */}
             <Layer ref={overlayRef} listening={false}>
-              {selected && (
+              {selectedEntries.map(({ label, box }) => (
                 <Rect
-                  x={selected.label.x}
-                  y={selected.label.y}
-                  width={selected.box.width}
-                  height={selected.box.height}
+                  key={label.object_id}
+                  x={label.x}
+                  y={label.y}
+                  width={box.width}
+                  height={box.height}
                   stroke={HOVER_COLOR}
                   strokeWidth={1 / view.scale}
                   listening={false}
                 />
-              )}
+              ))}
               {hovered && (
                 <Circle
                   x={hovered.x}
@@ -650,6 +807,19 @@ export default function EditorCanvas() {
           <div className="editor-tooltip" style={{ left: tip.x + 12, top: tip.y + 12 }}>
             {hovered.primary_name}
           </div>
+        )}
+        {/* Hidden while the text editor is open, so the two overlays never stack. */}
+        {selectionBox && editing === null && <LabelToolbar box={selectionBox} onError={setToolbarError} />}
+        {editing && (
+          <LabelTextEditor
+            key={editing.label.object_id}
+            id={editing.label.object_id}
+            x={editing.label.x}
+            y={editing.label.y}
+            width={editing.box.width}
+            fontSize={editing.box.primarySize}
+            onClose={closeEditing}
+          />
         )}
       </div>
     </>

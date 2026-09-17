@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { shallow } from 'zustand/shallow'
 import type { Annotations, AnnotationsUpdate, FontOut, ImageOut, Label, ObjectOut, StyleConfig } from '../api'
 import { actualSize, fitView, type View } from './view'
 
@@ -26,6 +27,12 @@ export interface Snapshot {
   style: StyleConfig
 }
 
+/** The per-label fields the toolbar, the wheel and the text editor may change. Position is
+ *  `moveLabel`'s; `enabled` is `toggleObject`'s / `applyLabels`'. */
+export type LabelPatch = Partial<
+  Pick<Label, 'font_size' | 'color' | 'show_aliases' | 'leader' | 'text_override' | 'pinned' | 'collided'>
+>
+
 /** Undo entries kept per editing session (spec § A). */
 export const HISTORY_LIMIT = 100
 
@@ -39,7 +46,7 @@ export interface EditorState {
   updatedAt: string
   fonts: Map<string, FontOut> // by file
   fontFallback: FontFallback | null // set by load when the stored font was swapped for the default
-  selectedId: number | null
+  selectedIds: ReadonlySet<number>
   hoveredId: number | null
   view: View
   viewport: { w: number; h: number }
@@ -55,7 +62,10 @@ export interface EditorState {
   redoLast(): void
   load(doc: LoadedDocument): void
   setView(view: View): void
+  /** Exactly this label (or nothing) is selected. */
   select(id: number | null): void
+  /** Shift-click: adds or removes one label. */
+  toggleSelect(id: number): void
   hover(id: number | null): void
   reset(): void
   setViewport(w: number, h: number): void
@@ -65,6 +75,12 @@ export interface EditorState {
   toggleObject(id: number, placed?: { x: number; y: number; collided?: boolean }): void
   moveLabel(id: number, x: number, y: number, commit?: boolean): void
   applyLabels(labels: Label[]): void
+  /** One patch onto every listed label; one commit (one undo entry) for the set, nothing at all
+   *  when the patch changes nothing. `commit: false` is a preview frame (wheel-resize). */
+  updateLabels(ids: Iterable<number>, patch: LabelPatch, commit?: boolean): void
+  /** Commits whatever preview frames left in the labels map, as one entry; a no-op when the
+   *  map matches the committed document field by field. */
+  commitPreview(): void
   /** Global style fields; one commit (one undo entry) per call. */
   setStyle(patch: Partial<StyleConfig>): void
   markSaving(): void
@@ -83,7 +99,7 @@ const initial = {
   updatedAt: '',
   fonts: new Map<string, FontOut>(),
   fontFallback: null as FontFallback | null,
-  selectedId: null,
+  selectedIds: new Set<number>() as ReadonlySet<number>,
   hoveredId: null,
   view: { scale: 1, x: 0, y: 0 } as View,
   viewport: { w: 0, h: 0 },
@@ -117,17 +133,23 @@ interface DocPatch {
  *  edited, so no tab can slip a change past the read-only rule. A preview (`commit: false`, the
  *  drag frames) only swaps the maps in; a commit records history, bumps `changeSeq`/
  *  `pendingChanges` (the autosave keys on `changeSeq`) and marks the document dirty unless a
- *  conflict is already sticky. It also drops a selection the new labels map disables: a disabled
- *  label has nothing on the canvas to select, and Delete/Backspace on a selection left behind
- *  would toggle it straight back on. Callers hand in *new* maps and never mutate the stored
- *  `Label` objects — `useShallow(enabledLabels)` in the canvas relies on identity. */
-function changedDoc(s: EditorState, patch: DocPatch, commit = true): Partial<EditorState> | null {
+ *  conflict is already sticky. It also drops from the selection every label the new map disables:
+ *  a disabled label has nothing on the canvas to select, and Delete/Backspace on a selection left
+ *  behind would toggle it straight back on. That scan is gated on `prune`, which defaults to
+ *  `commit`: only a commit or a restored snapshot (`swapHistory`, which asks for it explicitly
+ *  while passing `commit: false`) can disable a label, and a drag would otherwise pay for it on
+ *  every preview frame. Callers hand in *new* maps and never mutate the stored `Label` objects —
+ *  `useShallow(enabledLabels)` in the canvas relies on identity. */
+function changedDoc(s: EditorState, patch: DocPatch, commit = true, prune = commit): Partial<EditorState> | null {
   if (!isEditable(s)) return null
   const labels = patch.labels ?? s.labels
   const style = patch.style ?? s.style
   if (!style) return null
   const next: Partial<EditorState> = { labels, style }
-  if (s.selectedId !== null && labels.get(s.selectedId)?.enabled !== true) next.selectedId = null
+  if (prune && s.selectedIds.size > 0) {
+    const kept = new Set([...s.selectedIds].filter((id) => labels.get(id)?.enabled === true))
+    if (kept.size !== s.selectedIds.size) next.selectedIds = kept
+  }
   if (!commit) return next
   // The previous head goes onto the undo stack; a fresh commit invalidates whatever was redone.
   const history = s.committed
@@ -147,6 +169,26 @@ function committed(s: EditorState, snapshot: Snapshot): Partial<EditorState> {
   }
 }
 
+/** Commits `labels` if any entry differs field-wise from the committed document; otherwise
+ *  restores the committed map's identity (the canvas memoises on it) and records nothing. `commit
+ *  = false` (a drag that landed back at its origin, but left another label field, e.g. a
+ *  wheel-resize, still diverging) merges the same map as a preview frame instead: the position
+ *  reverting is not itself a change worth an undo entry, and must not sweep up an unrelated one. */
+function commitLabels(s: EditorState, labels: Map<number, Label>, commit = true): Partial<EditorState> {
+  const base = s.committed?.labels
+  if (!base) return changedDoc(s, { labels }, commit) ?? {}
+  let diverged = false
+  for (const [id, label] of labels) {
+    const was = base.get(id)
+    if (!was || (label !== was && !shallow(label, was))) {
+      diverged = true
+      break
+    }
+  }
+  if (diverged) return changedDoc(s, { labels }, commit) ?? {}
+  return s.labels !== base ? { labels: base } : {}
+}
+
 /** Makes the snapshot at the top of the undo or redo stack the document. The restored document is
  *  a commit like any other (the autosave writes it), except that the history moves sideways
  *  instead of growing. */
@@ -154,7 +196,9 @@ function swapHistory(s: EditorState, direction: 'undo' | 'redo'): Partial<Editor
   const from = direction === 'undo' ? s.undo : s.redo
   if (!s.committed || from.length === 0) return {}
   const snapshot = from[from.length - 1]!
-  const patch = changedDoc(s, snapshot, false)
+  // Not a commit — the history below is this function's own — but a restored snapshot can
+  // disable a label, so the selection still has to be pruned against it.
+  const patch = changedDoc(s, snapshot, false, true)
   if (!patch) return {}
   const popped = from.slice(0, -1)
   const to = direction === 'undo' ? s.redo : s.undo
@@ -180,7 +224,7 @@ export const useEditor = create<EditorState>()((set) => ({
       updatedAt: doc.annotations.updated_at,
       fonts: new Map(doc.fonts.map((f) => [f.file, f])),
       fontFallback: doc.fontFallback,
-      selectedId: null,
+      selectedIds: new Set(),
       hoveredId: null,
       save: { status: 'saved', message: null },
       fitted: false,
@@ -193,7 +237,13 @@ export const useEditor = create<EditorState>()((set) => ({
     })
   },
   setView: (view) => set({ view }),
-  select: (selectedId) => set({ selectedId }),
+  select: (id) => set({ selectedIds: id === null ? new Set() : new Set([id]) }),
+  toggleSelect: (id) =>
+    set((s) => {
+      const next = new Set(s.selectedIds)
+      if (!next.delete(id)) next.add(id)
+      return { selectedIds: next }
+    }),
   hover: (hoveredId) => set({ hoveredId }),
   reset: () =>
     set({
@@ -202,6 +252,7 @@ export const useEditor = create<EditorState>()((set) => ({
       labels: new Map(),
       fonts: new Map(),
       objectOrder: [],
+      selectedIds: new Set(),
       undo: [],
       redo: [],
     }),
@@ -248,20 +299,39 @@ export const useEditor = create<EditorState>()((set) => ({
     set((s) => {
       const label = s.labels.get(id)
       if (!label) return {}
-      const labels = new Map(s.labels)
-      labels.set(id, { ...label, x, y, collided: false })
-      if (!commit) return label.x === x && label.y === y ? {} : (changedDoc(s, { labels }, false) ?? {})
-      // A commit is measured against the last committed position, not the last preview frame:
+      // Deltas are measured against the last committed position, not the last preview frame:
       // Konva fires dragmove/dragend at the start position for a gesture that never moved, and a
       // drag that came back to where it began has changed nothing worth an undo entry or a save
-      // (it would also clear the placer's `collided` verdict). Restoring the committed map keeps
-      // the label identities the canvas memoises on. Preview frames are gated like commits, so
-      // the maps can only have diverged while the document was editable.
-      const origin = s.committed?.labels.get(id) ?? label
-      if (origin.x === x && origin.y === y) {
-        return s.committed && s.labels !== s.committed.labels ? { labels: s.committed.labels } : {}
+      // (it would also clear the placer's `collided` verdict). Preview frames are gated like
+      // commits, so the maps can only have diverged while the document was editable.
+      const base = s.committed?.labels ?? s.labels
+      const origin = base.get(id) ?? label
+      const dx = x - origin.x
+      const dy = y - origin.y
+      // A selected label drags the whole selection; an unselected one drags alone.
+      const moving = s.selectedIds.has(id) ? [...s.selectedIds] : [id]
+      const labels = new Map(s.labels)
+      for (const mid of moving) {
+        const was = base.get(mid)
+        const cur = s.labels.get(mid)
+        if (!was || !cur) continue
+        if (dx === 0 && dy === 0) {
+          // Back at the start: only the position preview is undone. Another live preview on the
+          // same label (a wheel resize during the press) stays for commitPreview to record.
+          const restored = { ...cur, x: was.x, y: was.y, collided: was.collided, pinned: was.pinned }
+          labels.set(mid, shallow(restored, was) ? was : restored)
+        } else {
+          // The pin rides on the preview frames too, not only on the commit: `commitPreview`
+          // (the window mouseup) and Konva's own `dragend` then produce the same committed
+          // label whichever of the two fires first, so their order stops mattering.
+          labels.set(mid, { ...cur, x: was.x + dx, y: was.y + dy, collided: false, pinned: true })
+        }
       }
-      return changedDoc(s, { labels }) ?? {}
+      if (!commit) return changedDoc(s, { labels }, false) ?? {}
+      // Landing back at the origin is never itself a commit-worthy change, even on a real
+      // drag-end: commitLabels still collapses to the committed map's identity when nothing else
+      // diverges, but must not silently commit an unrelated live preview (a wheel resize) either.
+      return commitLabels(s, labels, !(dx === 0 && dy === 0))
     }),
   applyLabels: (updated) =>
     set((s) => {
@@ -273,6 +343,25 @@ export const useEditor = create<EditorState>()((set) => ({
       }
       return changedDoc(s, { labels }) ?? {}
     }),
+  updateLabels: (ids, patch, commit = true) =>
+    set((s) => {
+      const labels = new Map(s.labels)
+      let touched = false
+      for (const id of ids) {
+        const label = s.labels.get(id)
+        if (!label) continue
+        const next = { ...label, ...patch }
+        if (shallow(next, label)) continue
+        labels.set(id, next)
+        touched = true
+      }
+      if (!commit) return touched ? (changedDoc(s, { labels }, false) ?? {}) : {}
+      // A commit is measured against the committed document, not against this frame: a preview
+      // brought back to its starting value records nothing even though the map "changed", and a
+      // patch that touched nothing collapses the same way. `commitLabels` answers both.
+      return commitLabels(s, labels)
+    }),
+  commitPreview: () => set((s) => (s.committed && s.labels !== s.committed.labels ? commitLabels(s, s.labels) : {})),
   setStyle: (patch) =>
     set((s) => {
       const current = s.style

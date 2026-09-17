@@ -27,9 +27,10 @@ export interface StyleFormProps {
   /** Shown under the font select (a fallback notice, "Loading…", or a load error). */
   fontNote?: string | null
   onChange: <K extends keyof StyleFormValues>(key: K, value: StyleFormValues[K]) => void
-  /** values mode only: a colour picker closed or a hex was typed — commit the current value.
-   *  `hex` is set for a typed commit (the just-typed value); undefined for a close, where the
-   *  caller commits whatever it already has for `key`. */
+  /** A colour picker closed, a hex was typed, or "Use default" was clicked — commit the current
+   *  value. `hex` is set for a typed commit (the just-typed value) and '' for a clear; undefined
+   *  for a close, where the caller commits whatever it already has for `key`. Only the Style tab
+   *  (values mode) passes it: the config page's form is committed by its own submit button. */
   onColorCommit?: (key: ColorKey, hex?: string) => void
   /** values mode only: a number field lost focus, or Enter was pressed in it — commit its
    *  currently-debounced value at once rather than waiting out the debounce. */
@@ -114,6 +115,8 @@ export default function StyleForm({
       </div>
     )
   }
+  // "Use default" (overrides mode only) is the one close ColorField does not follow with an
+  // `onCommit`, so the cleared value is committed from `onClear` instead.
   const colorField = (label: string, key: ColorKey) => (
     <ColorField
       key={key}
@@ -124,6 +127,7 @@ export default function StyleForm({
       disabled={disabled}
       onChange={(hex) => onChange(key, hex)}
       onCommit={(hex) => onColorCommit?.(key, hex)}
+      onClear={() => onColorCommit?.(key, '')}
     />
   )
   const fontMissing = values.font_file !== '' && !fontList.some((f) => f.file === values.font_file)

@@ -1,8 +1,18 @@
 import { expect, test } from './fixtures'
+import type { Page, TestInfo } from '@playwright/test'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ensureExported, ensureSetUpAndSignedIn, ensureSolvedImage } from './helpers'
+import type { Annotations, AnnotationsUpdate, Label } from '../src/api'
+import {
+  currentImageId,
+  ensureExported,
+  ensureSetUpAndSignedIn,
+  ensureSolvedImage,
+  exportImage,
+  fetchAnnotations,
+  putAnnotations,
+} from './helpers'
 
 // Preview/export parity (SPEC § 9), the half that needs a browser: Konva and the canvas text
 // metrics only exist there, so this cannot live in pytest next to test_render_parity.py.
@@ -74,29 +84,16 @@ test('the canvas measures every vector string within 0.5 px of Pillow', async ({
   expect(bad, JSON.stringify(bad.slice(0, 10), null, 1)).toEqual([])
 })
 
-test('the editor stage matches the annotated preview within the pixel budget', async ({ page }, testInfo) => {
-  await ensureSetUpAndSignedIn(page)
-  const card = await ensureSolvedImage(page)
-  const previewUrl = await ensureExported(card)
-  await card.getByRole('link', { name: 'Edit' }).click()
-  await expect(page.locator('canvas').first()).toBeVisible()
-  // The hook appears only once the preview bitmap has loaded, so this also waits for the drawn
-  // stage rather than for an empty one.
-  await page.waitForFunction(() => window.__astrocaptionEditor?.labelCount !== undefined)
-
-  // Every enabled label must be on the stage: an empty or half-drawn canvas would otherwise
-  // diff clean against a preview whose annotations happen to be faint.
-  const imageId = /\/images\/([^/?#]+)/.exec(page.url())?.[1]
-  expect(imageId, `no image id in ${page.url()}`).toBeTruthy()
-  const annotations = await page.request.get(`/api/images/${imageId}/annotations`)
-  expect(annotations.status()).toBe(200)
-  const { labels } = (await annotations.json()) as { labels: { enabled: boolean }[] }
-  const expected = labels.filter((l) => l.enabled).length
-  const labelCount = await page.evaluate(() => window.__astrocaptionEditor!.labelCount)
-  console.log(`[parity] labels: the canvas drew ${labelCount} of ${labels.length} stored labels`)
-  expect(expected).toBeGreaterThan(0)
-  expect(labelCount).toBe(expected)
-
+/** Renders the mounted stage at the preview's scale and diffs it against `previewUrl`; attaches
+ *  the diff and the stage PNG when the budget is blown. The editor must be open with the hook
+ *  published (`window.__astrocaptionEditor`), and `tag` names this diff in the log and in the
+ *  attachment file names, so two documents in one run stay apart. */
+async function expectStageMatchesPreview(
+  page: Page,
+  previewUrl: string,
+  testInfo: TestInfo,
+  tag: string,
+): Promise<void> {
   const result = await page.evaluate(
     async ({ previewUrl, threshold, budget }) => {
       const hook = window.__astrocaptionEditor!
@@ -166,14 +163,14 @@ test('the editor stage matches the annotated preview within the pixel budget', a
     { previewUrl, threshold: PIXEL_THRESHOLD, budget: PIXEL_FRACTION },
   )
   console.log(
-    `[parity] pixels: preview ${result.w}x${result.h}, stage ${result.stageWidth}x${result.stageHeight} ` +
+    `[parity ${tag}] pixels: preview ${result.w}x${result.h}, stage ${result.stageWidth}x${result.stageHeight} ` +
       `at scale ${result.scale.toFixed(6)}; ${result.differing} of ${result.w * result.h} differ by more than ` +
       `${PIXEL_THRESHOLD}/255 = ${(result.fraction * 100).toFixed(3)} % (budget ${PIXEL_FRACTION * 100} %)`,
   )
   if (result.fraction > PIXEL_FRACTION) {
     for (const [name, url] of [
-      ['diff.png', result.diffPng!],
-      ['stage.png', result.stagePng!],
+      [`${tag}-diff.png`, result.diffPng!],
+      [`${tag}-stage.png`, result.stagePng!],
     ] as const) {
       const path = testInfo.outputPath(name)
       writeFileSync(path, Buffer.from(url.split(',')[1]!, 'base64'))
@@ -182,6 +179,98 @@ test('the editor stage matches the annotated preview within the pixel budget', a
   }
   expect(
     result.fraction,
-    `${result.differing} of ${result.w * result.h} pixels differ by more than ${PIXEL_THRESHOLD}`,
+    `${tag}: ${result.differing} of ${result.w * result.h} pixels differ by more than ${PIXEL_THRESHOLD}`,
   ).toBeLessThanOrEqual(PIXEL_FRACTION)
+}
+
+test('the editor stage matches the annotated preview within the pixel budget', async ({ page }, testInfo) => {
+  await ensureSetUpAndSignedIn(page)
+  const card = await ensureSolvedImage(page)
+  const previewUrl = await ensureExported(card)
+  await card.getByRole('link', { name: 'Edit' }).click()
+  await expect(page.locator('canvas').first()).toBeVisible()
+  // The hook appears only once the preview bitmap has loaded, so this also waits for the drawn
+  // stage rather than for an empty one.
+  await page.waitForFunction(() => window.__astrocaptionEditor?.labelCount !== undefined)
+
+  // Every enabled label must be on the stage: an empty or half-drawn canvas would otherwise
+  // diff clean against a preview whose annotations happen to be faint.
+  const imageId = currentImageId(page)
+  const annotations = await page.request.get(`/api/images/${imageId}/annotations`)
+  expect(annotations.status()).toBe(200)
+  const { labels } = (await annotations.json()) as { labels: { enabled: boolean }[] }
+  const expected = labels.filter((l) => l.enabled).length
+  const labelCount = await page.evaluate(() => window.__astrocaptionEditor!.labelCount)
+  console.log(`[parity] labels: the canvas drew ${labelCount} of ${labels.length} stored labels`)
+  expect(expected).toBeGreaterThan(0)
+  expect(labelCount).toBe(expected)
+  await expectStageMatchesPreview(page, previewUrl, testInfo, 'plain')
+})
+
+test('the stage matches the preview for a document with per-label overrides and a pinned label', async ({
+  page,
+}, testInfo) => {
+  await ensureSetUpAndSignedIn(page)
+  const card = await ensureSolvedImage(page)
+  await card.getByRole('link', { name: 'Edit' }).click()
+  await page.waitForFunction(() => window.__astrocaptionEditor?.labelCount !== undefined)
+  const imageId = currentImageId(page)
+  const original = await fetchAnnotations(page, imageId)
+  const enabled = original.labels.filter((l) => l.enabled)
+  expect(enabled.length).toBeGreaterThanOrEqual(3)
+  const [a, b, c] = enabled as [Label, Label, Label]
+  // A size and colour override, a text override with the alias line forced on, a pinned label
+  // with its leader forced on. (A stored font that is no longer bundled cannot be created
+  // through the API — PUT refuses it with a 422 — and the app here runs on a scratch data dir
+  // this spec cannot write to, so that half of the font fallback is pinned by pytest alone:
+  // backend/tests/test_render.py and test_fonts.py.)
+  const overridden: AnnotationsUpdate = {
+    style: original.style,
+    version: original.version,
+    labels: original.labels.map((l) => {
+      if (l.object_id === a.object_id) return { ...l, font_size: original.style.font_size * 2, color: '#ff8800' }
+      if (l.object_id === b.object_id) return { ...l, text_override: 'Overridden name', show_aliases: true }
+      if (l.object_id === c.object_id) return { ...l, pinned: true, leader: 'on' as const, x: l.x + 60, y: l.y + 40 }
+      return l
+    }),
+  }
+  // Everything that can leave the shared document overridden happens inside the try — the PUT
+  // itself included — so the restore below always runs, whatever fails.
+  let stored: Annotations | null = null
+  let failed: unknown = null
+  try {
+    stored = await putAnnotations(page, imageId, overridden)
+    // The overrides have to be in the document the server renders from, or the diff below would
+    // be comparing two plain documents and would pass without testing anything.
+    const byId = new Map(stored.labels.map((l) => [l.object_id, l]))
+    expect(byId.get(a.object_id)).toMatchObject({ font_size: original.style.font_size * 2, color: '#ff8800' })
+    expect(byId.get(b.object_id)).toMatchObject({ text_override: 'Overridden name', show_aliases: true })
+    expect(byId.get(c.object_id)).toMatchObject({ pinned: true, leader: 'on', x: c.x + 60, y: c.y + 40 })
+    const previewUrl = await exportImage(page, imageId)
+    // Reload so the editor draws the stored document, then diff.
+    await page.reload()
+    await page.waitForFunction(() => window.__astrocaptionEditor?.labelCount !== undefined)
+    await expectStageMatchesPreview(page, previewUrl, testInfo, 'overrides')
+  } catch (e) {
+    failed = e
+  }
+  // Put the shared fixture image back the way it was (and re-export it) so the other specs, and a
+  // re-run on the same data dir, compare against a matching export: a blown budget (or any
+  // failure above) must not leave the shared document overridden behind it. Hence the catch above
+  // rather than a plain throw — and hence this restore, not a `finally` (ESLint's
+  // `no-unsafe-finally` forbids the rethrow one would need). A restore that fails on its own is
+  // the real failure; one that fails after the body already threw is only logged, so the original
+  // failure is what the report shows.
+  try {
+    await putAnnotations(page, imageId, {
+      style: original.style,
+      labels: original.labels,
+      version: stored?.version ?? original.version,
+    })
+    await exportImage(page, imageId)
+  } catch (e) {
+    if (!failed) throw e
+    console.error(`[parity] restore failed: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  if (failed) throw failed
 })

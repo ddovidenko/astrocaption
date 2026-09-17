@@ -23,6 +23,7 @@ from ..layout import autoplace, default_style
 from ..models import (
     Annotations,
     AnnotationsUpdate,
+    AutoarrangeRequest,
     ExportOut,
     ExportRequest,
     ImageOut,
@@ -448,21 +449,33 @@ async def put_annotations(
 
 @router.post("/{image_id}/autoarrange")
 async def autoarrange(
-    image_id: str, doc: AnnotationsUpdate, settings: SettingsDep, db: DbDep
+    image_id: str, doc: AutoarrangeRequest, settings: SettingsDep, db: DbDep
 ) -> Annotations:
-    """Run the placer on every enabled label of the submitted document (no fixed labels) and
-    return the result without storing it; the editor applies it and autosaves (design § 4)."""
+    """Run the placer on every enabled label of the submitted document and return the result
+    without storing it; the editor applies it and autosaves (design § 4). Pinned labels stay
+    where they are and block the others (spec § A); ``reset`` unpins everything first."""
     rec, stored = _annotations_target(db, image_id)
     _check_version(doc, stored, image_id)
     objects = db.get_objects(image_id)
     _validate_document(doc, objects, settings, image_id)
-    labels = await asyncio.to_thread(
-        autoplace, rec.width, rec.height, doc.style, doc.labels, objects, settings.fonts_dir
+    labels = doc.labels
+    if doc.reset:
+        labels = [lab.model_copy(update={"pinned": False}) for lab in labels]
+    keep = frozenset(lab.object_id for lab in labels if lab.enabled and lab.pinned)
+    placed = await asyncio.to_thread(
+        autoplace,
+        rec.width,
+        rec.height,
+        doc.style,
+        labels,
+        objects,
+        settings.fonts_dir,
+        keep=keep,
     )
     return Annotations(
         image_id=image_id,
         style=doc.style,
-        labels=labels,
+        labels=placed,
         version=doc.version,
         updated_at=stored.updated_at,
     )

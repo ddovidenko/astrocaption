@@ -1,5 +1,12 @@
 import { expect, test } from './fixtures'
-import { ensureExported, ensureSetUpAndSignedIn, ensureSolvedImage, fetchAnnotations, PASSWORD } from './helpers'
+import {
+  currentImageId,
+  ensureExported,
+  ensureSetUpAndSignedIn,
+  ensureSolvedImage,
+  fetchAnnotations,
+  PASSWORD,
+} from './helpers'
 
 // This runs against the built frontend bundle served by uvicorn (`make e2e`) or the Docker
 // image (CI) — never the Vite dev server, so it does not guard `make dev`'s /api proxy.
@@ -32,8 +39,7 @@ test('first run: setup, sign in, solve, export, edit, config, sign out', async (
   // needs it, whether to read a label's position or just to know the stage has something drawn.
   await page.waitForFunction(() => window.__astrocaptionEditor?.labelPositions !== undefined)
 
-  const imageId = /\/images\/([^/?#]+)/.exec(page.url())?.[1]
-  expect(imageId, `no image id in ${page.url()}`).toBeTruthy()
+  const imageId = currentImageId(page)
   interface StoredLabel {
     object_id: number
     enabled: boolean
@@ -42,7 +48,7 @@ test('first run: setup, sign in, solve, export, edit, config, sign out', async (
   }
   // What the server has stored, which is what every assertion below is about: the autosave has to
   // have landed, not just the canvas to have moved.
-  const stored = () => fetchAnnotations(page, imageId!)
+  const stored = () => fetchAnnotations(page, imageId)
   const enabledCount = async (): Promise<number> =>
     (await stored()).labels.filter((l) => l.enabled).length
   const storedLabel = async (objectId: number): Promise<StoredLabel | undefined> =>
