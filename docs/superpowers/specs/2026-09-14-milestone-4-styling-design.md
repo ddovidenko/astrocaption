@@ -200,8 +200,9 @@ applies `config.default_style` merged over the built-ins (fetched once on tab op
 ### Objects tab
 
 - `build_names_catalog.py` also writes a `kinds` map (`{"NGC 1976": "nebula", …}`) from OpenNGC's
-  Type column: galaxy (G, GPair, GTrpl, GGroup), nebula (Neb, EmN, RfN, HII, PN, SNR, DrkN),
-  cluster (OCl, GCl, Cl+N), other (everything else, including `*`, `**`, `*Ass`, `Nova`, `NonEx`).
+  Type column: galaxy (G, GPair, GTrpl, GGroup), nebula (Neb, EmN, RfN, HII, PN, SNR, DrkN,
+  Cl+N (a cluster with nebulosity: M 42, the Cocoon; decided 2026-09-17 during PR 5)),
+  cluster (OCl, GCl), other (everything else, including `*`, `**`, `*Ass`, `Nova`, `NonEx`).
   `names.json` becomes `{"aliases": [...], "kinds": {...}}`; `catalog/__init__.py` gains
   `kind_for(names) -> Kind | None`.
 - `ObjectOut.kind: Literal["galaxy","nebula","cluster","star","other"]`, computed at read time: `star`
