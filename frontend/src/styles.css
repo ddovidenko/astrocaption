@@ -159,7 +159,7 @@ body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
 .object-row input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
 .link-button { background: transparent; border: 0; padding: 0; color: var(--text); font: inherit; font-weight: 500; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .link-button:hover { color: var(--accent); }
-.object-type, .object-radius { color: var(--muted); font-size: 0.8rem; }
+.object-kind, .object-radius { color: var(--muted); font-size: 0.8rem; }
 .object-radius { font-variant-numeric: tabular-nums; }
 .facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.35rem 0.75rem; margin: 0; font-size: 0.9rem; }
 .facts dt { color: var(--muted); }

@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import type { ObjectKind, ObjectOut } from '../api'
 import { disableAll, enableWithPlacement, isEditable, toggleWithPlacement } from './editing'
 import { primaryName } from './names'
@@ -9,7 +9,17 @@ import { useEditor } from './store'
  *  rows it concerns and not the whole list (#75). Keyboard focus inside the row highlights it and
  *  its marker exactly like hover (#76): `onFocus`/`onBlur` bubble in React, and the blur is
  *  ignored while the focus only moves between the row's own controls. */
-const ObjectRow = memo(function ObjectRow({ obj, name, editable }: { obj: ObjectOut; name: string; editable: boolean }) {
+const ObjectRow = memo(function ObjectRow({
+  obj,
+  name,
+  editable,
+  onError,
+}: {
+  obj: ObjectOut
+  name: string
+  editable: boolean
+  onError: (message: string | null) => void
+}) {
   const id = obj.id
   const enabled = useEditor((s) => s.labels.get(id)?.enabled ?? false)
   const hasLabel = useEditor((s) => s.labels.has(id))
@@ -17,11 +27,24 @@ const ObjectRow = memo(function ObjectRow({ obj, name, editable }: { obj: Object
   const selected = useEditor((s) => s.selectedIds.has(id))
   const hover = useEditor((s) => s.hover)
   const panTo = useEditor((s) => s.panTo)
+  // A row filtered out of the list (a chip turned off, a search typed) unmounts without ever
+  // firing a blur, so the hover it set would stay on its marker for good.
+  useEffect(
+    () => () => {
+      const s = useEditor.getState()
+      if (s.hoveredId === id) s.hover(null)
+    },
+    [id],
+  )
   return (
     <li
       className={`object-row${hovered ? ' hovered' : ''}${selected ? ' selected' : ''}`}
       onMouseEnter={() => hover(id)}
-      onMouseLeave={() => hover(null)}
+      // The pointer leaving is not the end of the highlight while the row still holds the
+      // keyboard focus: the row stays lit via :focus-within, and its marker must match.
+      onMouseLeave={(e) => {
+        if (!e.currentTarget.contains(document.activeElement)) hover(null)
+      }}
       onFocus={() => hover(id)}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) hover(null)
@@ -32,7 +55,17 @@ const ObjectRow = memo(function ObjectRow({ obj, name, editable }: { obj: Object
         checked={enabled}
         disabled={!editable || !hasLabel}
         aria-label={`Show ${name}`}
-        onChange={() => toggleWithPlacement(id)}
+        // The placer measures text, so a single toggle can throw exactly like the batch below;
+        // without this the click would simply do nothing.
+        onChange={() => {
+          onError(null)
+          try {
+            toggleWithPlacement(id)
+          } catch (err) {
+            console.error('toggle failed', err)
+            onError('The label could not be changed; nothing was altered.')
+          }
+        }}
       />
       <button
         type="button"
@@ -43,7 +76,7 @@ const ObjectRow = memo(function ObjectRow({ obj, name, editable }: { obj: Object
       >
         {name}
       </button>
-      <span className="object-type">{obj.kind}</span>
+      <span className="object-kind">{obj.kind}</span>
       <span className="object-radius">{Math.round(obj.radius)} px</span>
     </li>
   )
@@ -141,7 +174,13 @@ export default function ObjectsTab() {
       </p>
       <ul className="object-list">
         {rows.map((obj) => (
-          <ObjectRow key={obj.id} obj={obj} name={primaryName(obj.catalog_names, preference)} editable={editable} />
+          <ObjectRow
+            key={obj.id}
+            obj={obj}
+            name={primaryName(obj.catalog_names, preference)}
+            editable={editable}
+            onError={setError}
+          />
         ))}
       </ul>
       {rows.length === 0 && <p className="meta">No objects match this search.</p>}
