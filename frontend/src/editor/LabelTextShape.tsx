@@ -1,8 +1,13 @@
 import { useRef } from 'react'
 import { Shape } from 'react-konva'
 import type Konva from 'konva'
-import { describeError, type FontOut, type Label, type StyleConfig } from '../api'
+import type { FontOut, Label, StyleConfig } from '../api'
 import { ascentFor, fontShorthand, type LabelBox, type LabelLines } from './metrics'
+
+/** A refusal to draw this shape at all, raised here and worded for the page. Anything else the
+ *  canvas throws is a browser failure whose message is not for the owner (CLAUDE.md: no raw
+ *  exception text on the page). */
+class DrawSetupError extends Error {}
 
 interface Props {
   label: Label
@@ -33,7 +38,9 @@ export function LabelTextShape({ label, style, font, box, text, onDrawError }: P
       // Ascent and family must come from the same file, or the baseline would be Pillow's for one
       // font and the glyphs another's.
       if (font.file !== style.font_file) {
-        throw new Error(`the ascent table is for ${font.file} but the style asks for ${style.font_file}`)
+        throw new DrawSetupError(
+          `the ascent table is for ${font.file} but the style asks for ${style.font_file}`,
+        )
       }
       const c = ctx._context
       c.textRendering = 'geometricPrecision'
@@ -55,7 +62,8 @@ export function LabelTextShape({ label, style, font, box, text, onDrawError }: P
       }
     } catch (err) {
       failedRef.current = true
-      onDrawError?.(describeError(err))
+      console.error('label draw failed', err)
+      onDrawError?.(err instanceof DrawSetupError ? err.message : 'the browser could not draw it')
     }
   }
   return (

@@ -190,6 +190,9 @@ const LabelEntry = memo(function LabelEntry({
         onDragEnd={(e) => moveLabel(label.object_id, e.target.x(), e.target.y())}
       >
         <LabelTextShape
+          // A new font is a fresh attempt: remounting drops the shape's "already failed" flag, so
+          // a label that failed under the old file draws again instead of staying blank.
+          key={style.font_file}
           label={label}
           style={style}
           font={font}
@@ -285,10 +288,16 @@ export default function EditorCanvas() {
     error: string | null
   } | null>(null)
   const [drawErrors, setDrawErrors] = useState<ReadonlyMap<number, string>>(new Map())
+  // The font those failures belong to: picking another one is a fresh attempt for every label
+  // (see the shape's key below), so the whole map is dropped when it changes.
+  const [drawErrorFont, setDrawErrorFont] = useState<string | null>(null)
   // A toolbar action that threw (the placer measures text, so Reset position can fail). Tagged
   // with the selection it was raised for, the same hook the toolbar's own drafts use, so it
   // clears itself the moment the selection moves on.
   const [toolbarError, setToolbarError] = useTaggedDraft<string>([selectedIds])
+  // A marker click whose placement threw. Not tagged with the selection like the toolbar's error:
+  // a click on a marker is not a selection change, so it is cleared by the next click.
+  const [toggleError, setToggleError] = useState<string | null>(null)
   const [sizeError, setSizeError] = useState<string | null>(null)
   const [panning, setPanning] = useState(false)
 
@@ -380,6 +389,17 @@ export default function EditorCanvas() {
   const onDrawError = useCallback((id: number, message: string) => {
     setDrawErrors((prev) => (prev.has(id) ? prev : new Map(prev).set(id, message)))
   }, [])
+
+  // Only the failures of labels the layer still draws: a label disabled, undone away or left
+  // behind by a re-solve is no longer failing, and the notice must stop counting it.
+  const liveDrawErrors = useMemo(() => {
+    const drawn = new Set(entries.map((e) => e.label.object_id))
+    const live = new Map<number, string>()
+    for (const [id, message] of drawErrors) {
+      if (drawn.has(id)) live.set(id, message)
+    }
+    return live
+  }, [drawErrors, entries])
 
   // A press selects: plain replaces the selection unless the label is already in it (so a drag
   // of one selected label moves the whole group), shift toggles membership.
@@ -582,25 +602,36 @@ export default function EditorCanvas() {
             y={obj.y}
             radius={Math.max(markerRadius(obj, style), 8 / view.scale)}
             fill="transparent"
-            // While a solve runs the click below no-ops; the cursor says so (#76).
-            onMouseEnter={(e) => {
-              hover(id)
-              if (!editable) e.target.getStage()?.container().style.setProperty('cursor', 'not-allowed')
-            }}
-            onMouseLeave={(e) => {
-              hover(null)
-              e.target.getStage()?.container().style.removeProperty('cursor')
-            }}
+            onMouseEnter={() => hover(id)}
+            onMouseLeave={() => hover(null)}
             // Left button only, and not after a pan or a label drag that happened to end over
-            // this marker: the click Konva fires then is not a toggle.
+            // this marker: the click Konva fires then is not a toggle. The placer measures text,
+            // so this can throw (a stale font) — a dead click would say nothing.
             onClick={(e) => {
-              if (e.evt.button === 0 && !movedRef.current) toggleWithPlacement(id)
+              if (e.evt.button !== 0 || movedRef.current) return
+              setToggleError(null)
+              try {
+                toggleWithPlacement(id)
+              } catch (err) {
+                console.error('toggle failed', err)
+                setToggleError('The label could not be changed; nothing was altered.')
+              }
             }}
           />
         )
       }),
-    [objectOrder, objects, style, view.scale, hover, editable],
+    [objectOrder, objects, style, view.scale, hover],
   )
+
+  // While a solve runs the toggle above no-ops; the cursor over a marker says so (#76). An effect,
+  // not the hover handlers: `editable` can flip while the pointer already rests on a marker, and
+  // no mouseenter would follow to correct the cursor.
+  useEffect(() => {
+    const el = stageRef.current?.container()
+    if (!el) return
+    if (!editable && hoveredId !== null) el.style.setProperty('cursor', 'not-allowed')
+    else el.style.removeProperty('cursor')
+  }, [editable, hoveredId])
 
   // A click on the empty background (never on a label or a marker) clears the selection; a click
   // that ended a pan does not.
@@ -734,16 +765,24 @@ export default function EditorCanvas() {
   const editing = editingId === null ? null : (entries.find((e) => e.label.object_id === editingId) ?? null)
   if (editingId !== null && editing === null) setEditingId(null)
 
+  // Same pattern, for the same reason: the draw failures are the old font's, and the shapes have
+  // been remounted to try the new one.
+  if (drawErrorFont !== style.font_file) {
+    setDrawErrorFont(style.font_file)
+    if (drawErrors.size > 0) setDrawErrors(new Map())
+  }
+
   const notices: { text: string; error: boolean }[] = []
   if (previewError) notices.push({ text: previewError, error: true })
   if (sizeError) notices.push({ text: sizeError, error: true })
-  if (drawErrors.size > 0) {
-    const [firstId, firstMessage] = drawErrors.entries().next().value as [number, string]
+  if (liveDrawErrors.size > 0) {
+    const [firstId, firstMessage] = liveDrawErrors.entries().next().value as [number, string]
     const first = objects.get(firstId)
     const name = first ? primaryName(first.catalog_names, style.name_preference) : `object ${firstId}`
-    notices.push({ text: drawErrorNotice(drawErrors.size, name, firstMessage), error: true })
+    notices.push({ text: drawErrorNotice(liveDrawErrors.size, name, firstMessage), error: true })
   }
   if (toolbarError) notices.push({ text: toolbarError, error: true })
+  if (toggleError) notices.push({ text: toggleError, error: true })
   if (orphans > 0) {
     notices.push({
       text: `${orphans} label(s) refer to objects this image no longer has; they are not shown.`,
