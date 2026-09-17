@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.catalog import enrich_names, normalise
+from app.catalog import enrich_names, kind_for, normalise
 from app.models import (
     SolveObject,
     StyleConfig,
@@ -218,3 +218,15 @@ def test_max_aliases_bounds() -> None:
         StyleConfig(max_aliases=6)
     with pytest.raises(ValidationError):
         StyleOverrides(max_aliases=-1)
+
+
+def test_kind_for_reads_openngc_types() -> None:
+    # NGC 1976 (M 42, the Orion Nebula) is OpenNGC type "Cl+N" (cluster + nebulosity, for the
+    # embedded Trapezium cluster), not a plain nebula type -- see KIND_BY_TYPE.
+    assert kind_for(["NGC 1976", "M 42"]) == "cluster"
+    assert kind_for(["NGC 7000"]) == "nebula"  # North America Nebula, type "HII"
+    assert kind_for(["ngc0224"]) == "galaxy"  # normalised like every other lookup
+    assert kind_for(["NGC 1912"]) == "cluster"
+    assert kind_for(["NGC 2239"]) == "cluster"  # OpenNGC 'Dup' of NGC 2244
+    assert kind_for(["Hatysa"]) is None
+    assert kind_for([]) is None

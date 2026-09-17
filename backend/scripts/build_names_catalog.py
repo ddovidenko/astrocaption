@@ -3,8 +3,9 @@
 Usage (from backend/):  python scripts/build_names_catalog.py [--from DIR]
 
 Downloads NGC.csv and addendum.csv from the OpenNGC repository (or reads them from DIR)
-and writes name groups: every deep-sky object that has at least one alias worth showing
-becomes ``["NGC 1976", "M 42", "LBN 974", "Great Orion Nebula", "Orion Nebula"]``.
+and writes ``{"aliases": [...], "kinds": {...}}``: name groups such as
+``["NGC 1976", "M 42", ...]`` for every object with an alias worth showing, and the kind
+(galaxy / nebula / cluster) of every object whose OpenNGC type has one.
 """
 
 from __future__ import annotations
@@ -70,6 +71,26 @@ KEEP_PREFIXES = {
 }
 NAME_RE = re.compile(r"^([A-Za-z]+)0*(\d+)(.*)$")
 
+# OpenNGC's Type column folded into the editor's four buckets (spec § C "Objects tab"). Types not
+# listed (stars, associations, novae, non-existent and duplicate entries) get no entry: the API
+# reports them as "other".
+KIND_BY_TYPE: dict[str, str] = {
+    "G": "galaxy",
+    "GPair": "galaxy",
+    "GTrpl": "galaxy",
+    "GGroup": "galaxy",
+    "Neb": "nebula",
+    "EmN": "nebula",
+    "RfN": "nebula",
+    "HII": "nebula",
+    "PN": "nebula",
+    "SNR": "nebula",
+    "DrkN": "nebula",
+    "OCl": "cluster",
+    "GCl": "cluster",
+    "Cl+N": "cluster",
+}
+
 
 def pretty(designation: str) -> str:
     """``NGC1976`` → ``NGC 1976``, ``C 031`` → ``C 31``, ``Mel022`` → ``Mel 22``."""
@@ -93,9 +114,10 @@ def load_rows(source: Path | None) -> list[dict[str, str]]:
     return rows
 
 
-def build(rows: list[dict[str, str]]) -> list[list[str]]:
+def build(rows: list[dict[str, str]]) -> tuple[list[list[str]], dict[str, str]]:
     by_name: dict[str, dict[str, str]] = {r["Name"]: r for r in rows}
     groups: list[list[str]] = []
+    kinds: dict[str, str] = {}
     for row in rows:
         canonical = row
         extra: list[str] = []
@@ -106,6 +128,9 @@ def build(rows: list[dict[str, str]]) -> list[list[str]]:
             if target in by_name:
                 canonical = by_name[target]
                 extra.append(pretty(target))
+        kind = KIND_BY_TYPE.get(canonical["Type"])
+        if kind is not None:
+            kinds[pretty(row["Name"])] = kind
         names: list[str] = [pretty(row["Name"])] + extra
         if canonical.get("M"):
             names.append(f"M {int(canonical['M'])}")
@@ -125,16 +150,19 @@ def build(rows: list[dict[str, str]]) -> list[list[str]]:
                 deduped.append(n)
         if len(deduped) > 1:
             groups.append(deduped)
-    return groups
+    return groups, kinds
 
 
 def main(argv: list[str]) -> int:
     source = Path(argv[argv.index("--from") + 1]) if "--from" in argv else None
-    groups = build(load_rows(source))
+    groups, kinds = build(load_rows(source))
+    payload = {"aliases": groups, "kinds": kinds}
     OUT.write_text(
-        json.dumps(groups, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8"
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8"
     )
-    print(f"wrote {OUT.name}: {len(groups)} groups, {OUT.stat().st_size // 1024} KB")
+    print(
+        f"wrote {OUT.name}: {len(groups)} groups, {len(kinds)} kinds, {OUT.stat().st_size // 1024} KB"
+    )
     return 0
 
 
