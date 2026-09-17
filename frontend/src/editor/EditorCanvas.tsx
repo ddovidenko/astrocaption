@@ -575,8 +575,15 @@ export default function EditorCanvas() {
             y={obj.y}
             radius={Math.max(markerRadius(obj, style), 8 / view.scale)}
             fill="transparent"
-            onMouseEnter={() => hover(id)}
-            onMouseLeave={() => hover(null)}
+            // While a solve runs the click below no-ops; the cursor says so (#76).
+            onMouseEnter={(e) => {
+              hover(id)
+              if (!editable) e.target.getStage()?.container().style.setProperty('cursor', 'not-allowed')
+            }}
+            onMouseLeave={(e) => {
+              hover(null)
+              e.target.getStage()?.container().style.removeProperty('cursor')
+            }}
             // Left button only, and not after a pan or a label drag that happened to end over
             // this marker: the click Konva fires then is not a toggle.
             onClick={(e) => {
@@ -585,7 +592,7 @@ export default function EditorCanvas() {
           />
         )
       }),
-    [objectOrder, objects, style, view.scale, hover],
+    [objectOrder, objects, style, view.scale, hover, editable],
   )
 
   // A click on the empty background (never on a label or a marker) clears the selection; a click

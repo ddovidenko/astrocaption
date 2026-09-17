@@ -135,6 +135,7 @@ body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
 .tab:hover { color: var(--text); }
 .tab[aria-selected='true'] { color: var(--text); border-bottom-color: var(--accent); }
 .side-panel-body { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 0.9rem; }
+.side-panel-body[hidden] { display: none; }
 .tab-body { display: grid; gap: 0.75rem; align-content: start; min-width: 0; }
 .tab-body input[type='text'] { width: 100%; }
 .tab-body .meta { gap: 0.5rem; }
