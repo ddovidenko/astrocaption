@@ -74,9 +74,9 @@ describe('placeNewLabel', () => {
     ).toBe(false)
   })
 
-  it('returns null for an unknown object', () => {
+  it('throws for an unknown object', () => {
     useEditor.getState().load(makeDoc())
-    expect(placeNewLabel(useEditor.getState(), measure, 999)).toBeNull()
+    expect(() => placeNewLabel(useEditor.getState(), measure, 999)).toThrow(/999/)
   })
 })
 

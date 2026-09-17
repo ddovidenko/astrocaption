@@ -8,6 +8,7 @@ import LabelToolbar from './LabelToolbar'
 import { LabelTextShape } from './LabelTextShape'
 import { disableAll, getMeasurer, isEditable, toggleWithPlacement } from './editing'
 import { primaryName } from './names'
+import { CANVAS_SIZE_ERROR, drawErrorNotice, previewErrorSentence, probeStatus } from './notices'
 import {
   MAX_FONT_SIZE,
   MIN_FONT_SIZE,
@@ -115,7 +116,7 @@ interface EntryProps {
   /** Whether Space is held: a pan gesture, which wins over selecting or dragging a label. Held in
    *  React state so `draggable` can turn off before Konva sees the press. */
   spacePan: boolean
-  onDrawError: (message: string) => void
+  onDrawError: (id: number, message: string) => void
 }
 
 /** One object's marker, leader and draggable label. Memoised on the cached `Entry`, so a drag
@@ -188,7 +189,14 @@ const LabelEntry = memo(function LabelEntry({
         onDragMove={(e) => moveLabel(label.object_id, e.target.x(), e.target.y(), false)}
         onDragEnd={(e) => moveLabel(label.object_id, e.target.x(), e.target.y())}
       >
-        <LabelTextShape label={label} style={style} font={font} box={box} text={text} onDrawError={onDrawError} />
+        <LabelTextShape
+          label={label}
+          style={style}
+          font={font}
+          box={box}
+          text={text}
+          onDrawError={(m) => onDrawError(label.object_id, m)}
+        />
       </Group>
     </Group>
   )
@@ -276,7 +284,7 @@ export default function EditorCanvas() {
     el: HTMLImageElement | null
     error: string | null
   } | null>(null)
-  const [drawError, setDrawError] = useState<string | null>(null)
+  const [drawErrors, setDrawErrors] = useState<ReadonlyMap<number, string>>(new Map())
   // A toolbar action that threw (the placer measures text, so Reset position can fail). Tagged
   // with the selection it was raised for, the same hook the toolbar's own drafts use, so it
   // clears itself the moment the selection moves on.
@@ -311,7 +319,7 @@ export default function EditorCanvas() {
       const w = Math.floor(rect.width)
       const h = Math.floor(rect.height)
       if (w > 0 && h > 0) apply(w, h)
-      else setSizeError('The editor could not size its canvas.')
+      else setSizeError(CANVAS_SIZE_ERROR)
     }, 250)
     return () => {
       window.clearTimeout(fallback)
@@ -333,14 +341,12 @@ export default function EditorCanvas() {
       if (!cancelled) setLoadedPreview({ src, el, error: null })
     }
     el.onerror = () => {
-      if (!cancelled) {
-        setLoadedPreview({
-          src,
-          el: null,
-          error:
-            'The preview image for this photo could not be loaded. Reload the page; if it keeps failing, re-upload the image.',
-        })
-      }
+      if (cancelled) return
+      // The bitmap says only that it failed; the status decides the sentence (a 401 is the
+      // session, not the file).
+      void probeStatus(src).then((status) => {
+        if (!cancelled) setLoadedPreview({ src, el: null, error: previewErrorSentence(status) })
+      })
     }
     el.src = src
     return () => {
@@ -369,9 +375,10 @@ export default function EditorCanvas() {
     return { entries: out, orphans }
   }, [image, style, labels, objects, measure])
 
-  // The first draw failure of any label becomes one notice; the shape itself stops drawing.
-  const onDrawError = useCallback((message: string) => {
-    setDrawError((prev) => prev ?? message)
+  // Every label whose draw threw, in failure order; the notice counts them and names the first.
+  // A label that keeps failing reports once (the shape stops drawing after its first throw).
+  const onDrawError = useCallback((id: number, message: string) => {
+    setDrawErrors((prev) => (prev.has(id) ? prev : new Map(prev).set(id, message)))
   }, [])
 
   // A press selects: plain replaces the selection unless the label is already in it (so a drag
@@ -730,7 +737,12 @@ export default function EditorCanvas() {
   const notices: { text: string; error: boolean }[] = []
   if (previewError) notices.push({ text: previewError, error: true })
   if (sizeError) notices.push({ text: sizeError, error: true })
-  if (drawError) notices.push({ text: `Some labels could not be drawn: ${drawError}`, error: true })
+  if (drawErrors.size > 0) {
+    const [firstId, firstMessage] = drawErrors.entries().next().value as [number, string]
+    const first = objects.get(firstId)
+    const name = first ? primaryName(first.catalog_names, style.name_preference) : `object ${firstId}`
+    notices.push({ text: drawErrorNotice(drawErrors.size, name, firstMessage), error: true })
+  }
   if (toolbarError) notices.push({ text: toolbarError, error: true })
   if (orphans > 0) {
     notices.push({

@@ -99,6 +99,19 @@ describe('autosave', () => {
     expect(f.calls).toHaveLength(1)
   })
 
+  it('422 → the stale-document sentence in the conflict state, with the history cleared', async () => {
+    const f = fakeSave()
+    stop = startAutosave('img', { save: f.save })
+    f.setFail(new ApiError(422, 'labels must list every object exactly once'))
+    useEditor.getState().toggleObject(1)
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS)
+    expect(useEditor.getState().save).toEqual({
+      status: 'conflict',
+      message: "This image's objects changed; reload the editor.",
+    })
+    expect(useEditor.getState().undo).toEqual([])
+  })
+
   it('other failures → error, and retrySave saves again', async () => {
     const f = fakeSave()
     f.setFail(new ApiError(500, 'boom'))

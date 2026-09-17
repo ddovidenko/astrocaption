@@ -42,7 +42,7 @@ export function toggleWithPlacement(id: number, measure?: TextMeasurer): void {
     state.toggleObject(id)
     return
   }
-  state.toggleObject(id, placeNewLabel(state, measure ?? getMeasurer(), id) ?? undefined)
+  state.toggleObject(id, placeNewLabel(state, measure ?? getMeasurer(), id))
 }
 
 /** A label still sitting exactly on its object: how the server stores one that was never placed. */

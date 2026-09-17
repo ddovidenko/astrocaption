@@ -183,11 +183,14 @@ export function placeNewLabels(
 }
 
 /** The object's label measured with the current style, placed against every other enabled
- *  label's box and marker; null when the object or style is missing. */
+ *  label's box and marker. Throws for an id the document does not hold — unreachable from the
+ *  toggle path, which checks first, so a miss is a bug and must not enable the label unplaced. */
 export function placeNewLabel(
   state: EditorState,
   measure: TextMeasurer,
   id: number,
-): { x: number; y: number; collided: boolean } | null {
-  return placeNewLabels(state, measure, [id]).get(id) ?? null
+): { x: number; y: number; collided: boolean } {
+  const placed = placeNewLabels(state, measure, [id]).get(id)
+  if (!placed) throw new Error(`placeNewLabel: object ${id} has no label to place`)
+  return placed
 }
