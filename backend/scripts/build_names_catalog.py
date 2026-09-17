@@ -86,9 +86,11 @@ KIND_BY_TYPE: dict[str, str] = {
     "PN": "nebula",
     "SNR": "nebula",
     "DrkN": "nebula",
+    # Cluster + nebulosity (M 42, the Cocoon, the Running Man, War and Peace): astrophotographers
+    # look for these under "nebula", not "cluster".
+    "Cl+N": "nebula",
     "OCl": "cluster",
     "GCl": "cluster",
-    "Cl+N": "cluster",
 }
 
 

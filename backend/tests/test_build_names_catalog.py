@@ -54,7 +54,8 @@ def test_kind_table_covers_the_spec_buckets() -> None:
         "PN",
         "SNR",
         "DrkN",
+        "Cl+N",
     }
-    assert {t for t, k in KIND_BY_TYPE.items() if k == "cluster"} == {"OCl", "GCl", "Cl+N"}
+    assert {t for t, k in KIND_BY_TYPE.items() if k == "cluster"} == {"OCl", "GCl"}
     for other in ("*", "**", "*Ass", "Nova", "NonEx", "Dup", "Other"):
         assert other not in KIND_BY_TYPE

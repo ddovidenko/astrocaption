@@ -279,8 +279,7 @@ def test_solve_objects_annotations_and_export(
         "M 42",
         ["NGC 1976", "M 42", "LBN 974", "Great Orion Nebula", "Orion Nebula"],
     )
-    # NGC 1976 is OpenNGC type "Cl+N" (cluster + nebulosity, for the embedded Trapezium cluster).
-    assert m42["kind"] == "cluster"
+    assert m42["kind"] == "nebula"
     assert {o["kind"] for o in objects if o["type"] == "bright"} == {"star"}
     assert {o["kind"] for o in objects} <= {"galaxy", "nebula", "cluster", "star", "other"}
     assert {o["primary_name"] for o in objects} >= {"Hatysa", "Trapezium", "θ1 Ori C", "M 43"}
