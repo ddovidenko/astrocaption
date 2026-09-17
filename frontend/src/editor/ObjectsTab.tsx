@@ -1,9 +1,53 @@
-import { useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import type { ObjectKind, ObjectOut } from '../api'
 import { disableAll, enableWithPlacement, isEditable, toggleWithPlacement } from './editing'
 import { primaryName } from './names'
 import { DEFAULT_FILTER, KINDS, KIND_LABELS, filterObjects, type ObjectsFilter } from './objectsFilter'
 import { useEditor } from './store'
+
+/** One row. Memoised with per-row selectors, so a drag frame or a marker hover re-renders the
+ *  rows it concerns and not the whole list (#75). Keyboard focus inside the row highlights it and
+ *  its marker exactly like hover (#76): `onFocus`/`onBlur` bubble in React, and the blur is
+ *  ignored while the focus only moves between the row's own controls. */
+const ObjectRow = memo(function ObjectRow({ obj, name, editable }: { obj: ObjectOut; name: string; editable: boolean }) {
+  const id = obj.id
+  const enabled = useEditor((s) => s.labels.get(id)?.enabled ?? false)
+  const hasLabel = useEditor((s) => s.labels.has(id))
+  const hovered = useEditor((s) => s.hoveredId === id)
+  const selected = useEditor((s) => s.selectedIds.has(id))
+  const hover = useEditor((s) => s.hover)
+  const panTo = useEditor((s) => s.panTo)
+  return (
+    <li
+      className={`object-row${hovered ? ' hovered' : ''}${selected ? ' selected' : ''}`}
+      onMouseEnter={() => hover(id)}
+      onMouseLeave={() => hover(null)}
+      onFocus={() => hover(id)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) hover(null)
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={enabled}
+        disabled={!editable || !hasLabel}
+        aria-label={`Show ${name}`}
+        onChange={() => toggleWithPlacement(id)}
+      />
+      <button
+        type="button"
+        className="link-button"
+        title="Centre the view on this object"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => panTo(id)}
+      >
+        {name}
+      </button>
+      <span className="object-type">{obj.kind}</span>
+      <span className="object-radius">{Math.round(obj.radius)} px</span>
+    </li>
+  )
+})
 
 /** Search, kind chips and one row per object (design § 5). The checkbox does exactly what a click
  *  on the canvas marker does — `toggleWithPlacement`, so a label enabled here is placed by the
@@ -12,11 +56,7 @@ import { useEditor } from './store'
 export default function ObjectsTab() {
   const objects = useEditor((s) => s.objects)
   const objectOrder = useEditor((s) => s.objectOrder)
-  const labels = useEditor((s) => s.labels)
   const editable = useEditor(isEditable)
-  const hover = useEditor((s) => s.hover)
-  const panTo = useEditor((s) => s.panTo)
-  const hoveredId = useEditor((s) => s.hoveredId)
   const preference = useEditor((s) => s.style?.name_preference ?? 'popular')
 
   const [query, setQuery] = useState('')
@@ -100,37 +140,9 @@ export default function ObjectsTab() {
         {rows.length} of {objectOrder.length} objects
       </p>
       <ul className="object-list">
-        {rows.map((obj) => {
-          const label = labels.get(obj.id)
-          const name = primaryName(obj.catalog_names, preference)
-          return (
-            <li
-              key={obj.id}
-              className={`object-row${hoveredId === obj.id ? ' hovered' : ''}`}
-              onMouseEnter={() => hover(obj.id)}
-              onMouseLeave={() => hover(null)}
-            >
-              <input
-                type="checkbox"
-                checked={label?.enabled ?? false}
-                disabled={!editable || !label}
-                aria-label={`Show ${name}`}
-                onChange={() => toggleWithPlacement(obj.id)}
-              />
-              <button
-                type="button"
-                className="link-button"
-                title="Centre the view on this object"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => panTo(obj.id)}
-              >
-                {name}
-              </button>
-              <span className="object-type">{obj.kind}</span>
-              <span className="object-radius">{Math.round(obj.radius)} px</span>
-            </li>
-          )
-        })}
+        {rows.map((obj) => (
+          <ObjectRow key={obj.id} obj={obj} name={primaryName(obj.catalog_names, preference)} editable={editable} />
+        ))}
       </ul>
       {rows.length === 0 && <p className="meta">No objects match this search.</p>}
     </div>
