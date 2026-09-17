@@ -45,6 +45,21 @@ export function toggleWithPlacement(id: number, measure?: TextMeasurer): void {
   state.toggleObject(id, placeNewLabel(state, measure ?? getMeasurer(), id))
 }
 
+export const TOGGLE_FAILED_MESSAGE = 'The label could not be changed; nothing was altered.'
+
+/** `toggleWithPlacement` for a click: the placer measures text, so a single toggle can throw
+ *  exactly like a batch (a stale font), and a dead click would say nothing. Clears the caller's
+ *  notice first, so the next toggle that works takes the sentence away again. */
+export function tryToggleWithPlacement(id: number, onError: (message: string | null) => void): void {
+  onError(null)
+  try {
+    toggleWithPlacement(id)
+  } catch (err) {
+    console.error('toggle failed', err)
+    onError(TOGGLE_FAILED_MESSAGE)
+  }
+}
+
 /** A label still sitting exactly on its object: how the server stores one that was never placed. */
 function isUnplaced(label: Label, obj: ObjectOut): boolean {
   return label.x === obj.x && label.y === obj.y

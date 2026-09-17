@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import type { ObjectKind, ObjectOut } from '../api'
-import { disableAll, enableWithPlacement, isEditable, toggleWithPlacement } from './editing'
+import { disableAll, enableWithPlacement, isEditable, tryToggleWithPlacement } from './editing'
 import { primaryName } from './names'
 import { DEFAULT_FILTER, KINDS, KIND_LABELS, filterObjects, type ObjectsFilter } from './objectsFilter'
 import { useEditor } from './store'
@@ -21,8 +21,8 @@ const ObjectRow = memo(function ObjectRow({
   onError: (message: string | null) => void
 }) {
   const id = obj.id
-  const enabled = useEditor((s) => s.labels.get(id)?.enabled ?? false)
-  const hasLabel = useEditor((s) => s.labels.has(id))
+  // The label object itself: the store replaces it only when this label changes.
+  const label = useEditor((s) => s.labels.get(id))
   const hovered = useEditor((s) => s.hoveredId === id)
   const selected = useEditor((s) => s.selectedIds.has(id))
   const hover = useEditor((s) => s.hover)
@@ -52,20 +52,10 @@ const ObjectRow = memo(function ObjectRow({
     >
       <input
         type="checkbox"
-        checked={enabled}
-        disabled={!editable || !hasLabel}
+        checked={label?.enabled ?? false}
+        disabled={!editable || !label}
         aria-label={`Show ${name}`}
-        // The placer measures text, so a single toggle can throw exactly like the batch below;
-        // without this the click would simply do nothing.
-        onChange={() => {
-          onError(null)
-          try {
-            toggleWithPlacement(id)
-          } catch (err) {
-            console.error('toggle failed', err)
-            onError('The label could not be changed; nothing was altered.')
-          }
-        }}
+        onChange={() => tryToggleWithPlacement(id, onError)}
       />
       <button
         type="button"
@@ -81,6 +71,15 @@ const ObjectRow = memo(function ObjectRow({
     </li>
   )
 })
+
+/** A filter chip: pressed state, never takes the focus (the canvas shortcuts stay alive). */
+function Chip({ pressed, onClick, title, children }: { pressed: boolean; onClick: () => void; title?: string; children: string }) {
+  return (
+    <button type="button" className="chip" aria-pressed={pressed} title={title} onMouseDown={(e) => e.preventDefault()} onClick={onClick}>
+      {children}
+    </button>
+  )
+}
 
 /** Search, kind chips and one row per object (design § 5). The checkbox does exactly what a click
  *  on the canvas marker does — `toggleWithPlacement`, so a label enabled here is placed by the
@@ -138,27 +137,13 @@ export default function ObjectsTab() {
       />
       <div className="chips">
         {KINDS.map((kind) => (
-          <button
-            key={kind}
-            type="button"
-            className="chip"
-            aria-pressed={filter.kinds.has(kind)}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => toggleKind(kind)}
-          >
+          <Chip key={kind} pressed={filter.kinds.has(kind)} onClick={() => toggleKind(kind)}>
             {KIND_LABELS[kind]}
-          </button>
+          </Chip>
         ))}
-        <button
-          type="button"
-          className="chip"
-          aria-pressed={filter.hd}
-          title="Nova's HD-catalogue rows, hidden by default: most duplicate a brighter star"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={toggleHd}
-        >
+        <Chip pressed={filter.hd} onClick={toggleHd} title="Nova's HD-catalogue rows, hidden by default: most duplicate a brighter star">
           HD stars
-        </button>
+        </Chip>
       </div>
       <div className="tab-actions">
         <button className="secondary" disabled={!editable} onMouseDown={(e) => e.preventDefault()} onClick={() => bulk(true)}>

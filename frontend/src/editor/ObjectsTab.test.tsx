@@ -9,13 +9,13 @@ import { makeDoc } from './testDoc'
 // The toggle runs the browser placer, which measures text on a real canvas — vitest has none,
 // so the failing path is reached by making the module throw on demand.
 const placer = vi.hoisted(() => ({ throws: false }))
-vi.mock('./editing', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./editing')>()
+vi.mock('./placement', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./placement')>()
   return {
     ...actual,
-    toggleWithPlacement: (...args: Parameters<typeof actual.toggleWithPlacement>) => {
+    placeNewLabel: (...args: Parameters<typeof actual.placeNewLabel>) => {
       if (placer.throws) throw new Error('this browser could not open a canvas to measure text with')
-      return actual.toggleWithPlacement(...args)
+      return actual.placeNewLabel(...args)
     },
   }
 })

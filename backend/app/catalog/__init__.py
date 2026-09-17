@@ -12,7 +12,7 @@ import json
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, cast, get_args
 
 Kind = Literal["galaxy", "nebula", "cluster"]
 
@@ -52,10 +52,9 @@ def _kinds() -> dict[str, Kind]:
     for name, kind in _data()["kinds"].items():
         # The table is bundled at build time, so anything outside the three kinds is a defect in
         # the generator, not user data: fail loudly rather than drop the row.
-        if kind == "galaxy" or kind == "nebula" or kind == "cluster":
-            out[normalise(name)] = kind
-        else:
+        if kind not in get_args(Kind):
             raise ValueError(f"names.json: unknown kind {kind!r} for {name!r}")
+        out[normalise(name)] = cast(Kind, kind)
     return out
 
 

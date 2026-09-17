@@ -6,7 +6,7 @@ import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
 import LabelTextEditor from './LabelTextEditor'
 import LabelToolbar from './LabelToolbar'
 import { LabelTextShape } from './LabelTextShape'
-import { disableAll, getMeasurer, isEditable, toggleWithPlacement } from './editing'
+import { disableAll, getMeasurer, isEditable, tryToggleWithPlacement } from './editing'
 import { primaryName } from './names'
 import { CANVAS_SIZE_ERROR, drawErrorNotice, previewErrorSentence, probeStatus } from './notices'
 import {
@@ -287,10 +287,9 @@ export default function EditorCanvas() {
     el: HTMLImageElement | null
     error: string | null
   } | null>(null)
-  const [drawErrors, setDrawErrors] = useState<ReadonlyMap<number, string>>(new Map())
-  // The font those failures belong to: picking another one is a fresh attempt for every label
-  // (see the shape's key below), so the whole map is dropped when it changes.
-  const [drawErrorFont, setDrawErrorFont] = useState<string | null>(null)
+  // Each failure remembers the font it happened under: picking another one is a fresh attempt
+  // for every label (see the shape's key below), so those entries stop counting.
+  const [drawErrors, setDrawErrors] = useState<ReadonlyMap<number, { font: string; message: string }>>(new Map())
   // A toolbar action that threw (the placer measures text, so Reset position can fail). Tagged
   // with the selection it was raised for, the same hook the toolbar's own drafts use, so it
   // clears itself the moment the selection moves on.
@@ -387,19 +386,20 @@ export default function EditorCanvas() {
   // Every label whose draw threw, in failure order; the notice counts them and names the first.
   // A label that keeps failing reports once (the shape stops drawing after its first throw).
   const onDrawError = useCallback((id: number, message: string) => {
-    setDrawErrors((prev) => (prev.has(id) ? prev : new Map(prev).set(id, message)))
+    const font = useEditor.getState().style?.font_file ?? ''
+    setDrawErrors((prev) => (prev.has(id) ? prev : new Map(prev).set(id, { font, message })))
   }, [])
 
-  // Only the failures of labels the layer still draws: a label disabled, undone away or left
-  // behind by a re-solve is no longer failing, and the notice must stop counting it.
+  // Only the failures that still stand: of labels the layer still draws (a label disabled, undone
+  // away or left behind by a re-solve is no longer failing) and under the current font.
   const liveDrawErrors = useMemo(() => {
     const drawn = new Set(entries.map((e) => e.label.object_id))
     const live = new Map<number, string>()
-    for (const [id, message] of drawErrors) {
-      if (drawn.has(id)) live.set(id, message)
+    for (const [id, { font, message }] of drawErrors) {
+      if (drawn.has(id) && font === style?.font_file) live.set(id, message)
     }
     return live
-  }, [drawErrors, entries])
+  }, [drawErrors, entries, style])
 
   // A press selects: plain replaces the selection unless the label is already in it (so a drag
   // of one selected label moves the whole group), shift toggles membership.
@@ -605,17 +605,10 @@ export default function EditorCanvas() {
             onMouseEnter={() => hover(id)}
             onMouseLeave={() => hover(null)}
             // Left button only, and not after a pan or a label drag that happened to end over
-            // this marker: the click Konva fires then is not a toggle. The placer measures text,
-            // so this can throw (a stale font) — a dead click would say nothing.
+            // this marker: the click Konva fires then is not a toggle. `tryToggleWithPlacement` catches a
+            // placer that throws (a stale font) and says so, rather than a dead click.
             onClick={(e) => {
-              if (e.evt.button !== 0 || movedRef.current) return
-              setToggleError(null)
-              try {
-                toggleWithPlacement(id)
-              } catch (err) {
-                console.error('toggle failed', err)
-                setToggleError('The label could not be changed; nothing was altered.')
-              }
+              if (e.evt.button === 0 && !movedRef.current) tryToggleWithPlacement(id, setToggleError)
             }}
           />
         )
@@ -764,13 +757,6 @@ export default function EditorCanvas() {
   // before anything is committed to the DOM.
   const editing = editingId === null ? null : (entries.find((e) => e.label.object_id === editingId) ?? null)
   if (editingId !== null && editing === null) setEditingId(null)
-
-  // Same pattern, for the same reason: the draw failures are the old font's, and the shapes have
-  // been remounted to try the new one.
-  if (drawErrorFont !== style.font_file) {
-    setDrawErrorFont(style.font_file)
-    if (drawErrors.size > 0) setDrawErrors(new Map())
-  }
 
   const notices: { text: string; error: boolean }[] = []
   if (previewError) notices.push({ text: previewError, error: true })
