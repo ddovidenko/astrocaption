@@ -377,6 +377,8 @@ NOT_RESUMABLE_MESSAGE = (
 ALREADY_SOLVED_MESSAGE = "This image is already solved; use Re-solve to solve it again."
 CONFLICT_MESSAGE = "This image was changed elsewhere. Reload to continue editing."
 NOT_SOLVED_MESSAGE = "Image has not been solved yet."
+# The three sentences below mean "the document is stale": the editor recognises them by the
+# `labels:` prefix and offers Reload instead of Retry (notices.ts `isStaleDocumentError`).
 OBJECTS_DUPLICATE_MESSAGE = "labels: each of this image's objects may appear only once."
 OBJECTS_UNKNOWN_MESSAGE = "labels: every label must name one of this image's objects."
 OBJECTS_MISSING_MESSAGE = "labels: the document must list every one of this image's objects."
@@ -567,7 +569,10 @@ async def download_export(image_id: str, settings: SettingsDep, db: DbDep) -> Fi
     )
 
 
-@router.get("/{image_id}/files/{kind}")
+# GET and HEAD: a failed <img> in the editor carries no status, so it probes this URL again with
+# HEAD (notices.ts `probeStatus`) — without it FastAPI would answer 405 before the session check.
+# FileResponse serves a HEAD as headers only.
+@router.api_route("/{image_id}/files/{kind}", methods=["GET", "HEAD"])
 async def image_file(
     image_id: str, kind: FileKind, settings: SettingsDep, db: DbDep
 ) -> FileResponse:

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
+from app import catalog
 from app.catalog import enrich_names, kind_for, normalise
 from app.models import (
     SolveObject,
@@ -231,3 +235,23 @@ def test_kind_for_reads_openngc_types() -> None:
     assert kind_for(["NGC 2244"]) == "nebula"
     assert kind_for(["Hatysa"]) is None
     assert kind_for([]) is None
+
+
+def test_kind_for_rejects_an_unknown_kind_in_the_bundled_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """names.json is built at image-build time, so a kind outside the three is a deployment
+    defect: the catalogue must say so instead of quietly dropping the row."""
+    bad = tmp_path / "names.json"
+    bad.write_text(json.dumps({"aliases": [], "kinds": {"NGC 1": "comet"}}), encoding="utf-8")
+    monkeypatch.setattr(catalog, "NAMES_FILE", bad)
+    try:
+        catalog._data.cache_clear()
+        catalog._kinds.cache_clear()
+        catalog._index.cache_clear()
+        with pytest.raises(ValueError, match="comet"):
+            kind_for(["NGC 1"])
+    finally:
+        catalog._data.cache_clear()
+        catalog._kinds.cache_clear()
+        catalog._index.cache_clear()

@@ -117,6 +117,21 @@ def test_upload_stores_original_untouched_with_derivatives(
     assert [i["id"] for i in listed] == [body["id"]]
 
 
+def test_preview_file_answers_head_for_the_editor_probe(
+    anon_client: TestClient, client: TestClient, sample_jpeg: Path
+) -> None:
+    """A failed <img> carries no status, so the editor asks the same URL again with HEAD to tell
+    an expired session from a broken file (notices.ts `probeStatus`). The route has to answer
+    HEAD — a 405 would come before the session check and hide the 401."""
+    image_id = upload(client, sample_jpeg)["id"]
+    assert anon_client.head(f"/api/images/{image_id}/files/preview").status_code == 401
+    head = client.head(f"/api/images/{image_id}/files/preview")
+    get = client.get(f"/api/images/{image_id}/files/preview")
+    assert head.status_code == 200
+    assert head.content == b""
+    assert head.headers["content-length"] == get.headers["content-length"]
+
+
 def test_upload_title_defaults_to_filename(client: TestClient, sample_jpeg: Path) -> None:
     assert upload(client, sample_jpeg)["title"] == "orion"
 
