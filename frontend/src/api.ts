@@ -102,12 +102,18 @@ export interface Annotations {
 /** What the editor sends back: its document minus the server-owned fields. Mirrors AnnotationsUpdate. */
 export type AnnotationsUpdate = Pick<Annotations, 'style' | 'labels' | 'version'>
 
-/** A catalogued object; `primary_name` already follows the image's name preference. Mirrors ObjectOut. */
+export type ObjectKind = 'galaxy' | 'nebula' | 'cluster' | 'star' | 'other'
+
+/** A catalogued object. `primary_name` is the server's ranking under the preference stored at
+ *  fetch time (used by the plain export page); the editor ranks `catalog_names` itself with
+ *  `names.ts` so a Style-tab preference change updates every name at once (#94). `kind` is the
+ *  Objects-tab bucket (nova `bright`/`hd` rows are `star`; OpenNGC classifies the rest). */
 export interface ObjectOut {
   id: number
   catalog_names: string[]
   primary_name: string
   type: string
+  kind: ObjectKind
   x: number
   y: number
   radius: number

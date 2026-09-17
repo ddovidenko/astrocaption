@@ -7,6 +7,7 @@ import LabelTextEditor from './LabelTextEditor'
 import LabelToolbar from './LabelToolbar'
 import { LabelTextShape } from './LabelTextShape'
 import { disableAll, getMeasurer, isEditable, toggleWithPlacement } from './editing'
+import { primaryName } from './names'
 import {
   MAX_FONT_SIZE,
   MIN_FONT_SIZE,
@@ -805,7 +806,7 @@ export default function EditorCanvas() {
         )}
         {hovered && tip && (
           <div className="editor-tooltip" style={{ left: tip.x + 12, top: tip.y + 12 }}>
-            {hovered.primary_name}
+            {primaryName(hovered.catalog_names, style.name_preference)}
           </div>
         )}
         {/* Hidden while the text editor is open, so the two overlays never stack. */}

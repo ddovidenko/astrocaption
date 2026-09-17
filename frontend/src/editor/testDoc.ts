@@ -34,8 +34,8 @@ export function makeDoc(): LoadedDocument {
   }
 
   const objects: ObjectOut[] = [
-    { id: 1, catalog_names: ['NGC 1976', 'M 42'], primary_name: 'M 42', type: 'ngc', x: 1500, y: 1000, radius: 40 },
-    { id: 2, catalog_names: ['Alnitak'], primary_name: 'Alnitak', type: 'bright', x: 1560, y: 1010, radius: 0 },
+    { id: 1, catalog_names: ['NGC 1976', 'M 42'], primary_name: 'M 42', type: 'ngc', kind: 'nebula', x: 1500, y: 1000, radius: 40 },
+    { id: 2, catalog_names: ['Alnitak'], primary_name: 'Alnitak', type: 'bright', kind: 'star', x: 1560, y: 1010, radius: 0 },
   ]
 
   const style: StyleConfig = {
@@ -104,7 +104,17 @@ export function withThirdObject(
   obj: Partial<ObjectOut> = {},
   label: Partial<Label> = {},
 ): LoadedDocument {
-  const object: ObjectOut = { id: 3, catalog_names: ['X'], primary_name: 'X', type: 'ngc', x: 2500, y: 1800, radius: 0, ...obj }
+  const object: ObjectOut = {
+    id: 3,
+    catalog_names: ['X'],
+    primary_name: 'X',
+    type: 'ngc',
+    kind: 'other',
+    x: 2500,
+    y: 1800,
+    radius: 0,
+    ...obj,
+  }
   doc.objects.push(object)
   doc.annotations.labels.push({ ...doc.annotations.labels[1]!, object_id: 3, x: object.x, y: object.y, ...label })
   return doc
