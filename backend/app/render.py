@@ -4,12 +4,16 @@ The browser canvas (milestone 3) must implement the same layout rules:
   * a label is one or two lines drawn from its top-left corner ``(x, y)``;
   * line height is ``ceil(size * LINE_HEIGHT)``; the alias line uses ``ALIAS_SCALE``;
   * the marker is a circle of radius ``max(catalogue radius, style.marker_min_radius)``;
-  * the leader runs from the marker edge to the closest point of the text box.
+  * the leader runs from the marker edge to the closest point of the text box, unless that
+    segment cuts another enabled object's ring: then the first of the box's edge midpoints
+    (top, right, bottom, left) and corners (top-left, top-right, bottom-right, bottom-left)
+    whose segment is clear, and the closest point again when none is (#14).
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,7 +22,7 @@ from PIL import Image, ImageDraw, JpegImagePlugin
 
 from .fonts import load_font, resolved_style
 from .models import MIN_FONT_SIZE, Annotations, Label, SolveObject, StyleConfig
-from .placement import Box, scale_unit
+from .placement import PAD_FACTOR, Box, Circle, scale_unit
 from .storage import is_jpeg, to_rgb, write_preview
 
 ALIAS_SCALE = 0.7
@@ -115,18 +119,71 @@ def measure_label(fonts_dir: Path, style: StyleConfig, label: Label, obj: SolveO
     )
 
 
-def leader_segment(
-    cx: float, cy: float, r: float, box: Box
-) -> tuple[tuple[float, float], tuple[float, float], float] | None:
-    """Segment from the marker edge to the closest point of ``box`` and the gap between them."""
+Point = tuple[float, float]
+
+
+def segment_crosses_ring(a: Point, b: Point, c: Circle, pad: float) -> bool:
+    """True when the segment ``a``–``b`` cuts the ring's outline (inflated by ``pad``).
+
+    The counterpart of ``placement.box_crosses_ring``: a leader entirely inside a big marker
+    (a Trapezium star's, inside M 42) or entirely outside it is fine; one that passes through
+    the drawn ring is not.
+    """
+    ax, ay = a[0] - c.x, a[1] - c.y
+    bx, by = b[0] - c.x, b[1] - c.y
+    dx, dy = bx - ax, by - ay
+    length_sq = dx * dx + dy * dy
+    t = 0.0 if length_sq == 0 else min(1.0, max(0.0, -(ax * dx + ay * dy) / length_sq))
+    nearest = math.hypot(ax + t * dx, ay + t * dy)
+    farthest = max(math.hypot(ax, ay), math.hypot(bx, by))
+    return nearest < c.r + pad and farthest > c.r - pad
+
+
+def _leader_candidates(cx: float, cy: float, box: Box) -> list[Point]:
+    """Endpoints on the box in preference order: nearest point, edge midpoints, corners."""
     nx = min(max(cx, box.left), box.right)
     ny = min(max(cy, box.top), box.bottom)
-    dx, dy = nx - cx, ny - cy
-    dist = math.hypot(dx, dy)
-    if dist <= r:
-        return None
-    ux, uy = dx / dist, dy / dist
-    return (cx + ux * r, cy + uy * r), (nx, ny), dist - r
+    mx, my = (box.left + box.right) / 2, (box.top + box.bottom) / 2
+    return [
+        (nx, ny),
+        (mx, box.top),
+        (box.right, my),
+        (mx, box.bottom),
+        (box.left, my),
+        (box.left, box.top),
+        (box.right, box.top),
+        (box.right, box.bottom),
+        (box.left, box.bottom),
+    ]
+
+
+def leader_segment(
+    cx: float,
+    cy: float,
+    r: float,
+    box: Box,
+    obstacles: Sequence[Circle] = (),
+    pad: float = 0.0,
+) -> tuple[Point, Point, float] | None:
+    """Segment from the marker edge to ``box`` and the gap between them.
+
+    The endpoint is the first candidate (nearest point, edge midpoints, corners) whose segment
+    crosses none of the ``obstacles`` rings, or the nearest point when every candidate does.
+    ``None`` when the box reaches the marker.
+    """
+    fallback: tuple[Point, Point, float] | None = None
+    for px, py in _leader_candidates(cx, cy, box):
+        dx, dy = px - cx, py - cy
+        dist = math.hypot(dx, dy)
+        if dist <= r:
+            return None  # the nearest point comes first, so the box reaches the marker
+        ux, uy = dx / dist, dy / dist
+        seg = ((cx + ux * r, cy + uy * r), (px, py), dist - r)
+        if fallback is None:
+            fallback = seg
+        if not any(segment_crosses_ring(seg[0], seg[1], c, pad) for c in obstacles):
+            return seg
+    return fallback
 
 
 def leader_visible(label: Label, gap: float, s: float) -> bool:
@@ -146,6 +203,12 @@ def draw_annotations(
     by_id = {o.id: o for o in objects}
     s = scale_unit(img.width, img.height)
     stroke = style.halo_width if style.halo else 0
+    pad = PAD_FACTOR * s
+    rings = {
+        label.object_id: Circle(o.x, o.y, marker_radius(o, style))
+        for label in ann.labels
+        if label.enabled and (o := by_id.get(label.object_id)) is not None
+    }
 
     for label in ann.labels:
         obj = by_id.get(label.object_id)
@@ -159,7 +222,8 @@ def draw_annotations(
         )
         box = measure_label(fonts_dir, style, label, obj)
         rect = Box(label.x, label.y, label.x + box.width, label.y + box.height)
-        seg = leader_segment(obj.x, obj.y, r, rect)
+        others = [c for oid, c in rings.items() if oid != label.object_id]
+        seg = leader_segment(obj.x, obj.y, r, rect, others, pad)
         if seg is not None and leader_visible(label, seg[2], s):
             draw.line([seg[0], seg[1]], fill=style.leader_color, width=style.marker_width)
         text = label_text(obj, label, style)
