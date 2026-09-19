@@ -71,7 +71,8 @@ export interface LabelLines {
 
 /** Both lines from the object's raw names and the *store's* style (names.ts): a preference or
  *  cap change re-measures at once, and the export builds the same lines from the same rules
- *  (#64). `obj.primary_name` is the server's ranking at fetch time, kept for the Objects tab. */
+ *  (#64). `obj.primary_name` is the server's ranking at fetch time, used by the plain export
+ *  page only. */
 export function labelText(obj: ObjectOut, label: Label, style: StyleConfig): LabelLines {
   const override = (label.text_override ?? '').trim()
   const primary = override || primaryName(obj.catalog_names, style.name_preference)

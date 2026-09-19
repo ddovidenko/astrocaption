@@ -82,6 +82,10 @@ class SolveObject(BaseModel):
         return self.aliases_for()
 
 
+ObjectKind = Literal["galaxy", "nebula", "cluster", "star", "other"]
+"""Objects-tab bucket, computed at read time from OpenNGC's type (see ``app.catalog.kind_for``)
+and nova's object type."""
+
 NamePreference = Literal["popular", "ngc_ic"]
 """Which catalogue designation becomes the label's primary line.
 
@@ -500,6 +504,9 @@ class ObjectOut(BaseModel):
     catalog_names: list[str]
     primary_name: str
     type: str
+    #: Objects-tab bucket, computed at read time: nova's ``bright``/``hd`` rows are ``star``, rows
+    #: OpenNGC classifies take its kind, everything else is ``other``.
+    kind: ObjectKind
     x: float
     y: float
     radius: float

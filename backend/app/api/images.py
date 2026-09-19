@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from ..catalog import kind_for
 from ..config import Settings, SettingsSource
 from ..db import Database
 from ..fonts import list_fonts, resolved_style
@@ -29,6 +30,7 @@ from ..models import (
     ImageOut,
     ImageRecord,
     NamePreference,
+    ObjectKind,
     ObjectOut,
     SolveHints,
     SolveObject,
@@ -333,11 +335,15 @@ async def list_objects(image_id: str, db: DbDep) -> list[ObjectOut]:
 
 
 def _object_out(o: SolveObject, preference: NamePreference) -> ObjectOut:
+    kind: ObjectKind = (
+        "star" if o.type in ("bright", "hd") else (kind_for(o.catalog_names) or "other")
+    )
     return ObjectOut(
         id=o.id,
         catalog_names=o.catalog_names,
         primary_name=o.primary_name_for(preference),
         type=o.type,
+        kind=kind,
         x=o.x,
         y=o.y,
         radius=o.radius,
@@ -371,6 +377,8 @@ NOT_RESUMABLE_MESSAGE = (
 ALREADY_SOLVED_MESSAGE = "This image is already solved; use Re-solve to solve it again."
 CONFLICT_MESSAGE = "This image was changed elsewhere. Reload to continue editing."
 NOT_SOLVED_MESSAGE = "Image has not been solved yet."
+# The three sentences below mean "the document is stale": the editor recognises them by the
+# `labels:` prefix and offers Reload instead of Retry (notices.ts `isStaleDocumentError`).
 OBJECTS_DUPLICATE_MESSAGE = "labels: each of this image's objects may appear only once."
 OBJECTS_UNKNOWN_MESSAGE = "labels: every label must name one of this image's objects."
 OBJECTS_MISSING_MESSAGE = "labels: the document must list every one of this image's objects."
@@ -561,7 +569,12 @@ async def download_export(image_id: str, settings: SettingsDep, db: DbDep) -> Fi
     )
 
 
+# GET and HEAD: a failed <img> in the editor carries no status, so it probes this URL again with
+# HEAD (notices.ts `probeStatus`) — without it FastAPI would answer 405 before the session check.
+# FileResponse serves a HEAD as headers only. Two routes rather than one with both methods: FastAPI
+# would give them the same operation id and warn that the OpenAPI schema has a duplicate.
 @router.get("/{image_id}/files/{kind}")
+@router.head("/{image_id}/files/{kind}", include_in_schema=False)
 async def image_file(
     image_id: str, kind: FileKind, settings: SettingsDep, db: DbDep
 ) -> FileResponse:

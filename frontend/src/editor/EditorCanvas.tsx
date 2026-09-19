@@ -6,7 +6,9 @@ import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
 import LabelTextEditor from './LabelTextEditor'
 import LabelToolbar from './LabelToolbar'
 import { LabelTextShape } from './LabelTextShape'
-import { disableAll, getMeasurer, isEditable, toggleWithPlacement } from './editing'
+import { disableAll, getMeasurer, isEditable, tryToggleWithPlacement } from './editing'
+import { primaryName } from './names'
+import { CANVAS_SIZE_ERROR, drawErrorNotice, previewErrorSentence, probeStatus } from './notices'
 import {
   MAX_FONT_SIZE,
   MIN_FONT_SIZE,
@@ -114,7 +116,7 @@ interface EntryProps {
   /** Whether Space is held: a pan gesture, which wins over selecting or dragging a label. Held in
    *  React state so `draggable` can turn off before Konva sees the press. */
   spacePan: boolean
-  onDrawError: (message: string) => void
+  onDrawError: (id: number, message: string) => void
 }
 
 /** One object's marker, leader and draggable label. Memoised on the cached `Entry`, so a drag
@@ -187,7 +189,17 @@ const LabelEntry = memo(function LabelEntry({
         onDragMove={(e) => moveLabel(label.object_id, e.target.x(), e.target.y(), false)}
         onDragEnd={(e) => moveLabel(label.object_id, e.target.x(), e.target.y())}
       >
-        <LabelTextShape label={label} style={style} font={font} box={box} text={text} onDrawError={onDrawError} />
+        <LabelTextShape
+          // A new font is a fresh attempt: remounting drops the shape's "already failed" flag, so
+          // a label that failed under the old file draws again instead of staying blank.
+          key={style.font_file}
+          label={label}
+          style={style}
+          font={font}
+          box={box}
+          text={text}
+          onDrawError={(m) => onDrawError(label.object_id, m)}
+        />
       </Group>
     </Group>
   )
@@ -275,11 +287,16 @@ export default function EditorCanvas() {
     el: HTMLImageElement | null
     error: string | null
   } | null>(null)
-  const [drawError, setDrawError] = useState<string | null>(null)
+  // Each failure remembers the font it happened under: picking another one is a fresh attempt
+  // for every label (see the shape's key below), so those entries stop counting.
+  const [drawErrors, setDrawErrors] = useState<ReadonlyMap<number, { font: string; message: string }>>(new Map())
   // A toolbar action that threw (the placer measures text, so Reset position can fail). Tagged
   // with the selection it was raised for, the same hook the toolbar's own drafts use, so it
   // clears itself the moment the selection moves on.
   const [toolbarError, setToolbarError] = useTaggedDraft<string>([selectedIds])
+  // A marker click whose placement threw. Not tagged with the selection like the toolbar's error:
+  // a click on a marker is not a selection change, so it is cleared by the next click.
+  const [toggleError, setToggleError] = useState<string | null>(null)
   const [sizeError, setSizeError] = useState<string | null>(null)
   const [panning, setPanning] = useState(false)
 
@@ -310,7 +327,7 @@ export default function EditorCanvas() {
       const w = Math.floor(rect.width)
       const h = Math.floor(rect.height)
       if (w > 0 && h > 0) apply(w, h)
-      else setSizeError('The editor could not size its canvas.')
+      else setSizeError(CANVAS_SIZE_ERROR)
     }, 250)
     return () => {
       window.clearTimeout(fallback)
@@ -332,14 +349,12 @@ export default function EditorCanvas() {
       if (!cancelled) setLoadedPreview({ src, el, error: null })
     }
     el.onerror = () => {
-      if (!cancelled) {
-        setLoadedPreview({
-          src,
-          el: null,
-          error:
-            'The preview image for this photo could not be loaded. Reload the page; if it keeps failing, re-upload the image.',
-        })
-      }
+      if (cancelled) return
+      // The bitmap says only that it failed; the status decides the sentence (a 401 is the
+      // session, not the file).
+      void probeStatus(src).then((status) => {
+        if (!cancelled) setLoadedPreview({ src, el: null, error: previewErrorSentence(status) })
+      })
     }
     el.src = src
     return () => {
@@ -368,10 +383,23 @@ export default function EditorCanvas() {
     return { entries: out, orphans }
   }, [image, style, labels, objects, measure])
 
-  // The first draw failure of any label becomes one notice; the shape itself stops drawing.
-  const onDrawError = useCallback((message: string) => {
-    setDrawError((prev) => prev ?? message)
+  // Every label whose draw threw, in failure order; the notice counts them and names the first.
+  // A label that keeps failing reports once (the shape stops drawing after its first throw).
+  const onDrawError = useCallback((id: number, message: string) => {
+    const font = useEditor.getState().style?.font_file ?? ''
+    setDrawErrors((prev) => (prev.has(id) ? prev : new Map(prev).set(id, { font, message })))
   }, [])
+
+  // Only the failures that still stand: of labels the layer still draws (a label disabled, undone
+  // away or left behind by a re-solve is no longer failing) and under the current font.
+  const liveDrawErrors = useMemo(() => {
+    const drawn = new Set(entries.map((e) => e.label.object_id))
+    const live = new Map<number, string>()
+    for (const [id, { font, message }] of drawErrors) {
+      if (drawn.has(id) && font === style?.font_file) live.set(id, message)
+    }
+    return live
+  }, [drawErrors, entries, style])
 
   // A press selects: plain replaces the selection unless the label is already in it (so a drag
   // of one selected label moves the whole group), shift toggles membership.
@@ -425,8 +453,12 @@ export default function EditorCanvas() {
         setSpacePan(true)
         return
       }
-      // Undo/redo: Ctrl (Cmd on macOS) + Z / Y / Shift+Z. Fields keep their own undo.
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !inField()) {
+      // Undo/redo: Ctrl (Cmd on macOS) + Z / Y / Shift+Z. Fields keep their own undo — except a
+      // checkbox (an Objects-tab row keeps the focus after a click), which has none, so the
+      // editor's history answers from there. Every other shortcut still treats it as a field.
+      const el = document.activeElement
+      const checkboxFocused = el instanceof HTMLInputElement && el.type === 'checkbox' && !el.closest('.label-toolbar')
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (!inField() || checkboxFocused)) {
         const key = e.key.toLowerCase()
         if (key === 'z' && !e.shiftKey) {
           e.preventDefault()
@@ -577,15 +609,26 @@ export default function EditorCanvas() {
             onMouseEnter={() => hover(id)}
             onMouseLeave={() => hover(null)}
             // Left button only, and not after a pan or a label drag that happened to end over
-            // this marker: the click Konva fires then is not a toggle.
+            // this marker: the click Konva fires then is not a toggle. `tryToggleWithPlacement` catches a
+            // placer that throws (a stale font) and says so, rather than a dead click.
             onClick={(e) => {
-              if (e.evt.button === 0 && !movedRef.current) toggleWithPlacement(id)
+              if (e.evt.button === 0 && !movedRef.current) tryToggleWithPlacement(id, setToggleError)
             }}
           />
         )
       }),
     [objectOrder, objects, style, view.scale, hover],
   )
+
+  // While a solve runs the toggle above no-ops; the cursor over a marker says so (#76). An effect,
+  // not the hover handlers: `editable` can flip while the pointer already rests on a marker, and
+  // no mouseenter would follow to correct the cursor.
+  useEffect(() => {
+    const el = stageRef.current?.container()
+    if (!el) return
+    if (!editable && hoveredId !== null) el.style.setProperty('cursor', 'not-allowed')
+    else el.style.removeProperty('cursor')
+  }, [editable, hoveredId])
 
   // A click on the empty background (never on a label or a marker) clears the selection; a click
   // that ended a pan does not.
@@ -722,8 +765,14 @@ export default function EditorCanvas() {
   const notices: { text: string; error: boolean }[] = []
   if (previewError) notices.push({ text: previewError, error: true })
   if (sizeError) notices.push({ text: sizeError, error: true })
-  if (drawError) notices.push({ text: `Some labels could not be drawn: ${drawError}`, error: true })
+  if (liveDrawErrors.size > 0) {
+    const [firstId, firstMessage] = liveDrawErrors.entries().next().value as [number, string]
+    const first = objects.get(firstId)
+    const name = first ? primaryName(first.catalog_names, style.name_preference) : `object ${firstId}`
+    notices.push({ text: drawErrorNotice(liveDrawErrors.size, name, firstMessage), error: true })
+  }
   if (toolbarError) notices.push({ text: toolbarError, error: true })
+  if (toggleError) notices.push({ text: toggleError, error: true })
   if (orphans > 0) {
     notices.push({
       text: `${orphans} label(s) refer to objects this image no longer has; they are not shown.`,
@@ -805,7 +854,7 @@ export default function EditorCanvas() {
         )}
         {hovered && tip && (
           <div className="editor-tooltip" style={{ left: tip.x + 12, top: tip.y + 12 }}>
-            {hovered.primary_name}
+            {primaryName(hovered.catalog_names, style.name_preference)}
           </div>
         )}
         {/* Hidden while the text editor is open, so the two overlays never stack. */}

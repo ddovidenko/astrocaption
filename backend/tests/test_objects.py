@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
-from app.catalog import enrich_names, normalise
+from app import catalog
+from app.catalog import enrich_names, kind_for, normalise
 from app.models import (
     SolveObject,
     StyleConfig,
@@ -218,3 +222,36 @@ def test_max_aliases_bounds() -> None:
         StyleConfig(max_aliases=6)
     with pytest.raises(ValidationError):
         StyleOverrides(max_aliases=-1)
+
+
+def test_kind_for_reads_openngc_types() -> None:
+    assert kind_for(["NGC 1976", "M 42"]) == "nebula"
+    assert kind_for(["NGC 7000"]) == "nebula"  # North America Nebula, type "HII"
+    assert kind_for(["ngc0224"]) == "galaxy"  # normalised like every other lookup
+    assert kind_for(["NGC 1912"]) == "cluster"
+    # NGC 2239 (the Rosette's cluster+nebulosity) is OpenNGC type "Cl+N", so it's a nebula, not a
+    # cluster; NGC 2244 is its OpenNGC 'Dup' and inherits the same kind.
+    assert kind_for(["NGC 2239"]) == "nebula"
+    assert kind_for(["NGC 2244"]) == "nebula"
+    assert kind_for(["Hatysa"]) is None
+    assert kind_for([]) is None
+
+
+def test_kind_for_rejects_an_unknown_kind_in_the_bundled_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """names.json is built at image-build time, so a kind outside the three is a deployment
+    defect: the catalogue must say so instead of quietly dropping the row."""
+    bad = tmp_path / "names.json"
+    bad.write_text(json.dumps({"aliases": [], "kinds": {"NGC 1": "comet"}}), encoding="utf-8")
+    monkeypatch.setattr(catalog, "NAMES_FILE", bad)
+    try:
+        catalog._data.cache_clear()
+        catalog._kinds.cache_clear()
+        catalog._index.cache_clear()
+        with pytest.raises(ValueError, match="comet"):
+            kind_for(["NGC 1"])
+    finally:
+        catalog._data.cache_clear()
+        catalog._kinds.cache_clear()
+        catalog._index.cache_clear()

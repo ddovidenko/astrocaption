@@ -4,6 +4,7 @@
 
 import { api, ApiError, describeError, type Annotations, type AnnotationsUpdate } from '../api'
 import { isEditable } from './editing'
+import { isStaleDocumentError, STALE_DOCUMENT_MESSAGE } from './notices'
 import { documentForSave, useEditor, type SaveStatus } from './store'
 
 export const AUTOSAVE_DELAY_MS = 500
@@ -73,6 +74,10 @@ function run(c: Controller): Promise<void> | null {
       if (!c.alive) return
       if (err instanceof ApiError && err.status === 409) {
         useEditor.getState().markConflict(err.message)
+      } else if (err instanceof ApiError && isStaleDocumentError(err)) {
+        // The server's validation sentence would sit in the toolbar with a Retry that can never
+        // succeed; the conflict state offers Reload instead (#77).
+        useEditor.getState().markConflict(STALE_DOCUMENT_MESSAGE)
       } else {
         useEditor.getState().markSaveError(describeError(err))
       }
