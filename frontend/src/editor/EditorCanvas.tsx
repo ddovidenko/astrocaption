@@ -442,9 +442,6 @@ export default function EditorCanvas() {
       // swatch and the picker are buttons and inputs, and Escape there closes the popover while
       // Delete/Backspace edits a hex — neither may clear the selection or disable its labels.
       if (el.closest('.label-toolbar')) return true
-      // A checkbox (an Objects-tab row, after a click) has no text to protect: Space toggles it,
-      // like a button, but Ctrl+Z must still reach the editor's history.
-      if (el instanceof HTMLInputElement && el.type === 'checkbox') return withButton
       const tags = withButton ? ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'] : ['INPUT', 'TEXTAREA', 'SELECT']
       return tags.includes(el.tagName)
     }
@@ -456,8 +453,12 @@ export default function EditorCanvas() {
         setSpacePan(true)
         return
       }
-      // Undo/redo: Ctrl (Cmd on macOS) + Z / Y / Shift+Z. Fields keep their own undo.
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !inField()) {
+      // Undo/redo: Ctrl (Cmd on macOS) + Z / Y / Shift+Z. Fields keep their own undo — except a
+      // checkbox (an Objects-tab row keeps the focus after a click), which has none, so the
+      // editor's history answers from there. Every other shortcut still treats it as a field.
+      const el = document.activeElement
+      const checkboxFocused = el instanceof HTMLInputElement && el.type === 'checkbox' && !el.closest('.label-toolbar')
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (!inField() || checkboxFocused)) {
         const key = e.key.toLowerCase()
         if (key === 'z' && !e.shiftKey) {
           e.preventDefault()
