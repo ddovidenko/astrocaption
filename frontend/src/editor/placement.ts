@@ -7,7 +7,18 @@
 // A larger object's marker only blocks its ring line: labels may sit inside a big nebula's
 // circle, they just must not cross the drawn outline. An object whose own circle spills past
 // the frame (M 31 filling the field) is labelled at its centre, as if it were a point.
-import { ANCHORS, anchorBox, markerRadius, measureLabel, scaleUnit, type Box, type TextMeasurer } from './metrics'
+import {
+  ANCHORS,
+  anchorBox,
+  markerRadius,
+  measureLabel,
+  scaleUnit,
+  type Box,
+  type Circle,
+  type TextMeasurer,
+} from './metrics'
+
+export type { Circle }
 import { enabledLabels, type EditorState } from './store'
 
 export const GAP_FACTOR = 6.0
@@ -30,12 +41,6 @@ export interface Placement {
   x: number
   y: number
   collided: boolean
-}
-
-export interface Circle {
-  x: number
-  y: number
-  r: number
 }
 
 export function boxesOverlap(a: Box, b: Box, pad: number): boolean {

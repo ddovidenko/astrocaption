@@ -404,6 +404,11 @@ export function labelFor(state: EditorState, id: number): Label | undefined {
  *  the canvas's draw order, and it matches the export only because `layout.py` builds the labels in
  *  object order; PR 5's save must keep `labels` in that order or the two renderers will stack
  *  overlapping labels differently. */
+/** The ids of the enabled labels in object order: unlike `enabledLabels`, unchanged by a move. */
+export function enabledObjectIds(state: EditorState): number[] {
+  return state.objectOrder.filter((id) => state.labels.get(id)?.enabled)
+}
+
 export function enabledLabels(state: EditorState): Label[] {
   const labels: Label[] = []
   for (const id of state.objectOrder) {

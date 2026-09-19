@@ -149,23 +149,79 @@ export interface Box {
   bottom: number
 }
 
+export interface Circle {
+  x: number
+  y: number
+  r: number
+}
+
 export interface LeaderSegment {
   from: [number, number]
   to: [number, number]
   gap: number
 }
 
-/** From the marker edge to the closest point of `box`, or null when the box reaches the marker. */
-export function leaderSegment(cx: number, cy: number, r: number, box: Box): LeaderSegment | null {
+/** Whether the segment a–b cuts the ring's outline (inflated by `pad`). The counterpart of
+ *  placement's `boxCrossesRing`: a leader entirely inside a big marker (a Trapezium star's,
+ *  inside M 42) or entirely outside it is fine; one that passes through the drawn ring is not.
+ *  Mirrors render.segment_crosses_ring, same arithmetic in the same order. */
+export function segmentCrossesRing(a: [number, number], b: [number, number], c: Circle, pad: number): boolean {
+  const ax = a[0] - c.x
+  const ay = a[1] - c.y
+  const bx = b[0] - c.x
+  const by = b[1] - c.y
+  const dx = bx - ax
+  const dy = by - ay
+  const lengthSq = dx * dx + dy * dy
+  const t = lengthSq === 0 ? 0 : Math.min(1, Math.max(0, -(ax * dx + ay * dy) / lengthSq))
+  const nearest = Math.hypot(ax + t * dx, ay + t * dy)
+  const farthest = Math.max(Math.hypot(ax, ay), Math.hypot(bx, by))
+  return nearest < c.r + pad && farthest > c.r - pad
+}
+
+/** Endpoints on the box in preference order: nearest point, edge midpoints, corners. */
+function leaderCandidates(cx: number, cy: number, box: Box): [number, number][] {
   const nx = Math.min(Math.max(cx, box.left), box.right)
   const ny = Math.min(Math.max(cy, box.top), box.bottom)
-  const dx = nx - cx
-  const dy = ny - cy
-  const dist = Math.hypot(dx, dy)
-  if (dist <= r) return null
-  const ux = dx / dist
-  const uy = dy / dist
-  return { from: [cx + ux * r, cy + uy * r], to: [nx, ny], gap: dist - r }
+  const mx = (box.left + box.right) / 2
+  const my = (box.top + box.bottom) / 2
+  return [
+    [nx, ny],
+    [mx, box.top],
+    [box.right, my],
+    [mx, box.bottom],
+    [box.left, my],
+    [box.left, box.top],
+    [box.right, box.top],
+    [box.right, box.bottom],
+    [box.left, box.bottom],
+  ]
+}
+
+/** From the marker edge to `box`: the first candidate (nearest point, edge midpoints, corners)
+ *  whose segment crosses none of the `obstacles` rings, or the nearest point when every
+ *  candidate does (#14). Null when the box reaches the marker. Mirrors render.leader_segment. */
+export function leaderSegment(
+  cx: number,
+  cy: number,
+  r: number,
+  box: Box,
+  obstacles: readonly Circle[] = [],
+  pad = 0,
+): LeaderSegment | null {
+  let fallback: LeaderSegment | null = null
+  for (const [px, py] of leaderCandidates(cx, cy, box)) {
+    const dx = px - cx
+    const dy = py - cy
+    const dist = Math.hypot(dx, dy)
+    if (dist <= r) return null // the nearest point comes first, so the box reaches the marker
+    const ux = dx / dist
+    const uy = dy / dist
+    const seg: LeaderSegment = { from: [cx + ux * r, cy + uy * r], to: [px, py], gap: dist - r }
+    fallback ??= seg
+    if (!obstacles.some((c) => segmentCrossesRing(seg.from, seg.to, c, pad))) return seg
+  }
+  return fallback
 }
 
 export function leaderVisible(label: Label, gap: number, s: number): boolean {

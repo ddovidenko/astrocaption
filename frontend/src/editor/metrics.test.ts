@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import raw from '../../../tests/fixtures/render/vectors.json'
 import type { FontOut, Label, LeaderMode, ObjectOut, StyleConfig } from '../api'
+import type { Circle } from './metrics'
 import {
   ANCHORS,
   MAX_FONT_SIZE,
@@ -10,6 +11,7 @@ import {
   fontShorthand,
   labelText,
   leaderSegment,
+  segmentCrossesRing,
   leaderVisible,
   markerRadius,
   markerStrokeRadius,
@@ -43,7 +45,9 @@ interface LeaderCase {
   cy: number
   r: number
   s: number
+  pad: number
   box: Box
+  obstacles: Circle[]
   segment: { from: [number, number]; to: [number, number]; gap: number } | null
   visible: Record<LeaderMode, boolean>
 }
@@ -185,7 +189,7 @@ describe('render vectors', () => {
     })
     expect(scaleUnit(3000, 2000)).toBe(vectors.leaders[0]!.s)
     for (const c of vectors.leaders) {
-      const seg = leaderSegment(c.cx, c.cy, c.r, c.box)
+      const seg = leaderSegment(c.cx, c.cy, c.r, c.box, c.obstacles, c.pad)
       if (c.segment === null) {
         expect(seg).toBeNull()
       } else {
@@ -203,10 +207,28 @@ describe('render vectors', () => {
     }
   })
 
+  it('covers the avoidance cases', () => {
+    expect(vectors.leaders.filter((c) => c.obstacles.length > 0).length).toBeGreaterThanOrEqual(5)
+  })
+
   it('reproduces every anchor box', () => {
     expect(vectors.anchors.map((c) => c.anchor).slice(0, ANCHORS.length)).toEqual([...ANCHORS])
     for (const c of vectors.anchors) {
       expectBox(anchorBox(c.anchor, c.cx, c.cy, c.offset, c.w, c.h), c.box)
     }
+  })
+})
+
+describe('segmentCrossesRing', () => {
+  const small = { x: 50, y: 0, r: 5 }
+  it('is true only when the segment cuts the padded outline', () => {
+    expect(segmentCrossesRing([10, 0], [100, 0], small, 4)).toBe(true)
+    expect(segmentCrossesRing([10, -8.5], [100, -8.5], small, 4)).toBe(true)
+    expect(segmentCrossesRing([10, -9], [100, -9], small, 4)).toBe(false)
+    // Entirely inside a big ring (a Trapezium star's leader inside M 42): clear.
+    expect(segmentCrossesRing([10, 0], [100, 0], { x: 30, y: 0, r: 500 }, 4)).toBe(false)
+    // From inside a big ring to outside it: crosses the outline.
+    expect(segmentCrossesRing([10, 0], [100, 0], { x: 30, y: 0, r: 60 }, 4)).toBe(true)
+    expect(segmentCrossesRing([10, 0], [50, 0], { x: 30, y: 0, r: 60 }, 4)).toBe(false)
   })
 })

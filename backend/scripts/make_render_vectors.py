@@ -38,7 +38,7 @@ from app.models import (
     StyleConfig,
 )
 from app.objects import objects_from_nova
-from app.placement import ANCHORS, Box, anchor_box, scale_unit
+from app.placement import ANCHORS, PAD_FACTOR, Box, Circle, anchor_box, scale_unit
 from app.render import label_text, leader_segment, leader_visible, marker_radius, measure_label
 
 OUT = REPO_ROOT / "tests" / "fixtures" / "render" / "vectors.json"
@@ -193,25 +193,39 @@ def leader_vectors() -> list[dict[str, Any]]:
     """A marker at the centre of a 3000 × 2000 frame and boxes around it: each side, a diagonal,
     a box near enough for ``auto`` to hide the leader, a box inside a big marker, a box that
     contains the marker centre, a zero-radius marker a fraction of a pixel from its box, and a
-    box at exactly 12·s."""
+    box at exactly 12·s. Then the avoidance cases (#14): another ring on the nearest point's
+    path that the top midpoint clears, rings on every midpoint's path that the top-left corner
+    clears, a big ring the box sits behind (nothing clears: nearest point), a leader entirely
+    inside a big ring (clear), and a box inside the marker (no segment, whatever the rings)."""
     width, height = 3000, 2000
     s = scale_unit(width, height)
+    pad = PAD_FACTOR * s
     cx, cy = 1500.0, 1000.0
-    geometries: list[tuple[float, Box]] = [
-        (18.0, Box(1560, 970, 1900, 1030)),  # right
-        (18.0, Box(1100, 970, 1440, 1030)),  # left
-        (18.0, Box(1330, 700, 1670, 760)),  # above
-        (18.0, Box(1330, 1240, 1670, 1300)),  # below
-        (18.0, Box(1540, 1040, 1880, 1100)),  # below-right, nearest point is a corner
-        (130.0, Box(1650, 970, 1990, 1030)),  # gap 20 < 12·s = 36: auto hides the leader
-        (130.0, Box(1520, 990, 1600, 1010)),  # inside the marker: no segment
-        (18.0, Box(1400, 950, 1600, 1050)),  # box contains the centre: no segment
-        (0.0, Box(1500.5, 1000.5, 1700, 1050)),  # point marker, box a fraction of a pixel away
-        (18.0, Box(1554.0, 985, 1900, 1030)),  # gap exactly 36 = 12·s: auto does not draw (>)
+    tall = Box(1600, 850, 1900, 1150)
+    geometries: list[tuple[float, Box, list[Circle]]] = [
+        (18.0, Box(1560, 970, 1900, 1030), []),  # right
+        (18.0, Box(1100, 970, 1440, 1030), []),  # left
+        (18.0, Box(1330, 700, 1670, 760), []),  # above
+        (18.0, Box(1330, 1240, 1670, 1300), []),  # below
+        (18.0, Box(1540, 1040, 1880, 1100), []),  # below-right, nearest point is a corner
+        (130.0, Box(1650, 970, 1990, 1030), []),  # gap 20 < 12·s = 36: auto hides the leader
+        (130.0, Box(1520, 990, 1600, 1010), []),  # inside the marker: no segment
+        (18.0, Box(1400, 950, 1600, 1050), []),  # box contains the centre: no segment
+        (0.0, Box(1500.5, 1000.5, 1700, 1050), []),  # point marker, box a fraction of a pixel away
+        (18.0, Box(1554.0, 985, 1900, 1030), []),  # gap exactly 36 = 12·s: auto does not draw (>)
+        (18.0, tall, [Circle(1550, 1000, 5)]),  # nearest blocked: top midpoint
+        (
+            18.0,
+            tall,
+            [Circle(1550, 1000, 5), Circle(1650, 910, 5), Circle(1650, 1090, 5)],
+        ),  # corner
+        (18.0, tall, [Circle(1530, 1000, 60)]),  # behind a big ring: nothing clears, nearest
+        (18.0, tall, [Circle(1530, 1000, 500)]),  # entirely inside a big ring: clear
+        (130.0, Box(1520, 990, 1600, 1010), [Circle(1550, 1000, 5)]),  # inside: still no segment
     ]
     cases: list[dict[str, Any]] = []
-    for r, box in geometries:
-        seg = leader_segment(cx, cy, r, box)
+    for r, box, obstacles in geometries:
+        seg = leader_segment(cx, cy, r, box, obstacles, pad)
         visible = {
             mode: seg is not None and leader_visible(Label(object_id=1, leader=mode), seg[2], s)
             for mode in LEADER_MODES
@@ -222,7 +236,9 @@ def leader_vectors() -> list[dict[str, Any]]:
                 "cy": cy,
                 "r": r,
                 "s": s,
+                "pad": pad,
                 "box": asdict(box),
+                "obstacles": [asdict(c) for c in obstacles],
                 "segment": None
                 if seg is None
                 else {

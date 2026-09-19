@@ -8,6 +8,7 @@ import LabelToolbar from './LabelToolbar'
 import { LabelTextShape } from './LabelTextShape'
 import { disableAll, getMeasurer, isEditable, tryToggleWithPlacement } from './editing'
 import { primaryName } from './names'
+import { PAD_FACTOR } from './placement'
 import { CANVAS_SIZE_ERROR, drawErrorNotice, previewErrorSentence, probeStatus } from './notices'
 import {
   MAX_FONT_SIZE,
@@ -20,12 +21,13 @@ import {
   measureLabel,
   scaleUnit,
   type Box,
+  type Circle as Ring,
   type LabelBox,
   type LabelLines,
   type LeaderSegment,
   type TextMeasurer,
 } from './metrics'
-import { enabledLabels, fontFor, useEditor } from './store'
+import { enabledLabels, enabledObjectIds, fontFor, useEditor } from './store'
 import { useTaggedDraft } from './taggedDraft'
 import { toScreen, zoomAt } from './view'
 
@@ -70,27 +72,48 @@ const HOVER_COLOR = '#8ab4ff'
 // canvas (SPEC § 6.1), and Konva would otherwise start a drag with it.
 Konva.dragButtons = [0]
 
+/** Every enabled object's ring, keyed by object id: the obstacles a leader routes around (#14).
+ *  Its identity only changes with the enabled set, the objects or the style, never on a drag
+ *  frame, so it can key the entry cache. */
+type Rings = ReadonlyMap<number, Ring>
+
 /** Layout numbers per label, memoised on the label's identity. A drag replaces one `Label` object
  *  per frame (the store never mutates them), so without this every other label would be measured
- *  again 60 times a second. A hit is only reused while the style and the object behind it are the
- *  same objects; the maps are weak, so a replaced label or style needs no eviction. */
-const entryCache = new WeakMap<StyleConfig, WeakMap<Label, Entry>>()
+ *  again 60 times a second. A hit is only reused while the style, the rings and the object behind
+ *  it are the same objects; the maps are weak, so a replaced label or style needs no eviction. */
+const entryCache = new WeakMap<StyleConfig, WeakMap<Rings, WeakMap<Label, Entry>>>()
 
-function entryFor(style: StyleConfig, label: Label, obj: ObjectOut, measure: TextMeasurer, unit: number): Entry {
-  let byLabel = entryCache.get(style)
+function entryFor(
+  style: StyleConfig,
+  rings: Rings,
+  label: Label,
+  obj: ObjectOut,
+  measure: TextMeasurer,
+  unit: number,
+): Entry {
+  let byRings = entryCache.get(style)
+  if (!byRings) {
+    byRings = new WeakMap<Rings, WeakMap<Label, Entry>>()
+    entryCache.set(style, byRings)
+  }
+  let byLabel = byRings.get(rings)
   if (!byLabel) {
     byLabel = new WeakMap<Label, Entry>()
-    entryCache.set(style, byLabel)
+    byRings.set(rings, byLabel)
   }
   const hit = byLabel.get(label)
   if (hit && hit.obj === obj) return hit
   const box = measureLabel(measure, style, label, obj)
-  const seg = leaderSegment(obj.x, obj.y, markerRadius(obj, style), {
-    left: label.x,
-    top: label.y,
-    right: label.x + box.width,
-    bottom: label.y + box.height,
-  })
+  const others: Ring[] = []
+  for (const [id, ring] of rings) if (id !== label.object_id) others.push(ring)
+  const seg = leaderSegment(
+    obj.x,
+    obj.y,
+    markerRadius(obj, style),
+    { left: label.x, top: label.y, right: label.x + box.width, bottom: label.y + box.height },
+    others,
+    PAD_FACTOR * unit,
+  )
   const entry: Entry = {
     label,
     obj,
@@ -261,6 +284,9 @@ export default function EditorCanvas() {
   // useShallow keeps the array identity while the labels themselves are unchanged, so the
   // measuring memo below does not rerun on every pan frame.
   const labels = useEditor(useShallow(enabledLabels))
+  // The enabled ids alone: stable across a drag (which replaces labels, not the set), so the
+  // rings below, and with them every other label's cached entry, survive the drag's frames.
+  const enabledIds = useEditor(useShallow(enabledObjectIds))
 
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<Konva.Stage>(null)
@@ -365,6 +391,17 @@ export default function EditorCanvas() {
   // 3. The one offscreen context the editor measures with (design § 3); shared with the placer.
   const measure = getMeasurer()
 
+  // The rings every leader has to clear (#14): one per enabled object.
+  const rings = useMemo<Rings>(() => {
+    const out = new Map<number, Ring>()
+    if (!style) return out
+    for (const id of enabledIds) {
+      const obj = objects.get(id)
+      if (obj) out.set(id, { x: obj.x, y: obj.y, r: markerRadius(obj, style) })
+    }
+    return out
+  }, [enabledIds, objects, style])
+
   // 4. Every layout number for the enabled labels, recomputed only when the document changes.
   const { entries, orphans } = useMemo<{ entries: Entry[]; orphans: number }>(() => {
     if (!image || !style) return { entries: [], orphans: 0 }
@@ -378,10 +415,10 @@ export default function EditorCanvas() {
         orphans++
         continue
       }
-      out.push(entryFor(style, label, obj, measure, unit))
+      out.push(entryFor(style, rings, label, obj, measure, unit))
     }
     return { entries: out, orphans }
-  }, [image, style, labels, objects, measure])
+  }, [image, style, rings, labels, objects, measure])
 
   // Every label whose draw threw, in failure order; the notice counts them and names the first.
   // A label that keeps failing reports once (the shape stops drawing after its first throw).

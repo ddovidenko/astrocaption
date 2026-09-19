@@ -15,9 +15,9 @@ from app.render import (
     label_text,
     leader_segment,
     line_height,
-    segment_crosses_ring,
     measure_label,
     render_annotated,
+    segment_crosses_ring,
 )
 from tests.conftest import FONTS_DIR, write_test_image
 
