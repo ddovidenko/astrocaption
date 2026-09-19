@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Annotations, AnnotationsUpdate, Label, ObjectOut, StyleConfig } from '../src/api'
-import { leaderSegment, markerRadius, scaleUnit } from '../src/editor/metrics'
+import { leaderSegment, markerRadius, routeLeader, scaleUnit } from '../src/editor/metrics'
 import { PAD_FACTOR } from '../src/editor/placement'
 import {
   currentImageId,
@@ -229,11 +229,16 @@ function behindAnotherMarker(
   const byId = new Map(objects.map((o) => [o.id, o]))
   const sizes = new Map(boxes.map((b) => [b.id, b]))
   const pad = PAD_FACTOR * scaleUnit(frame.width, frame.height)
+  // The hook reports drawn labels only, so a candidate without a box is an orphan or a hook
+  // out of step with the document: say so rather than fail on geometry below.
+  for (const label of candidates) {
+    expect(byId.has(label.object_id), `label ${label.object_id} has no object`).toBe(true)
+    expect(sizes.has(label.object_id), `label ${label.object_id} was not drawn`).toBe(true)
+  }
   let best: ReturnType<typeof behindAnotherMarker> | null = null
   for (const label of candidates) {
-    const c = byId.get(label.object_id)
-    const size = sizes.get(label.object_id)
-    if (!c || !size) continue
+    const c = byId.get(label.object_id)!
+    const size = sizes.get(label.object_id)!
     const rings = enabled
       .filter((l) => l.object_id !== c.id)
       .flatMap((l) => {
@@ -252,8 +257,9 @@ function behindAnotherMarker(
       const y = dy > 0 ? nearest[1] : nearest[1] - size.h
       if (x < 0 || y < 0 || x + size.w > frame.width || y + size.h > frame.height) continue
       const box = { left: x, top: y, right: x + size.w, bottom: y + size.h }
-      const seg = leaderSegment(c.x, c.y, markerRadius(c, style), box, rings, pad)
-      if (!seg || Math.hypot(seg.to[0] - nearest[0], seg.to[1] - nearest[1]) <= 1) continue
+      const r = markerRadius(c, style)
+      const routed = leaderSegment(c.x, c.y, r, box) && routeLeader(c.x, c.y, r, box, rings, pad)
+      if (!routed || Math.hypot(routed.to[0] - nearest[0], routed.to[1] - nearest[1]) <= 1) continue
       if (best && sizes.get(best.label.object_id)!.w >= size.w) continue
       best = { label, x, y, nearest, blocker: d }
     }

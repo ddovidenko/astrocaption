@@ -16,6 +16,7 @@ import {
   labelText,
   leaderSegment,
   leaderVisible,
+  routeLeader,
   markerRadius,
   markerStrokeRadius,
   measureLabel,
@@ -24,7 +25,7 @@ import {
   type Circle as Ring,
   type LabelBox,
   type LabelLines,
-  type LeaderSegment,
+  type RoutedLeader,
   type TextMeasurer,
 } from './metrics'
 import { enabledLabels, enabledObjectIds, fontFor, useEditor } from './store'
@@ -68,8 +69,8 @@ interface Entry {
   obj: ObjectOut
   box: LabelBox
   text: LabelLines
-  seg: LeaderSegment | null
-  leader: boolean
+  /** The leader as drawn, routed around other markers' rings; null when none is drawn. */
+  leader: RoutedLeader | null
 }
 
 const HOVER_COLOR = '#8ab4ff'
@@ -83,11 +84,39 @@ Konva.dragButtons = [0]
  *  frame, so it can key the entry cache. */
 type Rings = ReadonlyMap<number, Ring>
 
-/** Layout numbers per label, memoised on the label's identity. A drag replaces one `Label` object
- *  per frame (the store never mutates them), so without this every other label would be measured
- *  again 60 times a second. A hit is only reused while the style, the rings and the object behind
+interface Measured {
+  obj: ObjectOut
+  box: LabelBox
+  text: LabelLines
+}
+
+/** Text measurements per label, memoised on the label's identity. A drag replaces one `Label`
+ *  object per frame (the store never mutates them), so without this every other label would be
+ *  measured again 60 times a second. A hit is only reused while the style and the object behind
  *  it are the same objects; the maps are weak, so a replaced label or style needs no eviction. */
+const measureCache = new WeakMap<StyleConfig, WeakMap<Label, Measured>>()
+
+/** The drawn entries, keyed further by the rings: toggling a label changes every other label's
+ *  routed leader but not its measurement, so only this layer is dropped then. */
 const entryCache = new WeakMap<StyleConfig, WeakMap<Rings, WeakMap<Label, Entry>>>()
+
+function cached<K extends object, V>(map: WeakMap<K, V>, key: K, make: () => V): V {
+  let value = map.get(key)
+  if (value === undefined) {
+    value = make()
+    map.set(key, value)
+  }
+  return value
+}
+
+function measuredFor(style: StyleConfig, label: Label, obj: ObjectOut, measure: TextMeasurer): Measured {
+  const byLabel = cached(measureCache, style, () => new WeakMap<Label, Measured>())
+  const hit = byLabel.get(label)
+  if (hit && hit.obj === obj) return hit
+  const measured: Measured = { obj, box: measureLabel(measure, style, label, obj), text: labelText(obj, label, style) }
+  byLabel.set(label, measured)
+  return measured
+}
 
 function entryFor(
   style: StyleConfig,
@@ -97,37 +126,24 @@ function entryFor(
   measure: TextMeasurer,
   unit: number,
 ): Entry {
-  let byRings = entryCache.get(style)
-  if (!byRings) {
-    byRings = new WeakMap<Rings, WeakMap<Label, Entry>>()
-    entryCache.set(style, byRings)
-  }
-  let byLabel = byRings.get(rings)
-  if (!byLabel) {
-    byLabel = new WeakMap<Label, Entry>()
-    byRings.set(rings, byLabel)
-  }
+  const byLabel = cached(
+    cached(entryCache, style, () => new WeakMap<Rings, WeakMap<Label, Entry>>()),
+    rings,
+    () => new WeakMap<Label, Entry>(),
+  )
   const hit = byLabel.get(label)
   if (hit && hit.obj === obj) return hit
-  const box = measureLabel(measure, style, label, obj)
-  const others: Ring[] = []
-  for (const [id, ring] of rings) if (id !== label.object_id) others.push(ring)
-  const seg = leaderSegment(
-    obj.x,
-    obj.y,
-    markerRadius(obj, style),
-    { left: label.x, top: label.y, right: label.x + box.width, bottom: label.y + box.height },
-    others,
-    PAD_FACTOR * unit,
-  )
-  const entry: Entry = {
-    label,
-    obj,
-    box,
-    text: labelText(obj, label, style),
-    seg,
-    leader: seg !== null && leaderVisible(label, seg.gap, unit),
+  const { box, text } = measuredFor(style, label, obj, measure)
+  const r = markerRadius(obj, style)
+  const rect = { left: label.x, top: label.y, right: label.x + box.width, bottom: label.y + box.height }
+  const seg = leaderSegment(obj.x, obj.y, r, rect)
+  let leader: RoutedLeader | null = null
+  if (seg !== null && leaderVisible(label, seg.gap, unit)) {
+    const others: Ring[] = []
+    for (const [id, ring] of rings) if (id !== label.object_id) others.push(ring)
+    leader = routeLeader(obj.x, obj.y, r, rect, others, PAD_FACTOR * unit)
   }
+  const entry: Entry = { label, obj, box, text, leader }
   byLabel.set(label, entry)
   return entry
 }
@@ -153,7 +169,7 @@ interface EntryProps {
  *  prop, not part of `Entry`, so a Space press or release still re-renders every label once (it
  *  flips `draggable` on each of them). */
 const LabelEntry = memo(function LabelEntry({
-  entry: { label, obj, box, text, seg, leader },
+  entry: { label, obj, box, text, leader },
   style,
   font,
   editable,
@@ -176,9 +192,9 @@ const LabelEntry = memo(function LabelEntry({
         strokeWidth={style.marker_width}
         listening={false}
       />
-      {seg && leader && (
+      {leader && (
         <Line
-          points={[seg.from[0], seg.from[1], seg.to[0], seg.to[1]]}
+          points={[leader.from[0], leader.from[1], leader.to[0], leader.to[1]]}
           stroke={style.leader_color}
           strokeWidth={style.marker_width}
           listening={false}
@@ -608,9 +624,9 @@ export default function EditorCanvas() {
           h: e.box.height,
         })),
       leaders: () =>
-        entriesRef.current
-          .filter((e) => e.leader && e.seg !== null)
-          .map((e) => ({ id: e.label.object_id, from: e.seg!.from, to: e.seg!.to })),
+        entriesRef.current.flatMap((e) =>
+          e.leader ? [{ id: e.label.object_id, from: e.leader.from, to: e.leader.to }] : [],
+        ),
       selectedIds: () => [...useEditor.getState().selectedIds],
       renderAt,
     }

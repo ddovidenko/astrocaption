@@ -152,7 +152,9 @@ Today the leader runs from the marker edge to the nearest point of the text box.
 renderers, pinned by render vectors:
 
 1. Candidate endpoints on the text box, in order: nearest point (today's), the four edge midpoints
-   (top, right, bottom, left), the four corners (top-left, top-right, bottom-right, bottom-left).
+   (top, right, bottom, left), the four corners (top-left, top-right, bottom-right, bottom-left),
+   keeping only the midpoints and corners of faces that face the marker (PR 6 review: a segment
+   to the far side runs across the label's own text).
 2. A candidate is rejected if the segment from the marker edge to it *cuts the ring* of any
    *other* enabled object: its closest approach to the centre is under `r + pad` and its farthest
    point is beyond `r − pad`, where `r = max(catalogue radius, marker_min_radius)` (the drawn
@@ -162,7 +164,9 @@ renderers, pinned by render vectors:
    every candidate for the Trapezium stars inside M 42, the very case of #14, and fallen back to
    the nearest point.)
 3. The first accepted candidate wins; if none is accepted the nearest point is used.
-4. `leader_visible` (the `auto` gap rule) is evaluated on the chosen segment.
+4. `leader_visible` (the `auto` gap rule) is evaluated on the nearest-point segment, and only a
+   leader that will be drawn is routed (PR 6 review, replacing the first draft's "on the chosen
+   segment": avoidance must not turn an adjacent label's hidden leader into a long one).
 
 Vectors gain a crowded-core case (Trapezium region of the Orion fixture) where the nearest point is
 rejected.

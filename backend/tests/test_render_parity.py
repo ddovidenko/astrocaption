@@ -36,6 +36,7 @@ def built() -> dict[str, Any]:
 def assert_contract_current(stored: dict[str, Any], built: dict[str, Any]) -> None:
     assert set(built) == set(stored)
     assert built["texts"] and built["labels"] and built["leaders"] and built["anchors"]
+    assert built["ring_crossings"]
     assert len(built["fonts"]) == len(list(FONTS_DIR.glob("*.ttf")))
     provenance = {k: (stored[k], built[k]) for k in PROVENANCE_KEYS}
     for key in sorted(set(built) - PROVENANCE_KEYS):

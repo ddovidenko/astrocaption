@@ -9,7 +9,7 @@ from PIL import Image, JpegImagePlugin
 from app.fonts import resolve_font_file
 from app.layout import build_default_annotations, default_style
 from app.models import Annotations, Label, SolveObject
-from app.placement import Box, Circle
+from app.placement import Box, Circle, segment_crosses_ring
 from app.render import (
     ALIAS_SCALE,
     label_text,
@@ -17,7 +17,7 @@ from app.render import (
     line_height,
     measure_label,
     render_annotated,
-    segment_crosses_ring,
+    route_leader,
 )
 from tests.conftest import FONTS_DIR, write_test_image
 
@@ -80,7 +80,7 @@ def test_segment_crosses_ring_only_when_it_cuts_the_outline() -> None:
     assert segment_crosses_ring((10, 0), (100, 0), Circle(50, 0, 5), 4)
     # Passing the ring's centre at r + pad - epsilon: still crosses (the pad is a margin).
     assert segment_crosses_ring((10, -8.5), (100, -8.5), Circle(50, 0, 5), 4)
-    # Passing it at r + pad: clear.
+    # Passing it at exactly r + pad: clear (strict, and exact in both languages: no hypot).
     assert not segment_crosses_ring((10, -9), (100, -9), Circle(50, 0, 5), 4)
     # Entirely inside a big ring (a Trapezium star's leader inside M 42): clear.
     assert not segment_crosses_ring((10, 0), (100, 0), Circle(30, 0, 500), 4)
@@ -88,34 +88,55 @@ def test_segment_crosses_ring_only_when_it_cuts_the_outline() -> None:
     assert segment_crosses_ring((10, 0), (100, 0), Circle(30, 0, 60), 4)
     # Ending short of the outline (inside r - pad): clear.
     assert not segment_crosses_ring((10, 0), (50, 0), Circle(30, 0, 60), 4)
+    # Ending exactly on r - pad: clear (strict).
+    assert not segment_crosses_ring((10, 0), (86, 0), Circle(30, 0, 60), 4)
+    # A zero-length segment is a point.
+    assert segment_crosses_ring((50, 3), (50, 3), Circle(50, 0, 5), 4)
 
 
-def test_leader_segment_avoids_another_ring() -> None:
+def test_route_leader_avoids_another_ring() -> None:
     box = Box(100, -60, 200, 60)
-    blocker = Circle(50, 0, 5)
-    # No obstacles: the nearest point, as before.
-    seg = leader_segment(0, 0, 10, box)
-    assert seg is not None and seg[1] == (100, 0)
-    # A ring in the way of the nearest point: the top edge midpoint is the first clear candidate.
-    seg = leader_segment(0, 0, 10, box, obstacles=[Circle(50, 0, 5)], pad=4)
-    assert seg is not None
-    (x1, y1), (x2, y2), gap = seg
-    assert (x2, y2) == (150, -60)
-    dist = (150**2 + 60**2) ** 0.5
-    assert abs((x1, y1)[0] - 150 / dist * 10) < 1e-9 and abs(y1 - (-60) / dist * 10) < 1e-9
-    assert abs(gap - (dist - 10)) < 1e-9
-    # Rings on every midpoint's path (and the nearest point's): the first corner clears.
-    blockers = [Circle(50, 0, 5), Circle(100, -40, 5), Circle(100, 40, 5)]
-    seg = leader_segment(0, 0, 10, box, obstacles=blockers, pad=4)
-    assert seg is not None and seg[1] == (100, -60)
+    # No obstacles: the nearest point, as the plain segment.
+    assert route_leader(0, 0, 10, box, [], 4) == leader_segment(0, 0, 10, box)[:2]  # type: ignore[index]
+    # A ring in the way of the nearest point (the left face's midpoint): the marker is level
+    # with the box, so only the left face faces it, and its top corner is the first clear one.
+    routed = route_leader(0, 0, 10, box, [Circle(50, 0, 5)], 4)
+    assert routed is not None
+    (x1, y1), (x2, y2) = routed
+    assert (x2, y2) == (100, -60)
+    dist = (100**2 + 60**2) ** 0.5
+    assert abs(x1 - 100 / dist * 10) < 1e-9 and abs(y1 - (-60) / dist * 10) < 1e-9
+    # That corner's path blocked too: the bottom corner.
+    blockers = [Circle(50, 0, 5), Circle(50, -30, 5)]
+    routed = route_leader(0, 0, 10, box, blockers, 4)
+    assert routed is not None and routed[1] == (100, 60)
     # Nothing clears: the nearest point is used.
-    seg = leader_segment(0, 0, 10, box, obstacles=[Circle(30, 0, 60)], pad=4)
-    assert seg is not None and seg[1] == (100, 0)
+    routed = route_leader(0, 0, 10, box, [Circle(30, 0, 60)], 4)
+    assert routed is not None and routed[1] == (100, 0)
     # Entirely inside a big ring: the nearest point stays.
-    seg = leader_segment(0, 0, 10, box, obstacles=[Circle(30, 0, 500)], pad=4)
-    assert seg is not None and seg[1] == (100, 0)
+    routed = route_leader(0, 0, 10, box, [Circle(30, 0, 500)], 4)
+    assert routed is not None and routed[1] == (100, 0)
     # The box swallowing the marker still means no leader, whatever the obstacles.
-    assert leader_segment(0, 0, 10, Box(-5, -5, 5, 5), obstacles=[blocker], pad=4) is None
+    assert route_leader(0, 0, 10, Box(-5, -5, 5, 5), [Circle(50, 0, 5)], 4) is None
+
+
+def test_route_leader_never_crosses_the_label_itself() -> None:
+    """Only the box's faces that face the marker (and their corners) are candidates: with the
+    near side fully blocked, the far corners are clear of every ring but would run the leader
+    across the text, so the nearest point is used instead."""
+    box = Box(100, -60, 200, 60)
+    blockers = [Circle(50, 0, 5), Circle(50, -30, 5), Circle(50, 30, 5)]
+    routed = route_leader(0, 0, 10, box, blockers, 4)
+    assert routed is not None and routed[1] == (100, 0)
+    # A marker above the box sees the top face and its corners, never the bottom ones.
+    above = Box(-100, 100, 100, 160)
+    blockers = [Circle(0, 50, 5), Circle(-50, 50, 5), Circle(50, 50, 5)]
+    routed = route_leader(0, 0, 10, above, blockers, 4)
+    assert routed is not None and routed[1] == (0, 100)
+    # Diagonal to the box: both facing faces' midpoints and three corners are candidates.
+    diagonal = Box(100, 100, 200, 160)
+    routed = route_leader(0, 0, 10, diagonal, [Circle(50, 50, 5)], 4)
+    assert routed is not None and routed[1] == (150, 100)
 
 
 def test_render_keeps_size_draws_marker_and_preserves_icc(tmp_path: Path) -> None:
@@ -201,25 +222,58 @@ def test_leader_is_drawn_when_forced_on(tmp_path: Path) -> None:
 
 def test_leader_routes_around_another_marker(tmp_path: Path) -> None:
     """Alnitak's label at the edge of M 42's shadow: the nearest-point leader (top-right
-    corner) would cut M 42's ring; the right edge's midpoint clears it (#14)."""
+    corner) would cut M 42's ring; the right edge's midpoint clears it (#14). A disabled
+    label's ring on that route does not count."""
     original = write_test_image(tmp_path / "orig.jpg", 3000, 2000)
     style = default_style(3000, 2000, FONTS_DIR)
     box = measure_label(FONTS_DIR, style, Label(object_id=2), OBJECTS[1])
     label = Label(object_id=2, x=1200.0 - box.width, y=1520.0, leader="on")
-    ann = Annotations(image_id="x", style=style, labels=[Label(object_id=1, x=1300, y=1300), label])
+    # A star on the routed leader's path, whose label is off: no obstacle.
+    bystander = SolveObject(id=3, catalog_names=["HD 1"], type="hd", x=1410, y=1053, radius=0)
+    labels = [Label(object_id=1, x=1300, y=1300), label, Label(object_id=3, enabled=False)]
+    ann = Annotations(image_id="x", style=style, labels=labels)
     out = tmp_path / "leader.jpg"
-    render_annotated(original, OBJECTS, ann, FONTS_DIR, out)
+    render_annotated(original, [*OBJECTS, bystander], ann, FONTS_DIR, out)
     r = float(style.marker_min_radius)
     rect = Box(label.x, label.y, label.x + box.width, label.y + box.height)
     naive = leader_segment(1620, 550, r, rect)
-    routed = leader_segment(1620, 550, r, rect, [Circle(1100, 1400, 130)], 4 * 3)
+    routed = route_leader(1620, 550, r, rect, [Circle(1100, 1400, 130)], 4 * 3)
     assert naive is not None and routed is not None
     assert naive[1] == (rect.right, rect.top)
     assert routed[1] == (rect.right, (rect.top + rect.bottom) / 2)
+    counted = route_leader(1620, 550, r, rect, [Circle(1100, 1400, 130), Circle(1410, 1053, r)], 12)
+    assert counted is not None and counted[1] != routed[1]  # the bystander would have mattered
     with Image.open(out) as img:
-        for seg, drawn in ((routed, True), (naive, False)):
-            (x1, y1), (x2, y2), _gap = seg
+        for (x1, y1), (x2, y2), drawn in ((*routed, True), (naive[0], naive[1], False)):
             px = img.getpixel((round(x1 + 0.8 * (x2 - x1)), round(y1 + 0.8 * (y2 - y1))))
+            assert isinstance(px, tuple) and close(px, (255, 213, 74)) == drawn
+
+
+def test_auto_leader_is_decided_on_the_nearest_gap(tmp_path: Path) -> None:
+    """A label adjacent to its marker draws no auto leader even when a ring beside the gap would
+    route a forced one elsewhere: avoidance never decides whether a leader exists."""
+    original = write_test_image(tmp_path / "orig.jpg", 3000, 2000)
+    style = default_style(3000, 2000, FONTS_DIR)
+    r = float(style.marker_min_radius)
+    # Alnitak at (1620, 550); this box's nearest gap is 34.8 px < 12·s = 36, and a star ring
+    # beside that gap would send a forced leader to the box's bottom-right corner.
+    bystander = SolveObject(id=3, catalog_names=["HD 1"], type="hd", x=1580.5, y=544.3, radius=0)
+    box = measure_label(FONTS_DIR, style, Label(object_id=2), OBJECTS[1])
+    rect = Box(1470, 434, 1470 + box.width, 434 + box.height)
+    naive = leader_segment(1620, 550, r, rect)
+    routed = route_leader(1620, 550, r, rect, [Circle(bystander.x, bystander.y, r)], 12)
+    assert naive is not None and routed is not None
+    assert naive[2] < 36 and routed[1] != naive[1]
+    objects = [*OBJECTS, bystander]
+    for mode, drawn in (("auto", False), ("on", True)):
+        label = Label(object_id=2, x=1470.0, y=434.0, leader=mode)  # type: ignore[arg-type]
+        labels = [Label(object_id=1, enabled=False), label, Label(object_id=3, x=1900, y=900)]
+        ann = Annotations(image_id="x", style=style, labels=labels)
+        out = tmp_path / f"leader-{mode}.jpg"
+        render_annotated(original, objects, ann, FONTS_DIR, out)
+        with Image.open(out) as img:
+            (x1, y1), (x2, y2) = routed
+            px = img.getpixel((round(x1 + 0.5 * (x2 - x1)), round(y1 + 0.5 * (y2 - y1))))
             assert isinstance(px, tuple) and close(px, (255, 213, 74)) == drawn
 
 

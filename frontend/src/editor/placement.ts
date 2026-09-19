@@ -17,9 +17,10 @@ import {
   type Circle,
   type TextMeasurer,
 } from './metrics'
-
-export type { Circle }
 import { enabledLabels, type EditorState } from './store'
+
+/** Defined in metrics.ts (this module imports it, so the shared type lives there). */
+export type { Circle }
 
 export const GAP_FACTOR = 6.0
 export const PAD_FACTOR = 4.0

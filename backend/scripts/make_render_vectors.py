@@ -38,8 +38,23 @@ from app.models import (
     StyleConfig,
 )
 from app.objects import objects_from_nova
-from app.placement import ANCHORS, PAD_FACTOR, Box, Circle, anchor_box, scale_unit
-from app.render import label_text, leader_segment, leader_visible, marker_radius, measure_label
+from app.placement import (
+    ANCHORS,
+    PAD_FACTOR,
+    Box,
+    Circle,
+    anchor_box,
+    scale_unit,
+    segment_crosses_ring,
+)
+from app.render import (
+    label_text,
+    leader_segment,
+    leader_visible,
+    marker_radius,
+    measure_label,
+    route_leader,
+)
 
 OUT = REPO_ROOT / "tests" / "fixtures" / "render" / "vectors.json"
 FONTS_DIR = REPO_ROOT / "fonts"
@@ -193,10 +208,13 @@ def leader_vectors() -> list[dict[str, Any]]:
     """A marker at the centre of a 3000 × 2000 frame and boxes around it: each side, a diagonal,
     a box near enough for ``auto`` to hide the leader, a box inside a big marker, a box that
     contains the marker centre, a zero-radius marker a fraction of a pixel from its box, and a
-    box at exactly 12·s. Then the avoidance cases (#14): another ring on the nearest point's
-    path that the top midpoint clears, rings on every midpoint's path that the top-left corner
-    clears, a big ring the box sits behind (nothing clears: nearest point), a leader entirely
-    inside a big ring (clear), and a box inside the marker (no segment, whatever the rings)."""
+    box at exactly 12·s. Then the routing cases (#14), each with its ``routed`` segment: another
+    ring on the nearest point's path (the marker level with the box: its top-left corner
+    clears), that corner's path blocked too (bottom-left), the whole facing side blocked (the
+    far corners are clear of every ring but would cross the text: nearest point), a big ring the
+    box sits behind (nearest point), a leader entirely inside a big ring (clear), a box inside
+    the marker (no segment, whatever the rings), and a diagonal box whose two facing faces both
+    offer candidates (top midpoint)."""
     width, height = 3000, 2000
     s = scale_unit(width, height)
     pad = PAD_FACTOR * s
@@ -213,19 +231,19 @@ def leader_vectors() -> list[dict[str, Any]]:
         (18.0, Box(1400, 950, 1600, 1050), []),  # box contains the centre: no segment
         (0.0, Box(1500.5, 1000.5, 1700, 1050), []),  # point marker, box a fraction of a pixel away
         (18.0, Box(1554.0, 985, 1900, 1030), []),  # gap exactly 36 = 12·s: auto does not draw (>)
-        (18.0, tall, [Circle(1550, 1000, 5)]),  # nearest blocked: top midpoint
-        (
-            18.0,
-            tall,
-            [Circle(1550, 1000, 5), Circle(1650, 910, 5), Circle(1650, 1090, 5)],
-        ),  # corner
+        (18.0, tall, [Circle(1550, 1000, 5)]),  # nearest blocked: top-left corner
+        (18.0, tall, [Circle(1550, 1000, 5), Circle(1550, 925, 5)]),  # and that: bottom-left
+        (18.0, tall, [Circle(1550, 1000, 5), Circle(1550, 925, 5), Circle(1550, 1075, 5)]),  # all
         (18.0, tall, [Circle(1530, 1000, 60)]),  # behind a big ring: nothing clears, nearest
         (18.0, tall, [Circle(1530, 1000, 500)]),  # entirely inside a big ring: clear
         (130.0, Box(1520, 990, 1600, 1010), [Circle(1550, 1000, 5)]),  # inside: still no segment
+        (18.0, Box(1600, 1100, 1900, 1160), [Circle(1550, 1050, 5)]),  # diagonal: top midpoint
     ]
     cases: list[dict[str, Any]] = []
     for r, box, obstacles in geometries:
-        seg = leader_segment(cx, cy, r, box, obstacles, pad)
+        seg = leader_segment(cx, cy, r, box)
+        routed = route_leader(cx, cy, r, box, obstacles, pad)
+        assert (seg is None) == (routed is None)
         visible = {
             mode: seg is not None and leader_visible(Label(object_id=1, leader=mode), seg[2], s)
             for mode in LEADER_MODES
@@ -246,10 +264,43 @@ def leader_vectors() -> list[dict[str, Any]]:
                     "to": [_r(seg[1][0]), _r(seg[1][1])],
                     "gap": _r(seg[2]),
                 },
+                "routed": None
+                if routed is None
+                else {
+                    "from": [_r(routed[0][0]), _r(routed[0][1])],
+                    "to": [_r(routed[1][0]), _r(routed[1][1])],
+                },
                 "visible": visible,
             }
         )
     return cases
+
+
+def ring_crossing_vectors() -> list[dict[str, Any]]:
+    """``segment_crosses_ring`` on and around its thresholds: through a small ring, past it at
+    r + pad − ½ and at exactly r + pad, entirely inside a big ring, from inside a big ring to
+    outside it, ending short of the outline and exactly on r − pad, and a zero-length segment."""
+    small, big, huge = Circle(50, 0, 5), Circle(30, 0, 60), Circle(30, 0, 500)
+    geometries: list[tuple[tuple[float, float], tuple[float, float], Circle]] = [
+        ((10, 0), (100, 0), small),
+        ((10, -8.5), (100, -8.5), small),
+        ((10, -9), (100, -9), small),
+        ((10, 0), (100, 0), huge),
+        ((10, 0), (100, 0), big),
+        ((10, 0), (50, 0), big),
+        ((10, 0), (86, 0), big),
+        ((50, 3), (50, 3), small),
+    ]
+    return [
+        {
+            "a": list(a),
+            "b": list(b),
+            "circle": asdict(c),
+            "pad": 4.0,
+            "crosses": segment_crosses_ring(a, b, c, 4.0),
+        }
+        for a, b, c in geometries
+    ]
 
 
 def anchor_vectors() -> list[dict[str, Any]]:
@@ -293,6 +344,7 @@ def build_vectors(fonts_dir: Path) -> dict[str, Any]:
         "texts": text_vectors(fonts_dir, label_strings(objects)),
         "labels": label_vectors(fonts_dir, objects),
         "leaders": leader_vectors(),
+        "ring_crossings": ring_crossing_vectors(),
         "anchors": anchor_vectors(),
     }
 
