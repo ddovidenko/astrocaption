@@ -242,8 +242,7 @@ def leader_vectors() -> list[dict[str, Any]]:
     cases: list[dict[str, Any]] = []
     for r, box, obstacles in geometries:
         seg = leader_segment(cx, cy, r, box)
-        routed = route_leader(cx, cy, r, box, obstacles, pad)
-        assert (seg is None) == (routed is None)
+        routed = None if seg is None else route_leader(seg, cx, cy, r, box, obstacles, pad)
         visible = {
             mode: seg is not None and leader_visible(Label(object_id=1, leader=mode), seg[2], s)
             for mode in LEADER_MODES
@@ -276,31 +275,39 @@ def leader_vectors() -> list[dict[str, Any]]:
     return cases
 
 
+# ``segment_crosses_ring`` on and around its thresholds, with the expected answer: through a
+# small ring; past it at r + pad − ½ and at exactly r + pad; entirely inside a big ring; from
+# inside a big ring to outside it; ending short of the outline and exactly on r − pad; a
+# zero-length segment. ``backend/tests/test_render.py`` asserts the table, the vectors replay it.
+_SMALL, _BIG, _HUGE = Circle(50, 0, 5), Circle(30, 0, 60), Circle(30, 0, 500)
+RING_CROSSING_PAD = 4.0
+RING_CROSSING_CASES: list[tuple[tuple[float, float], tuple[float, float], Circle, bool]] = [
+    ((10, 0), (100, 0), _SMALL, True),
+    ((10, -8.5), (100, -8.5), _SMALL, True),
+    ((10, -9), (100, -9), _SMALL, False),
+    ((10, 0), (100, 0), _HUGE, False),
+    ((10, 0), (100, 0), _BIG, True),
+    ((10, 0), (50, 0), _BIG, False),
+    ((10, 0), (86, 0), _BIG, False),
+    ((50, 3), (50, 3), _SMALL, True),
+]
+
+
 def ring_crossing_vectors() -> list[dict[str, Any]]:
-    """``segment_crosses_ring`` on and around its thresholds: through a small ring, past it at
-    r + pad − ½ and at exactly r + pad, entirely inside a big ring, from inside a big ring to
-    outside it, ending short of the outline and exactly on r − pad, and a zero-length segment."""
-    small, big, huge = Circle(50, 0, 5), Circle(30, 0, 60), Circle(30, 0, 500)
-    geometries: list[tuple[tuple[float, float], tuple[float, float], Circle]] = [
-        ((10, 0), (100, 0), small),
-        ((10, -8.5), (100, -8.5), small),
-        ((10, -9), (100, -9), small),
-        ((10, 0), (100, 0), huge),
-        ((10, 0), (100, 0), big),
-        ((10, 0), (50, 0), big),
-        ((10, 0), (86, 0), big),
-        ((50, 3), (50, 3), small),
-    ]
-    return [
-        {
-            "a": list(a),
-            "b": list(b),
-            "circle": asdict(c),
-            "pad": 4.0,
-            "crosses": segment_crosses_ring(a, b, c, 4.0),
-        }
-        for a, b, c in geometries
-    ]
+    cases: list[dict[str, Any]] = []
+    for a, b, c, crosses in RING_CROSSING_CASES:
+        if segment_crosses_ring(a, b, c, RING_CROSSING_PAD) != crosses:
+            raise SystemExit(f"segment_crosses_ring disagrees with its expected table at {a}–{b}")
+        cases.append(
+            {
+                "a": list(a),
+                "b": list(b),
+                "circle": asdict(c),
+                "pad": RING_CROSSING_PAD,
+                "crosses": crosses,
+            }
+        )
+    return cases
 
 
 def anchor_vectors() -> list[dict[str, Any]]:

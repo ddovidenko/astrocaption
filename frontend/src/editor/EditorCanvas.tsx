@@ -18,6 +18,7 @@ import {
   leaderVisible,
   routeLeader,
   markerRadius,
+  markerRing,
   markerStrokeRadius,
   measureLabel,
   scaleUnit,
@@ -50,9 +51,9 @@ export interface EditorTestHook {
   /** Where the drawn labels sit and how big their text boxes are, in original image pixels —
    *  what a drag has to move. */
   labelPositions(): { id: number; x: number; y: number; w: number; h: number }[]
-  /** The leaders the canvas draws, in original image pixels: the parity spec checks that one
-   *  moved behind another marker was routed around its ring (#14). */
-  leaders(): { id: number; from: [number, number]; to: [number, number] }[]
+  /** Where the leaders the canvas draws end, in original image pixels: the parity spec checks
+   *  that one moved behind another marker was routed around its ring (#14). */
+  leaders(): { id: number; to: [number, number] }[]
   /** The selected object ids, for the spec that drives clicks and shift-clicks. */
   selectedIds(): number[]
   renderAt(scale: number): string
@@ -141,7 +142,7 @@ function entryFor(
   if (seg !== null && leaderVisible(label, seg.gap, unit)) {
     const others: Ring[] = []
     for (const [id, ring] of rings) if (id !== label.object_id) others.push(ring)
-    leader = routeLeader(obj.x, obj.y, r, rect, others, PAD_FACTOR * unit)
+    leader = routeLeader(seg, obj.x, obj.y, r, rect, others, PAD_FACTOR * unit)
   }
   const entry: Entry = { label, obj, box, text, leader }
   byLabel.set(label, entry)
@@ -419,7 +420,7 @@ export default function EditorCanvas() {
     if (!style) return out
     for (const id of enabledIds) {
       const obj = objects.get(id)
-      if (obj) out.set(id, { x: obj.x, y: obj.y, r: markerRadius(obj, style) })
+      if (obj) out.set(id, markerRing(obj, style))
     }
     return out
   }, [enabledIds, objects, style])
@@ -623,10 +624,7 @@ export default function EditorCanvas() {
           w: e.box.width,
           h: e.box.height,
         })),
-      leaders: () =>
-        entriesRef.current.flatMap((e) =>
-          e.leader ? [{ id: e.label.object_id, from: e.leader.from, to: e.leader.to }] : [],
-        ),
+      leaders: () => entriesRef.current.flatMap((e) => (e.leader ? [{ id: e.label.object_id, to: e.leader.to }] : [])),
       selectedIds: () => [...useEditor.getState().selectedIds],
       renderAt,
     }

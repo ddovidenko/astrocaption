@@ -10,7 +10,7 @@
 import {
   ANCHORS,
   anchorBox,
-  markerRadius,
+  markerRing,
   measureLabel,
   scaleUnit,
   type Box,
@@ -18,9 +18,6 @@ import {
   type TextMeasurer,
 } from './metrics'
 import { enabledLabels, type EditorState } from './store'
-
-/** Defined in metrics.ts (this module imports it, so the shared type lives there). */
-export type { Circle }
 
 export const GAP_FACTOR = 6.0
 export const PAD_FACTOR = 4.0
@@ -166,14 +163,14 @@ export function placeNewLabels(
     const o = state.objects.get(other.object_id)
     if (!o) continue
     const b = measureLabel(measure, style, other, o)
-    block(obstacle(other.x, other.y, b.width, b.height, { x: o.x, y: o.y, r: markerRadius(o, style) }))
+    block(obstacle(other.x, other.y, b.width, b.height, markerRing(o, style)))
   }
   for (const id of ids) {
     const obj = state.objects.get(id)
     const label = state.labels.get(id)
     if (!obj || !label) continue
     const box = measureLabel(measure, style, label, obj)
-    const circle = { x: obj.x, y: obj.y, r: markerRadius(obj, style) }
+    const circle = markerRing(obj, style)
     const [p] = placeLabels(
       image.width,
       image.height,

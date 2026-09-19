@@ -48,6 +48,11 @@ export function markerRadius(obj: ObjectOut, style: StyleConfig): number {
   return Math.max(obj.radius, style.marker_min_radius)
 }
 
+/** The drawn ring: what the placer keeps text boxes off and a leader routes around. */
+export function markerRing(obj: ObjectOut, style: StyleConfig): Circle {
+  return { x: obj.x, y: obj.y, r: markerRadius(obj, style) }
+}
+
 /** The radius to give a centred canvas stroke so the ring lands where Pillow puts it: Pillow's
  *  `ImageDraw.ellipse(..., width=w)` grows the outline INWARD from the bounding box (the ring
  *  occupies radii r−w…r) while Konva centres the stroke on the radius, so the stroke has to sit
@@ -184,25 +189,28 @@ export function segmentCrossesRing(a: [number, number], b: [number, number], c: 
   return nearestSq < outer * outer && (inner <= 0 || farthestSq > inner * inner)
 }
 
+/** Segment from the marker edge towards (px, py) and the gap between them; null when the point
+ *  lies within the marker. Mirrors render._leader_to. */
+function leaderTo(cx: number, cy: number, r: number, px: number, py: number): LeaderSegment | null {
+  const dx = px - cx
+  const dy = py - cy
+  const dist = Math.hypot(dx, dy)
+  if (dist <= r) return null
+  return { from: [cx + (dx / dist) * r, cy + (dy / dist) * r], to: [px, py], gap: dist - r }
+}
+
 /** From the marker edge to the closest point of `box`, or null when the box reaches the marker.
  *  Its gap alone decides an `auto` leader (`leaderVisible`). */
 export function leaderSegment(cx: number, cy: number, r: number, box: Box): LeaderSegment | null {
   const nx = Math.min(Math.max(cx, box.left), box.right)
   const ny = Math.min(Math.max(cy, box.top), box.bottom)
-  const dx = nx - cx
-  const dy = ny - cy
-  const dist = Math.hypot(dx, dy)
-  if (dist <= r) return null
-  const ux = dx / dist
-  const uy = dy / dist
-  return { from: [cx + ux * r, cy + uy * r], to: [nx, ny], gap: dist - r }
+  return leaderTo(cx, cy, r, nx, ny)
 }
 
-/** Endpoints on the box in preference order: nearest point, then the edge midpoints and corners
- *  of the faces that face the marker (a segment to the far side would cross the text). */
-function leaderCandidates(cx: number, cy: number, box: Box): [number, number][] {
-  const nx = Math.min(Math.max(cx, box.left), box.right)
-  const ny = Math.min(Math.max(cy, box.top), box.bottom)
+/** Alternative leader endpoints, in preference order: the edge midpoints (top, right, bottom,
+ *  left), then the corners (top-left, top-right, bottom-right, bottom-left), of the faces that
+ *  face the marker; a segment to the far side would cross the text. */
+function facingCandidates(cx: number, cy: number, box: Box): [number, number][] {
   const mx = (box.left + box.right) / 2
   const my = (box.top + box.bottom) / 2
   const above = cy < box.top
@@ -219,7 +227,7 @@ function leaderCandidates(cx: number, cy: number, box: Box): [number, number][] 
     [below || right, [box.right, box.bottom]],
     [below || left, [box.left, box.bottom]],
   ]
-  return [[nx, ny], ...faces.filter(([visible]) => visible).map(([, point]) => point)]
+  return faces.filter(([visible]) => visible).map(([, point]) => point)
 }
 
 export interface RoutedLeader {
@@ -227,29 +235,27 @@ export interface RoutedLeader {
   to: [number, number]
 }
 
-/** The leader to draw (#14): from the marker edge to the first candidate endpoint on `box`
- *  (`leaderCandidates`) whose segment crosses none of the `obstacles` rings, or to the nearest
- *  point when every candidate does. Null when the box reaches the marker. Mirrors
- *  render.route_leader. */
+/** The leader to draw (#14): `seg` (the `leaderSegment` to the nearest point) unless it crosses
+ *  one of the `obstacles` rings, then the first of `facingCandidates` whose segment crosses
+ *  none, and `seg` again when every candidate does. Mirrors render.route_leader. */
 export function routeLeader(
+  seg: LeaderSegment,
   cx: number,
   cy: number,
   r: number,
   box: Box,
   obstacles: readonly Circle[],
   pad: number,
-): RoutedLeader | null {
-  let fallback: RoutedLeader | null = null
-  for (const [px, py] of leaderCandidates(cx, cy, box)) {
-    const dx = px - cx
-    const dy = py - cy
-    const dist = Math.hypot(dx, dy)
-    if (dist <= r) return null // the nearest point comes first, so the box reaches the marker
-    const seg: RoutedLeader = { from: [cx + (dx / dist) * r, cy + (dy / dist) * r], to: [px, py] }
-    fallback ??= seg
-    if (!obstacles.some((c) => segmentCrossesRing(seg.from, seg.to, c, pad))) return seg
+): RoutedLeader {
+  const crosses = (from: [number, number], to: [number, number]) =>
+    obstacles.some((c) => segmentCrossesRing(from, to, c, pad))
+  if (!crosses(seg.from, seg.to)) return { from: seg.from, to: seg.to }
+  for (const [px, py] of facingCandidates(cx, cy, box)) {
+    const cand = leaderTo(cx, cy, r, px, py)
+    if (cand === null) continue // cannot happen: the nearest point is already outside the marker
+    if (!crosses(cand.from, cand.to)) return { from: cand.from, to: cand.to }
   }
-  return fallback
+  return { from: seg.from, to: seg.to }
 }
 
 export function leaderVisible(label: Label, gap: number, s: number): boolean {

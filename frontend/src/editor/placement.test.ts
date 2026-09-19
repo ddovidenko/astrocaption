@@ -8,14 +8,13 @@ import random1 from '../../../tests/fixtures/placement/random_1.json'
 import random2 from '../../../tests/fixtures/placement/random_2.json'
 import single from '../../../tests/fixtures/placement/single_right.json'
 import stacked from '../../../tests/fixtures/placement/stacked_same_position.json'
-import type { Box } from './metrics'
+import type { Box, Circle } from './metrics'
 import {
   PAD_FACTOR,
   boxesOverlap,
   placeLabels,
   placeNewLabel,
   placeNewLabels,
-  type Circle,
   type Placement,
   type PlacementItem,
 } from './placement'

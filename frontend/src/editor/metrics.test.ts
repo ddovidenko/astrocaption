@@ -102,6 +102,11 @@ function pillowMeasurer(): TextMeasurer {
   }
 }
 
+function expectPoint(got: [number, number], want: [number, number]): void {
+  expect(Math.abs(got[0] - want[0])).toBeLessThanOrEqual(EPS)
+  expect(Math.abs(got[1] - want[1])).toBeLessThanOrEqual(EPS)
+}
+
 function expectBox(got: Box, want: Box): void {
   expect(Math.abs(got.left - want.left)).toBeLessThanOrEqual(EPS)
   expect(Math.abs(got.top - want.top)).toBeLessThanOrEqual(EPS)
@@ -197,25 +202,20 @@ describe('render vectors', () => {
       collided: false,
       pinned: false,
     })
-    const expectPoint = (got: [number, number], want: [number, number]) => {
-      expect(Math.abs(got[0] - want[0])).toBeLessThanOrEqual(EPS)
-      expect(Math.abs(got[1] - want[1])).toBeLessThanOrEqual(EPS)
-    }
     expect(scaleUnit(3000, 2000)).toBe(vectors.leaders[0]!.s)
     for (const c of vectors.leaders) {
       const seg = leaderSegment(c.cx, c.cy, c.r, c.box)
-      const routed = routeLeader(c.cx, c.cy, c.r, c.box, c.obstacles, c.pad)
       if (c.segment === null) {
         expect(seg).toBeNull()
-        expect(routed).toBeNull()
+        expect(c.routed).toBeNull()
       } else {
         expect(seg).not.toBeNull()
         expectPoint(seg!.from, c.segment.from)
         expectPoint(seg!.to, c.segment.to)
         expect(Math.abs(seg!.gap - c.segment.gap)).toBeLessThanOrEqual(EPS)
-        expect(routed, JSON.stringify(c.box)).not.toBeNull()
-        expectPoint(routed!.from, c.routed!.from)
-        expectPoint(routed!.to, c.routed!.to)
+        const routed = routeLeader(seg!, c.cx, c.cy, c.r, c.box, c.obstacles, c.pad)
+        expectPoint(routed.from, c.routed!.from)
+        expectPoint(routed.to, c.routed!.to)
       }
       for (const mode of ['auto', 'on', 'off'] as const) {
         const drawn = seg !== null && leaderVisible(label(mode), seg.gap, c.s)

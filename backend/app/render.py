@@ -33,6 +33,7 @@ ALIAS_SEP = " · "
 LEADER_GAP_FACTOR = 12.0  # auto leader when the box is farther than 12·s from the marker edge
 DEFAULT_QUALITY = 95  # used when the source is not a JPEG and no quality was requested
 SUBSAMPLING_NAMES = {0: "4:4:4", 1: "4:2:2", 2: "4:2:0"}
+Point = tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,11 @@ def marker_radius(obj: SolveObject, style: StyleConfig) -> float:
     return max(obj.radius, float(style.marker_min_radius))
 
 
+def marker_ring(obj: SolveObject, style: StyleConfig) -> Circle:
+    """The drawn ring: what the placer keeps text boxes off and a leader routes around."""
+    return Circle(obj.x, obj.y, marker_radius(obj, style))
+
+
 def label_text(obj: SolveObject, label: Label, style: StyleConfig) -> LabelText:
     override = (label.text_override or "").strip()
     primary = override or obj.primary_name_for(style.name_preference)
@@ -121,26 +127,29 @@ def measure_label(fonts_dir: Path, style: StyleConfig, label: Label, obj: SolveO
     )
 
 
-Point = tuple[float, float]
+def _leader_to(
+    cx: float, cy: float, r: float, px: float, py: float
+) -> tuple[Point, Point, float] | None:
+    """Segment from the marker edge towards ``(px, py)`` and the gap between them; ``None``
+    when the point lies within the marker."""
+    dx, dy = px - cx, py - cy
+    dist = math.hypot(dx, dy)
+    if dist <= r:
+        return None
+    return (cx + dx / dist * r, cy + dy / dist * r), (px, py), dist - r
 
 
 def leader_segment(cx: float, cy: float, r: float, box: Box) -> tuple[Point, Point, float] | None:
     """Segment from the marker edge to the closest point of ``box`` and the gap between them."""
     nx = min(max(cx, box.left), box.right)
     ny = min(max(cy, box.top), box.bottom)
-    dx, dy = nx - cx, ny - cy
-    dist = math.hypot(dx, dy)
-    if dist <= r:
-        return None
-    ux, uy = dx / dist, dy / dist
-    return (cx + ux * r, cy + uy * r), (nx, ny), dist - r
+    return _leader_to(cx, cy, r, nx, ny)
 
 
-def _leader_candidates(cx: float, cy: float, box: Box) -> list[Point]:
-    """Endpoints on the box in preference order: nearest point, then the edge midpoints and
-    corners of the faces that face the marker (a segment to the far side would cross the text)."""
-    nx = min(max(cx, box.left), box.right)
-    ny = min(max(cy, box.top), box.bottom)
+def _facing_candidates(cx: float, cy: float, box: Box) -> list[Point]:
+    """Alternative leader endpoints, in preference order: the edge midpoints (top, right, bottom,
+    left), then the corners (top-left, top-right, bottom-right, bottom-left), of the faces that
+    face the marker; a segment to the far side would cross the text."""
     mx, my = (box.left + box.right) / 2, (box.top + box.bottom) / 2
     above, right = cy < box.top, cx > box.right
     below, left = cy > box.bottom, cx < box.left
@@ -154,28 +163,31 @@ def _leader_candidates(cx: float, cy: float, box: Box) -> list[Point]:
         (below or right, (box.right, box.bottom)),
         (below or left, (box.left, box.bottom)),
     ]
-    return [(nx, ny), *(point for visible, point in faces if visible)]
+    return [point for visible, point in faces if visible]
 
 
 def route_leader(
-    cx: float, cy: float, r: float, box: Box, obstacles: Sequence[Circle], pad: float
-) -> tuple[Point, Point] | None:
-    """The leader to draw: from the marker edge to the first candidate endpoint on ``box``
-    (``_leader_candidates``) whose segment crosses none of the ``obstacles`` rings, or to the
-    nearest point when every candidate does. ``None`` when the box reaches the marker.
-    """
-    fallback: tuple[Point, Point] | None = None
-    for px, py in _leader_candidates(cx, cy, box):
-        dx, dy = px - cx, py - cy
-        dist = math.hypot(dx, dy)
-        if dist <= r:
-            return None  # the nearest point comes first, so the box reaches the marker
-        seg = ((cx + dx / dist * r, cy + dy / dist * r), (px, py))
-        if fallback is None:
-            fallback = seg
-        if not any(segment_crosses_ring(seg[0], seg[1], c, pad) for c in obstacles):
-            return seg
-    return fallback
+    seg: tuple[Point, Point, float],
+    cx: float,
+    cy: float,
+    r: float,
+    box: Box,
+    obstacles: Sequence[Circle],
+    pad: float,
+) -> tuple[Point, Point]:
+    """The leader to draw (#14): ``seg`` (the ``leader_segment`` to the nearest point) unless it
+    crosses one of the ``obstacles`` rings, then the first of ``_facing_candidates`` whose
+    segment crosses none, and ``seg`` again when every candidate does."""
+    start, end, _gap = seg
+    if not any(segment_crosses_ring(start, end, c, pad) for c in obstacles):
+        return start, end
+    for px, py in _facing_candidates(cx, cy, box):
+        cand = _leader_to(cx, cy, r, px, py)
+        if cand is None:  # cannot happen: the nearest point is already outside the marker
+            continue
+        if not any(segment_crosses_ring(cand[0], cand[1], c, pad) for c in obstacles):
+            return cand[0], cand[1]
+    return start, end
 
 
 def leader_visible(label: Label, gap: float, s: float) -> bool:
@@ -197,7 +209,7 @@ def draw_annotations(
     stroke = style.halo_width if style.halo else 0
     pad = PAD_FACTOR * s
     rings = {
-        label.object_id: Circle(o.x, o.y, marker_radius(o, style))
+        label.object_id: marker_ring(o, style)
         for label in ann.labels
         if label.enabled and (o := by_id.get(label.object_id)) is not None
     }
@@ -217,9 +229,8 @@ def draw_annotations(
         seg = leader_segment(obj.x, obj.y, r, rect)
         if seg is not None and leader_visible(label, seg[2], s):
             others = [c for oid, c in rings.items() if oid != label.object_id]
-            routed = route_leader(obj.x, obj.y, r, rect, others, pad)
-            if routed is not None:
-                draw.line(list(routed), fill=style.leader_color, width=style.marker_width)
+            routed = route_leader(seg, obj.x, obj.y, r, rect, others, pad)
+            draw.line(list(routed), fill=style.leader_color, width=style.marker_width)
         text = label_text(obj, label, style)
         color = label.color or style.text_color
         draw.text(

@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Annotations, AnnotationsUpdate, Label, ObjectOut, StyleConfig } from '../src/api'
-import { leaderSegment, markerRadius, routeLeader, scaleUnit } from '../src/editor/metrics'
+import { leaderSegment, markerRadius, markerRing, routeLeader, scaleUnit } from '../src/editor/metrics'
 import { PAD_FACTOR } from '../src/editor/placement'
 import {
   currentImageId,
@@ -212,11 +212,11 @@ test('the editor stage matches the annotated preview within the pixel budget', a
 
 /** A position for label `c` whose nearest-point leader would run straight through another
  *  object's marker (#14): the box corner facing c's marker sits at twice the vector from c's marker
- *  to the blocker's, so the blocker's centre is the segment's midpoint. Only pairs for which the
- *  shared geometry (metrics.ts, pinned to render.py by the render vectors) finds a clear candidate
- *  qualify — a box thrown into the M 42 core has every candidate cut some ring and falls back to
- *  the nearest point on both renderers, proving nothing — and the widest box wins. The box has to
- *  stay inside the frame. Every enabled object's ring counts, as on the canvas, but only
+ *  to the blocker's, so the blocker's centre is the segment's midpoint. The first pair (in object
+ *  order) whose box stays inside the frame and for which the shared geometry (metrics.ts, pinned
+ *  to render.py by the render vectors) finds a clear candidate is used: a box thrown into the
+ *  M 42 core has every candidate cut some ring and falls back to the nearest point on both
+ *  renderers, proving nothing. Every enabled object's ring counts, as on the canvas, but only
  *  `candidates` are moved. Returns the box's top-left and that nearest corner. */
 function behindAnotherMarker(
   candidates: Label[],
@@ -235,37 +235,32 @@ function behindAnotherMarker(
     expect(byId.has(label.object_id), `label ${label.object_id} has no object`).toBe(true)
     expect(sizes.has(label.object_id), `label ${label.object_id} was not drawn`).toBe(true)
   }
-  let best: ReturnType<typeof behindAnotherMarker> | null = null
+  const rings = enabled.flatMap((l) => {
+    const o = byId.get(l.object_id)
+    return o ? [{ id: o.id, ring: markerRing(o, style) }] : []
+  })
   for (const label of candidates) {
     const c = byId.get(label.object_id)!
     const size = sizes.get(label.object_id)!
-    const rings = enabled
-      .filter((l) => l.object_id !== c.id)
-      .flatMap((l) => {
-        const o = byId.get(l.object_id)
-        return o ? [{ x: o.x, y: o.y, r: markerRadius(o, style) }] : []
-      })
-    for (const other of enabled) {
-      const d = byId.get(other.object_id)
-      if (!d || d.id === c.id) continue
+    const r = markerRadius(c, style)
+    const others = rings.filter((x) => x.id !== c.id).map((x) => x.ring)
+    for (const { id, ring: d } of rings) {
+      if (id === c.id) continue
       const dx = d.x - c.x
       const dy = d.y - c.y
-      const dist = Math.hypot(dx, dy)
-      if (dist < 100 || dist > 600) continue
       const nearest: [number, number] = [c.x + 2 * dx, c.y + 2 * dy]
       const x = dx > 0 ? nearest[0] : nearest[0] - size.w
       const y = dy > 0 ? nearest[1] : nearest[1] - size.h
       if (x < 0 || y < 0 || x + size.w > frame.width || y + size.h > frame.height) continue
       const box = { left: x, top: y, right: x + size.w, bottom: y + size.h }
-      const r = markerRadius(c, style)
-      const routed = leaderSegment(c.x, c.y, r, box) && routeLeader(c.x, c.y, r, box, rings, pad)
-      if (!routed || Math.hypot(routed.to[0] - nearest[0], routed.to[1] - nearest[1]) <= 1) continue
-      if (best && sizes.get(best.label.object_id)!.w >= size.w) continue
-      best = { label, x, y, nearest, blocker: d }
+      const seg = leaderSegment(c.x, c.y, r, box)
+      if (!seg) continue
+      const routed = routeLeader(seg, c.x, c.y, r, box, others, pad)
+      if (Math.hypot(routed.to[0] - nearest[0], routed.to[1] - nearest[1]) <= 1) continue
+      return { label, x, y, nearest, blocker: byId.get(id)! }
     }
   }
-  expect(best, 'no enabled label can be put behind another marker with a clear leader candidate').not.toBeNull()
-  return best!
+  throw new Error('no enabled label can be put behind another marker with a clear leader candidate')
 }
 
 test('the stage matches the preview for a document with per-label overrides and a pinned label', async ({

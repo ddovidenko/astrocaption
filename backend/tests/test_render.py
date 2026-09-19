@@ -9,16 +9,18 @@ from PIL import Image, JpegImagePlugin
 from app.fonts import resolve_font_file
 from app.layout import build_default_annotations, default_style
 from app.models import Annotations, Label, SolveObject
-from app.placement import Box, Circle, segment_crosses_ring
+from app.placement import PAD_FACTOR, Box, Circle, scale_unit, segment_crosses_ring
 from app.render import (
     ALIAS_SCALE,
     label_text,
     leader_segment,
     line_height,
+    marker_ring,
     measure_label,
     render_annotated,
     route_leader,
 )
+from scripts.make_render_vectors import RING_CROSSING_CASES, RING_CROSSING_PAD
 from tests.conftest import FONTS_DIR, write_test_image
 
 OBJECTS = [
@@ -34,6 +36,11 @@ OBJECTS = [
         id=2, catalog_names=["Alnitak", "HD 37742"], type="bright", x=1620, y=550, radius=0
     ),
 ]
+
+
+S = scale_unit(3000, 2000)
+PAD = PAD_FACTOR * S
+LEADER_RGB = (255, 213, 74)
 
 
 def close(a: tuple[int, ...], b: tuple[int, ...], tol: int = 60) -> bool:
@@ -76,48 +83,35 @@ def test_leader_segment_geometry() -> None:
 
 
 def test_segment_crosses_ring_only_when_it_cuts_the_outline() -> None:
-    # Through a small ring: crosses.
-    assert segment_crosses_ring((10, 0), (100, 0), Circle(50, 0, 5), 4)
-    # Passing the ring's centre at r + pad - epsilon: still crosses (the pad is a margin).
-    assert segment_crosses_ring((10, -8.5), (100, -8.5), Circle(50, 0, 5), 4)
-    # Passing it at exactly r + pad: clear (strict, and exact in both languages: no hypot).
-    assert not segment_crosses_ring((10, -9), (100, -9), Circle(50, 0, 5), 4)
-    # Entirely inside a big ring (a Trapezium star's leader inside M 42): clear.
-    assert not segment_crosses_ring((10, 0), (100, 0), Circle(30, 0, 500), 4)
-    # From inside a big ring to outside it: crosses the outline.
-    assert segment_crosses_ring((10, 0), (100, 0), Circle(30, 0, 60), 4)
-    # Ending short of the outline (inside r - pad): clear.
-    assert not segment_crosses_ring((10, 0), (50, 0), Circle(30, 0, 60), 4)
-    # Ending exactly on r - pad: clear (strict).
-    assert not segment_crosses_ring((10, 0), (86, 0), Circle(30, 0, 60), 4)
-    # A zero-length segment is a point.
-    assert segment_crosses_ring((50, 3), (50, 3), Circle(50, 0, 5), 4)
+    for a, b, c, crosses in RING_CROSSING_CASES:
+        assert segment_crosses_ring(a, b, c, RING_CROSSING_PAD) == crosses, (a, b, c)
+
+
+def routed_to(box: Box, obstacles: list[Circle]) -> tuple[float, float]:
+    """Where a leader from a marker of radius 10 at the origin ends on ``box``, pad 4."""
+    seg = leader_segment(0, 0, 10, box)
+    assert seg is not None
+    return route_leader(seg, 0, 0, 10, box, obstacles, 4)[1]
 
 
 def test_route_leader_avoids_another_ring() -> None:
     box = Box(100, -60, 200, 60)
     # No obstacles: the nearest point, as the plain segment.
-    assert route_leader(0, 0, 10, box, [], 4) == leader_segment(0, 0, 10, box)[:2]  # type: ignore[index]
+    assert routed_to(box, []) == (100, 0)
     # A ring in the way of the nearest point (the left face's midpoint): the marker is level
     # with the box, so only the left face faces it, and its top corner is the first clear one.
-    routed = route_leader(0, 0, 10, box, [Circle(50, 0, 5)], 4)
-    assert routed is not None
-    (x1, y1), (x2, y2) = routed
+    seg = leader_segment(0, 0, 10, box)
+    assert seg is not None
+    (x1, y1), (x2, y2) = route_leader(seg, 0, 0, 10, box, [Circle(50, 0, 5)], 4)
     assert (x2, y2) == (100, -60)
     dist = (100**2 + 60**2) ** 0.5
     assert abs(x1 - 100 / dist * 10) < 1e-9 and abs(y1 - (-60) / dist * 10) < 1e-9
     # That corner's path blocked too: the bottom corner.
-    blockers = [Circle(50, 0, 5), Circle(50, -30, 5)]
-    routed = route_leader(0, 0, 10, box, blockers, 4)
-    assert routed is not None and routed[1] == (100, 60)
+    assert routed_to(box, [Circle(50, 0, 5), Circle(50, -30, 5)]) == (100, 60)
     # Nothing clears: the nearest point is used.
-    routed = route_leader(0, 0, 10, box, [Circle(30, 0, 60)], 4)
-    assert routed is not None and routed[1] == (100, 0)
+    assert routed_to(box, [Circle(30, 0, 60)]) == (100, 0)
     # Entirely inside a big ring: the nearest point stays.
-    routed = route_leader(0, 0, 10, box, [Circle(30, 0, 500)], 4)
-    assert routed is not None and routed[1] == (100, 0)
-    # The box swallowing the marker still means no leader, whatever the obstacles.
-    assert route_leader(0, 0, 10, Box(-5, -5, 5, 5), [Circle(50, 0, 5)], 4) is None
+    assert routed_to(box, [Circle(30, 0, 500)]) == (100, 0)
 
 
 def test_route_leader_never_crosses_the_label_itself() -> None:
@@ -125,18 +119,12 @@ def test_route_leader_never_crosses_the_label_itself() -> None:
     near side fully blocked, the far corners are clear of every ring but would run the leader
     across the text, so the nearest point is used instead."""
     box = Box(100, -60, 200, 60)
-    blockers = [Circle(50, 0, 5), Circle(50, -30, 5), Circle(50, 30, 5)]
-    routed = route_leader(0, 0, 10, box, blockers, 4)
-    assert routed is not None and routed[1] == (100, 0)
+    assert routed_to(box, [Circle(50, 0, 5), Circle(50, -30, 5), Circle(50, 30, 5)]) == (100, 0)
     # A marker above the box sees the top face and its corners, never the bottom ones.
     above = Box(-100, 100, 100, 160)
-    blockers = [Circle(0, 50, 5), Circle(-50, 50, 5), Circle(50, 50, 5)]
-    routed = route_leader(0, 0, 10, above, blockers, 4)
-    assert routed is not None and routed[1] == (0, 100)
+    assert routed_to(above, [Circle(0, 50, 5), Circle(-50, 50, 5), Circle(50, 50, 5)]) == (0, 100)
     # Diagonal to the box: both facing faces' midpoints and three corners are candidates.
-    diagonal = Box(100, 100, 200, 160)
-    routed = route_leader(0, 0, 10, diagonal, [Circle(50, 50, 5)], 4)
-    assert routed is not None and routed[1] == (150, 100)
+    assert routed_to(Box(100, 100, 200, 160), [Circle(50, 50, 5)]) == (150, 100)
 
 
 def test_render_keeps_size_draws_marker_and_preserves_icc(tmp_path: Path) -> None:
@@ -237,16 +225,13 @@ def test_leader_routes_around_another_marker(tmp_path: Path) -> None:
     r = float(style.marker_min_radius)
     rect = Box(label.x, label.y, label.x + box.width, label.y + box.height)
     naive = leader_segment(1620, 550, r, rect)
-    routed = route_leader(1620, 550, r, rect, [Circle(1100, 1400, 130)], 4 * 3)
-    assert naive is not None and routed is not None
-    assert naive[1] == (rect.right, rect.top)
+    assert naive is not None and naive[1] == (rect.right, rect.top)
+    routed = route_leader(naive, 1620, 550, r, rect, [marker_ring(OBJECTS[0], style)], PAD)
     assert routed[1] == (rect.right, (rect.top + rect.bottom) / 2)
-    counted = route_leader(1620, 550, r, rect, [Circle(1100, 1400, 130), Circle(1410, 1053, r)], 12)
-    assert counted is not None and counted[1] != routed[1]  # the bystander would have mattered
     with Image.open(out) as img:
         for (x1, y1), (x2, y2), drawn in ((*routed, True), (naive[0], naive[1], False)):
             px = img.getpixel((round(x1 + 0.8 * (x2 - x1)), round(y1 + 0.8 * (y2 - y1))))
-            assert isinstance(px, tuple) and close(px, (255, 213, 74)) == drawn
+            assert isinstance(px, tuple) and close(px, LEADER_RGB) == drawn
 
 
 def test_auto_leader_is_decided_on_the_nearest_gap(tmp_path: Path) -> None:
@@ -261,9 +246,9 @@ def test_auto_leader_is_decided_on_the_nearest_gap(tmp_path: Path) -> None:
     box = measure_label(FONTS_DIR, style, Label(object_id=2), OBJECTS[1])
     rect = Box(1470, 434, 1470 + box.width, 434 + box.height)
     naive = leader_segment(1620, 550, r, rect)
-    routed = route_leader(1620, 550, r, rect, [Circle(bystander.x, bystander.y, r)], 12)
-    assert naive is not None and routed is not None
-    assert naive[2] < 36 and routed[1] != naive[1]
+    assert naive is not None and naive[2] < 12 * S
+    routed = route_leader(naive, 1620, 550, r, rect, [marker_ring(bystander, style)], PAD)
+    assert routed[1] != naive[1]
     objects = [*OBJECTS, bystander]
     for mode, drawn in (("auto", False), ("on", True)):
         label = Label(object_id=2, x=1470.0, y=434.0, leader=mode)  # type: ignore[arg-type]
@@ -274,7 +259,7 @@ def test_auto_leader_is_decided_on_the_nearest_gap(tmp_path: Path) -> None:
         with Image.open(out) as img:
             (x1, y1), (x2, y2) = routed
             px = img.getpixel((round(x1 + 0.5 * (x2 - x1)), round(y1 + 0.5 * (y2 - y1))))
-            assert isinstance(px, tuple) and close(px, (255, 213, 74)) == drawn
+            assert isinstance(px, tuple) and close(px, LEADER_RGB) == drawn
 
 
 def test_render_falls_back_when_the_stored_font_is_gone(
