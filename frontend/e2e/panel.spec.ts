@@ -52,4 +52,17 @@ test('the side panel: kind chips, keyboard tabs, kept state, names follow the pr
   await page.getByRole('tab', { name: 'Style' }).click()
   await select.selectOption(before)
   await expect.poll(async () => (await fetchAnnotations(page, imageId)).style.name_preference, { timeout: 5_000 }).toBe(before)
+
+  // A clicked checkbox keeps the keyboard focus; Ctrl+Z must still undo (a checkbox is not a
+  // text field the key handler has to leave alone).
+  await page.getByRole('tab', { name: 'Objects' }).click()
+  const enabledCount = async () => (await fetchAnnotations(page, imageId)).labels.filter((l) => l.enabled).length
+  const wasEnabled = await enabledCount()
+  const box = page.locator('.object-list input[type=checkbox]').first()
+  const checked = await box.isChecked()
+  await box.click()
+  await expect.poll(enabledCount, { timeout: 5_000 }).toBe(checked ? wasEnabled - 1 : wasEnabled + 1)
+  await expect(box).toBeFocused()
+  await page.keyboard.press('Control+z')
+  await expect.poll(enabledCount, { timeout: 5_000 }).toBe(wasEnabled)
 })

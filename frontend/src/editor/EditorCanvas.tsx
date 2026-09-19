@@ -442,6 +442,9 @@ export default function EditorCanvas() {
       // swatch and the picker are buttons and inputs, and Escape there closes the popover while
       // Delete/Backspace edits a hex — neither may clear the selection or disable its labels.
       if (el.closest('.label-toolbar')) return true
+      // A checkbox (an Objects-tab row, after a click) has no text to protect: Space toggles it,
+      // like a button, but Ctrl+Z must still reach the editor's history.
+      if (el instanceof HTMLInputElement && el.type === 'checkbox') return withButton
       const tags = withButton ? ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'] : ['INPUT', 'TEXTAREA', 'SELECT']
       return tags.includes(el.tagName)
     }

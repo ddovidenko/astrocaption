@@ -67,7 +67,8 @@ const ObjectRow = memo(function ObjectRow({
         {name}
       </button>
       <span className="object-kind">{obj.kind}</span>
-      <span className="object-radius">{Math.round(obj.radius)} px</span>
+      {/* Nova reports radius 0 for stars: no size known, not a size (SPEC § 5.2). */}
+      <span className="object-radius">{obj.radius > 0 ? `${Math.round(obj.radius)} px` : '—'}</span>
     </li>
   )
 })

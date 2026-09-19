@@ -75,6 +75,13 @@ describe('ObjectsTab', () => {
     expect(useEditor.getState().hoveredId).toBeNull()
   })
 
+  it('shows a dash, not 0 px, for an object nova gave no size', () => {
+    render(<ObjectsTab />)
+    expect(row('M 42').textContent).toContain('40 px')
+    expect(row('Alnitak').textContent).toContain('—')
+    expect(row('Alnitak').textContent).not.toContain('px')
+  })
+
   it('marks the selected label’s row', () => {
     render(<ObjectsTab />)
     act(() => useEditor.getState().select(1))
