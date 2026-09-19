@@ -170,7 +170,13 @@ Every enabled object has:
   come first in nova's order, then the rest in the primary-name ranking order; the first `max_aliases`
   (0–5, default 2) survive. M 42 reads "M 42" over "Great Orion Nebula · NGC 1976".
 - A **leader line** from marker edge to label, drawn only when the label is farther than a gap threshold
-  (`auto`: gap between marker edge and the closest point of the text box > 12·s). Owner can force it always/never.
+  (`auto`: gap between marker edge and the leader's end on the text box > 12·s). Owner can force it always/never.
+  The leader ends at the closest point of the text box unless that segment cuts another enabled object's
+  ring (closest approach to the centre under `r + 4·s` and farthest point beyond `r − 4·s`, with
+  `r = max(catalogue radius, marker_min_radius)`; a leader entirely inside a big ring, a Trapezium star's
+  inside M 42, is fine, as for the placer). Then the first clear endpoint among the box's edge midpoints
+  (top, right, bottom, left) and corners (top-left, top-right, bottom-right, bottom-left) is used, and the
+  closest point again when none is clear. Both renderers apply the rule; `make render-vectors` pins it.
 
 Interactions:
 

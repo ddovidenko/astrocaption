@@ -3,7 +3,9 @@ import type { Page, TestInfo } from '@playwright/test'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Annotations, AnnotationsUpdate, Label } from '../src/api'
+import type { Annotations, AnnotationsUpdate, Label, ObjectOut, StyleConfig } from '../src/api'
+import { leaderSegment, markerRadius, scaleUnit } from '../src/editor/metrics'
+import { PAD_FACTOR } from '../src/editor/placement'
 import {
   currentImageId,
   ensureExported,
@@ -11,6 +13,7 @@ import {
   ensureSolvedImage,
   exportImage,
   fetchAnnotations,
+  fetchObjects,
   putAnnotations,
 } from './helpers'
 
@@ -207,6 +210,58 @@ test('the editor stage matches the annotated preview within the pixel budget', a
   await expectStageMatchesPreview(page, previewUrl, testInfo, 'plain')
 })
 
+/** A position for label `c` whose nearest-point leader would run straight through another
+ *  object's marker (#14): the box corner facing c's marker sits at twice the vector from c's marker
+ *  to the blocker's, so the blocker's centre is the segment's midpoint. Only pairs for which the
+ *  shared geometry (metrics.ts, pinned to render.py by the render vectors) finds a clear candidate
+ *  qualify — a box thrown into the M 42 core has every candidate cut some ring and falls back to
+ *  the nearest point on both renderers, proving nothing — and the widest box wins. The box has to
+ *  stay inside the frame. Every enabled object's ring counts, as on the canvas, but only
+ *  `candidates` are moved. Returns the box's top-left and that nearest corner. */
+function behindAnotherMarker(
+  candidates: Label[],
+  enabled: Label[],
+  objects: ObjectOut[],
+  style: StyleConfig,
+  boxes: { id: number; w: number; h: number }[],
+  frame: { width: number; height: number },
+): { label: Label; x: number; y: number; nearest: [number, number]; blocker: ObjectOut } {
+  const byId = new Map(objects.map((o) => [o.id, o]))
+  const sizes = new Map(boxes.map((b) => [b.id, b]))
+  const pad = PAD_FACTOR * scaleUnit(frame.width, frame.height)
+  let best: ReturnType<typeof behindAnotherMarker> | null = null
+  for (const label of candidates) {
+    const c = byId.get(label.object_id)
+    const size = sizes.get(label.object_id)
+    if (!c || !size) continue
+    const rings = enabled
+      .filter((l) => l.object_id !== c.id)
+      .flatMap((l) => {
+        const o = byId.get(l.object_id)
+        return o ? [{ x: o.x, y: o.y, r: markerRadius(o, style) }] : []
+      })
+    for (const other of enabled) {
+      const d = byId.get(other.object_id)
+      if (!d || d.id === c.id) continue
+      const dx = d.x - c.x
+      const dy = d.y - c.y
+      const dist = Math.hypot(dx, dy)
+      if (dist < 100 || dist > 600) continue
+      const nearest: [number, number] = [c.x + 2 * dx, c.y + 2 * dy]
+      const x = dx > 0 ? nearest[0] : nearest[0] - size.w
+      const y = dy > 0 ? nearest[1] : nearest[1] - size.h
+      if (x < 0 || y < 0 || x + size.w > frame.width || y + size.h > frame.height) continue
+      const box = { left: x, top: y, right: x + size.w, bottom: y + size.h }
+      const seg = leaderSegment(c.x, c.y, markerRadius(c, style), box, rings, pad)
+      if (!seg || Math.hypot(seg.to[0] - nearest[0], seg.to[1] - nearest[1]) <= 1) continue
+      if (best && sizes.get(best.label.object_id)!.w >= size.w) continue
+      best = { label, x, y, nearest, blocker: d }
+    }
+  }
+  expect(best, 'no enabled label can be put behind another marker with a clear leader candidate').not.toBeNull()
+  return best!
+}
+
 test('the stage matches the preview for a document with per-label overrides and a pinned label', async ({
   page,
 }, testInfo) => {
@@ -216,11 +271,26 @@ test('the stage matches the preview for a document with per-label overrides and 
   await page.waitForFunction(() => window.__astrocaptionEditor?.labelCount !== undefined)
   const imageId = currentImageId(page)
   const original = await fetchAnnotations(page, imageId)
+  const objects = await fetchObjects(page, imageId)
   const enabled = original.labels.filter((l) => l.enabled)
   expect(enabled.length).toBeGreaterThanOrEqual(3)
-  const [a, b, c] = enabled as [Label, Label, Label]
+  const [a, b] = enabled as [Label, Label]
+  const drawn = await page.evaluate(() => {
+    const hook = window.__astrocaptionEditor!
+    return { boxes: hook.labelPositions(), frame: { width: hook.imageWidth, height: hook.imageHeight } }
+  })
+  const moved = behindAnotherMarker(
+    enabled.filter((l) => l !== a && l !== b),
+    enabled,
+    objects,
+    original.style,
+    drawn.boxes,
+    drawn.frame,
+  )
+  const c = moved.label
   // A size and colour override, a text override with the alias line forced on, a pinned label
-  // with its leader forced on. (A stored font that is no longer bundled cannot be created
+  // with its leader forced on and moved behind another marker, so the leader has to route
+  // around that marker's ring (#14). (A stored font that is no longer bundled cannot be created
   // through the API — PUT refuses it with a 422 — and the app here runs on a scratch data dir
   // this spec cannot write to, so that half of the font fallback is pinned by pytest alone:
   // backend/tests/test_render.py and test_fonts.py.)
@@ -230,7 +300,7 @@ test('the stage matches the preview for a document with per-label overrides and 
     labels: original.labels.map((l) => {
       if (l.object_id === a.object_id) return { ...l, font_size: original.style.font_size * 2, color: '#ff8800' }
       if (l.object_id === b.object_id) return { ...l, text_override: 'Overridden name', show_aliases: true }
-      if (l.object_id === c.object_id) return { ...l, pinned: true, leader: 'on' as const, x: l.x + 60, y: l.y + 40 }
+      if (l.object_id === c.object_id) return { ...l, pinned: true, leader: 'on' as const, x: moved.x, y: moved.y }
       return l
     }),
   }
@@ -245,11 +315,28 @@ test('the stage matches the preview for a document with per-label overrides and 
     const byId = new Map(stored.labels.map((l) => [l.object_id, l]))
     expect(byId.get(a.object_id)).toMatchObject({ font_size: original.style.font_size * 2, color: '#ff8800' })
     expect(byId.get(b.object_id)).toMatchObject({ text_override: 'Overridden name', show_aliases: true })
-    expect(byId.get(c.object_id)).toMatchObject({ pinned: true, leader: 'on', x: c.x + 60, y: c.y + 40 })
+    expect(byId.get(c.object_id)).toMatchObject({ pinned: true, leader: 'on', x: moved.x, y: moved.y })
     const previewUrl = await exportImage(page, imageId)
     // Reload so the editor draws the stored document, then diff.
     await page.reload()
     await page.waitForFunction(() => window.__astrocaptionEditor?.labelCount !== undefined)
+    // The pixel budget below is too loose to notice one thin line drawn to the wrong corner, so
+    // the routed leader is checked outright: it must not end at the nearest point (the blocker's
+    // marker sits on that segment) and it must be drawn (the leader is forced on).
+    const leader = await page.evaluate(
+      (id) => window.__astrocaptionEditor!.leaders().find((l) => l.id === id) ?? null,
+      c.object_id,
+    )
+    expect(leader, `label ${c.object_id} has no leader on the stage`).not.toBeNull()
+    const [tx, ty] = leader!.to
+    expect(
+      Math.hypot(tx - moved.nearest[0], ty - moved.nearest[1]),
+      `the leader of label ${c.object_id} still ends at the nearest point, through ${moved.blocker.primary_name}'s ring`,
+    ).toBeGreaterThan(1)
+    console.log(
+      `[parity overrides] leader of label ${c.object_id} routed around ${moved.blocker.primary_name}: ` +
+        `nearest (${moved.nearest.map((v) => v.toFixed(1)).join(', ')}) → (${tx.toFixed(1)}, ${ty.toFixed(1)})`,
+    )
     await expectStageMatchesPreview(page, previewUrl, testInfo, 'overrides')
   } catch (e) {
     failed = e

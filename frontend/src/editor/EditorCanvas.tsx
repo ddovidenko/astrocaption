@@ -40,12 +40,18 @@ import { toScreen, zoomAt } from './view'
  *  stage anyway. */
 export interface EditorTestHook {
   stage: Konva.Stage
-  /** The original image width, so a caller can pick the scale that matches a server render. */
+  /** The original image size, so a caller can pick the scale that matches a server render and
+   *  keep a moved label inside the frame. */
   imageWidth: number
+  imageHeight: number
   /** How many enabled labels the canvas actually drew (orphaned ones are not counted). */
   labelCount: number
-  /** Where the drawn labels sit, in original image pixels — what a drag has to move. */
-  labelPositions(): { id: number; x: number; y: number }[]
+  /** Where the drawn labels sit and how big their text boxes are, in original image pixels —
+   *  what a drag has to move. */
+  labelPositions(): { id: number; x: number; y: number; w: number; h: number }[]
+  /** The leaders the canvas draws, in original image pixels: the parity spec checks that one
+   *  moved behind another marker was routed around its ring (#14). */
+  leaders(): { id: number; from: [number, number]; to: [number, number] }[]
   /** The selected object ids, for the spec that drives clicks and shift-clicks. */
   selectedIds(): number[]
   renderAt(scale: number): string
@@ -589,11 +595,22 @@ export default function EditorCanvas() {
     window.__astrocaptionEditor = {
       stage,
       imageWidth: image.width,
+      imageHeight: image.height,
       get labelCount() {
         return entriesRef.current.length
       },
       labelPositions: () =>
-        entriesRef.current.map((e) => ({ id: e.label.object_id, x: e.label.x, y: e.label.y })),
+        entriesRef.current.map((e) => ({
+          id: e.label.object_id,
+          x: e.label.x,
+          y: e.label.y,
+          w: e.box.width,
+          h: e.box.height,
+        })),
+      leaders: () =>
+        entriesRef.current
+          .filter((e) => e.leader && e.seg !== null)
+          .map((e) => ({ id: e.label.object_id, from: e.seg!.from, to: e.seg!.to })),
       selectedIds: () => [...useEditor.getState().selectedIds],
       renderAt,
     }
