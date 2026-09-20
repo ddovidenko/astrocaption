@@ -177,8 +177,9 @@ Every enabled object has:
   inside M 42, is fine, as for the placer). Then the first clear endpoint among the edge midpoints
   (top, right, bottom, left) and corners (top-left, top-right, bottom-right, bottom-left) of the box's faces
   that face the marker is used (a far-side endpoint would run the leader across the text), and the closest
-  point again when none is clear. Routing never decides whether a leader exists: `auto` looks at the closest
-  point's gap alone. Both renderers apply the rule; `make render-vectors` pins it.
+  point again when none is clear. A ring whose outline already runs through the label's own box (the owner
+  dragged it there) does not block that label's leader. Routing never decides whether a leader exists: `auto`
+  looks at the closest point's gap alone. Both renderers apply the rule; `make render-vectors` pins it.
 
 Interactions:
 

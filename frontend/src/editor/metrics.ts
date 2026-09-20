@@ -166,6 +166,22 @@ export interface LeaderSegment {
   gap: number
 }
 
+/** True when the circle's outline passes through `box` (inflated by `pad`). Mirrors
+ *  placement.box_crosses_ring; it lives here rather than in placement.ts because that module
+ *  imports this one and `routeLeader` needs it.
+ *
+ *  A box entirely inside a large marker (e.g. a star label inside M 42's circle) or entirely
+ *  outside it is fine; sitting on the drawn ring is not. */
+export function boxCrossesRing(box: Box, c: Circle, pad: number): boolean {
+  const nx = Math.min(Math.max(c.x, box.left), box.right)
+  const ny = Math.min(Math.max(c.y, box.top), box.bottom)
+  const nearest = Math.hypot(c.x - nx, c.y - ny)
+  const fx = Math.abs(c.x - box.left) > Math.abs(c.x - box.right) ? box.left : box.right
+  const fy = Math.abs(c.y - box.top) > Math.abs(c.y - box.bottom) ? box.top : box.bottom
+  const farthest = Math.hypot(c.x - fx, c.y - fy)
+  return nearest < c.r + pad && farthest > c.r - pad
+}
+
 /** Whether the segment a–b cuts the ring's outline (inflated by `pad`). The counterpart of
  *  placement's `boxCrossesRing`, kept here rather than in placement.ts because placement.ts
  *  imports this module. Mirrors placement.segment_crosses_ring: squared distances only, since
@@ -237,16 +253,21 @@ export interface RoutedLeader {
 
 /** The leader to draw (#14): `seg` (the `leaderSegment` to the nearest point) unless it crosses
  *  one of the `obstacles` rings, then the first of `facingCandidates` whose segment crosses
- *  none, and `seg` again when every candidate does. Mirrors render.route_leader. */
+ *  none, and `seg` again when every candidate does; a ring whose outline runs through the box
+ *  itself never blocks. Mirrors render.route_leader. */
 export function routeLeader(
   seg: LeaderSegment,
   cx: number,
   cy: number,
   r: number,
   box: Box,
-  obstacles: readonly Circle[],
+  allObstacles: readonly Circle[],
   pad: number,
 ): RoutedLeader {
+  // A ring whose outline already runs through the box (the owner dragged the label onto it;
+  // M 42's arc through a label near the Trapezium) is not an obstacle: the leader cannot make
+  // that worse.
+  const obstacles = allObstacles.filter((c) => !boxCrossesRing(box, c, pad))
   const crosses = (from: [number, number], to: [number, number]) =>
     obstacles.some((c) => segmentCrossesRing(from, to, c, pad))
   if (!crosses(seg.from, seg.to)) return { from: seg.from, to: seg.to }

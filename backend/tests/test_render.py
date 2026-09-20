@@ -114,6 +114,22 @@ def test_route_leader_avoids_another_ring() -> None:
     assert routed_to(box, [Circle(30, 0, 500)]) == (100, 0)
 
 
+def test_route_leader_ignores_a_ring_the_box_sits_across() -> None:
+    """A ring whose outline already runs through the label's box (the owner dragged it there)
+    does not block that label's leader: M 42's arc through a label near the Trapezium would
+    otherwise reject every endpoint on the box's far half."""
+    box = Box(100, -60, 200, 60)
+    straddled = Circle(-200, 0, 300)  # outline at x = 100: the box's left edge sits on it
+    # Without the small ring the nearest point crosses the big outline, and is kept.
+    assert routed_to(box, [straddled]) == (100, 0)
+    # The small ring blocks the nearest point; the top-left corner clears it, although it
+    # crosses the straddled outline like every other endpoint.
+    assert routed_to(box, [Circle(50, 0, 5), straddled]) == (100, -60)
+    # A big ring the box lies entirely inside is not straddled and still blocks.
+    assert routed_to(box, [Circle(150, 0, 100)]) == (100, 0)
+    assert routed_to(box, [Circle(50, 0, 5), Circle(150, 0, 100)]) == (100, 0)
+
+
 def test_route_leader_never_crosses_the_label_itself() -> None:
     """Only the box's faces that face the marker (and their corners) are candidates: with the
     near side fully blocked, the far corners are clear of every ring but would run the leader
@@ -209,13 +225,13 @@ def test_leader_is_drawn_when_forced_on(tmp_path: Path) -> None:
 
 
 def test_leader_routes_around_another_marker(tmp_path: Path) -> None:
-    """Alnitak's label at the edge of M 42's shadow: the nearest-point leader (top-right
-    corner) would cut M 42's ring; the right edge's midpoint clears it (#14). A disabled
-    label's ring on that route does not count."""
+    """Alnitak's label at the edge of M 42's shadow, clear of M 42's outline: the nearest-point
+    leader (top-right corner) would cut M 42's ring; the bottom-right corner clears it (#14).
+    A disabled label's ring on that route does not count."""
     original = write_test_image(tmp_path / "orig.jpg", 3000, 2000)
     style = default_style(3000, 2000, FONTS_DIR)
     box = measure_label(FONTS_DIR, style, Label(object_id=2), OBJECTS[1])
-    label = Label(object_id=2, x=1200.0 - box.width, y=1520.0, leader="on")
+    label = Label(object_id=2, x=1165.0 - box.width, y=1545.0, leader="on")
     # A star on the routed leader's path, whose label is off: no obstacle.
     bystander = SolveObject(id=3, catalog_names=["HD 1"], type="hd", x=1410, y=1053, radius=0)
     labels = [Label(object_id=1, x=1300, y=1300), label, Label(object_id=3, enabled=False)]
@@ -227,7 +243,7 @@ def test_leader_routes_around_another_marker(tmp_path: Path) -> None:
     naive = leader_segment(1620, 550, r, rect)
     assert naive is not None and naive[1] == (rect.right, rect.top)
     routed = route_leader(naive, 1620, 550, r, rect, [marker_ring(OBJECTS[0], style)], PAD)
-    assert routed[1] == (rect.right, (rect.top + rect.bottom) / 2)
+    assert routed[1] == (rect.right, rect.bottom)
     with Image.open(out) as img:
         for (x1, y1), (x2, y2), drawn in ((*routed, True), (naive[0], naive[1], False)):
             px = img.getpixel((round(x1 + 0.8 * (x2 - x1)), round(y1 + 0.8 * (y2 - y1))))

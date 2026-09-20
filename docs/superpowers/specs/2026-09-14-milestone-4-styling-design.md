@@ -162,7 +162,9 @@ renderers, pinned by render vectors:
    and a segment entirely inside a big ring is clear. (Decided at PR 6, 2026-09-19: the first
    draft rejected any segment passing within `r + pad` of the centre, which would have rejected
    every candidate for the Trapezium stars inside M 42, the very case of #14, and fallen back to
-   the nearest point.)
+   the nearest point.) A ring whose outline already runs through the label's own box is not an
+   obstacle for that label (owner's smoke test, 2026-09-19: M 42's arc through the NGC 1977 label
+   otherwise rejected every endpoint on the box's far half, and 45 Ori the rest).
 3. The first accepted candidate wins; if none is accepted the nearest point is used.
 4. `leader_visible` (the `auto` gap rule) is evaluated on the nearest-point segment, and only a
    leader that will be drawn is routed (PR 6 review, replacing the first draft's "on the chosen

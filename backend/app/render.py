@@ -9,7 +9,8 @@ The browser canvas (milestone 3) must implement the same layout rules:
   * a leader that is drawn is routed (#14): if the closest-point segment cuts another enabled
     object's ring, the first clear endpoint among the box's edge midpoints (top, right, bottom,
     left) and corners (top-left, top-right, bottom-right, bottom-left) that face the marker
-    is used instead, and the closest point again when none is clear.
+    is used instead, and the closest point again when none is clear; a ring whose outline runs
+    through the box itself never blocks.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from PIL import Image, ImageDraw, JpegImagePlugin
 
 from .fonts import load_font, resolved_style
 from .models import MIN_FONT_SIZE, Annotations, Label, SolveObject, StyleConfig
-from .placement import PAD_FACTOR, Box, Circle, scale_unit, segment_crosses_ring
+from .placement import PAD_FACTOR, Box, Circle, box_crosses_ring, scale_unit, segment_crosses_ring
 from .storage import is_jpeg, to_rgb, write_preview
 
 ALIAS_SCALE = 0.7
@@ -177,7 +178,10 @@ def route_leader(
 ) -> tuple[Point, Point]:
     """The leader to draw (#14): ``seg`` (the ``leader_segment`` to the nearest point) unless it
     crosses one of the ``obstacles`` rings, then the first of ``_facing_candidates`` whose
-    segment crosses none, and ``seg`` again when every candidate does."""
+    segment crosses none, and ``seg`` again when every candidate does. A ring whose outline
+    already runs through ``box`` (the owner dragged the label onto it; M 42's arc through a
+    label near the Trapezium) is not an obstacle: the leader cannot make that worse."""
+    obstacles = [c for c in obstacles if not box_crosses_ring(box, c, pad)]
     start, end, _gap = seg
     if not any(segment_crosses_ring(start, end, c, pad) for c in obstacles):
         return start, end

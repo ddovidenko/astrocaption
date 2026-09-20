@@ -10,6 +10,7 @@
 import {
   ANCHORS,
   anchorBox,
+  boxCrossesRing,
   markerRing,
   measureLabel,
   scaleUnit,
@@ -18,6 +19,8 @@ import {
   type TextMeasurer,
 } from './metrics'
 import { enabledLabels, type EditorState } from './store'
+
+export { boxCrossesRing }
 
 export const GAP_FACTOR = 6.0
 export const PAD_FACTOR = 4.0
@@ -43,20 +46,6 @@ export interface Placement {
 
 export function boxesOverlap(a: Box, b: Box, pad: number): boolean {
   return a.left < b.right + pad && b.left < a.right + pad && a.top < b.bottom + pad && b.top < a.bottom + pad
-}
-
-/** True when the circle's outline passes through `box` (inflated by `pad`).
- *
- *  A box entirely inside a large marker (e.g. a star label inside M 42's circle) or entirely
- *  outside it is fine; sitting on the drawn ring is not. */
-export function boxCrossesRing(box: Box, c: Circle, pad: number): boolean {
-  const nx = Math.min(Math.max(c.x, box.left), box.right)
-  const ny = Math.min(Math.max(c.y, box.top), box.bottom)
-  const nearest = Math.hypot(c.x - nx, c.y - ny)
-  const fx = Math.abs(c.x - box.left) > Math.abs(c.x - box.right) ? box.left : box.right
-  const fy = Math.abs(c.y - box.top) > Math.abs(c.y - box.bottom) ? box.top : box.bottom
-  const farthest = Math.hypot(c.x - fx, c.y - fy)
-  return nearest < c.r + pad && farthest > c.r - pad
 }
 
 export function boxInside(box: Box, width: number, height: number): boolean {

@@ -228,3 +228,6 @@ frontend/dist/
 frontend/test-results/
 frontend/playwright-report/
 .superpowers/
+
+# Playwright MCP snapshots (may contain typed form contents)
+.playwright-mcp/

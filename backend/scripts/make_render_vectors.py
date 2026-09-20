@@ -213,8 +213,9 @@ def leader_vectors() -> list[dict[str, Any]]:
     clears), that corner's path blocked too (bottom-left), the whole facing side blocked (the
     far corners are clear of every ring but would cross the text: nearest point), a big ring the
     box sits behind (nearest point), a leader entirely inside a big ring (clear), a box inside
-    the marker (no segment, whatever the rings), and a diagonal box whose two facing faces both
-    offer candidates (top midpoint)."""
+    the marker (no segment, whatever the rings), a diagonal box whose two facing faces both
+    offer candidates (top midpoint), and a box sitting across a big ring's outline, which then
+    does not block (top-left corner)."""
     width, height = 3000, 2000
     s = scale_unit(width, height)
     pad = PAD_FACTOR * s
@@ -238,6 +239,9 @@ def leader_vectors() -> list[dict[str, Any]]:
         (18.0, tall, [Circle(1530, 1000, 500)]),  # entirely inside a big ring: clear
         (130.0, Box(1520, 990, 1600, 1010), [Circle(1550, 1000, 5)]),  # inside: still no segment
         (18.0, Box(1600, 1100, 1900, 1160), [Circle(1550, 1050, 5)]),  # diagonal: top midpoint
+        # The box sits across a big ring's outline (x = 1600): that ring does not block, so the
+        # small ring on the nearest point's path sends the leader to the top-left corner.
+        (18.0, tall, [Circle(1550, 1000, 5), Circle(1300, 1000, 300)]),
     ]
     cases: list[dict[str, Any]] = []
     for r, box, obstacles in geometries:
