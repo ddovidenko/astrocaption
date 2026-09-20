@@ -1,7 +1,7 @@
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Annotations, AnnotationsUpdate, ExportOut, HealthOut, ImageOut } from '../src/api'
+import type { Annotations, AnnotationsUpdate, ExportOut, HealthOut, ImageOut, ObjectOut } from '../src/api'
 import type { EditorTestHook } from '../src/editor/EditorCanvas'
 
 // Shared steps for the e2e specs. The whole run shares one data dir (`make e2e` mints a scratch
@@ -168,6 +168,13 @@ export async function fetchAnnotations(page: Page, imageId: string): Promise<Ann
   const res = await page.request.get(`/api/images/${imageId}/annotations`)
   expect(res.status()).toBe(200)
   return (await res.json()) as Annotations
+}
+
+/** The solved objects of `imageId`, through the signed-in page's cookies. */
+export async function fetchObjects(page: Page, imageId: string): Promise<ObjectOut[]> {
+  const res = await page.request.get(`/api/images/${imageId}/objects`)
+  expect(res.status()).toBe(200)
+  return (await res.json()) as ObjectOut[]
 }
 
 /** Stores `doc` as the image's annotations through the signed-in page's cookies. */

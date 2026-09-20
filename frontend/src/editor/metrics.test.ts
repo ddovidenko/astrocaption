@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import raw from '../../../tests/fixtures/render/vectors.json'
 import type { FontOut, Label, LeaderMode, ObjectOut, StyleConfig } from '../api'
+import type { Circle } from './metrics'
 import {
   ANCHORS,
   MAX_FONT_SIZE,
@@ -10,6 +11,8 @@ import {
   fontShorthand,
   labelText,
   leaderSegment,
+  routeLeader,
+  segmentCrossesRing,
   leaderVisible,
   markerRadius,
   markerStrokeRadius,
@@ -43,9 +46,19 @@ interface LeaderCase {
   cy: number
   r: number
   s: number
+  pad: number
   box: Box
+  obstacles: Circle[]
   segment: { from: [number, number]; to: [number, number]; gap: number } | null
+  routed: { from: [number, number]; to: [number, number] } | null
   visible: Record<LeaderMode, boolean>
+}
+interface RingCrossingCase {
+  a: [number, number]
+  b: [number, number]
+  circle: Circle
+  pad: number
+  crosses: boolean
 }
 interface AnchorCase {
   anchor: Anchor
@@ -63,6 +76,7 @@ interface Vectors {
   texts: [string, number, string, number][]
   labels: LabelCase[]
   leaders: LeaderCase[]
+  ring_crossings: RingCrossingCase[]
   anchors: AnchorCase[]
 }
 
@@ -86,6 +100,11 @@ function pillowMeasurer(): TextMeasurer {
     if (width === undefined) throw new Error(`no Pillow width for ${file} ${size}px ${JSON.stringify(text)}`)
     return width
   }
+}
+
+function expectPoint(got: [number, number], want: [number, number]): void {
+  expect(Math.abs(got[0] - want[0])).toBeLessThanOrEqual(EPS)
+  expect(Math.abs(got[1] - want[1])).toBeLessThanOrEqual(EPS)
 }
 
 function expectBox(got: Box, want: Box): void {
@@ -169,7 +188,7 @@ describe('render vectors', () => {
     expect(markerStrokeRadius(obj, style)).toBe(0)
   })
 
-  it('reproduces every leader segment and its visibility per mode', () => {
+  it('reproduces every leader segment, its routed segment and its visibility per mode', () => {
     const label = (mode: LeaderMode): Label => ({
       object_id: 1,
       enabled: true,
@@ -188,18 +207,35 @@ describe('render vectors', () => {
       const seg = leaderSegment(c.cx, c.cy, c.r, c.box)
       if (c.segment === null) {
         expect(seg).toBeNull()
+        expect(c.routed).toBeNull()
       } else {
         expect(seg).not.toBeNull()
-        expect(Math.abs(seg!.from[0] - c.segment.from[0])).toBeLessThanOrEqual(EPS)
-        expect(Math.abs(seg!.from[1] - c.segment.from[1])).toBeLessThanOrEqual(EPS)
-        expect(Math.abs(seg!.to[0] - c.segment.to[0])).toBeLessThanOrEqual(EPS)
-        expect(Math.abs(seg!.to[1] - c.segment.to[1])).toBeLessThanOrEqual(EPS)
+        expectPoint(seg!.from, c.segment.from)
+        expectPoint(seg!.to, c.segment.to)
         expect(Math.abs(seg!.gap - c.segment.gap)).toBeLessThanOrEqual(EPS)
+        const routed = routeLeader(seg!, c.cx, c.cy, c.r, c.box, c.obstacles, c.pad)
+        expectPoint(routed.from, c.routed!.from)
+        expectPoint(routed.to, c.routed!.to)
       }
       for (const mode of ['auto', 'on', 'off'] as const) {
         const drawn = seg !== null && leaderVisible(label(mode), seg.gap, c.s)
         expect(drawn, `${JSON.stringify(c.box)} ${mode}`).toBe(c.visible[mode])
       }
+    }
+  })
+
+  it('covers the routing cases', () => {
+    const routed = vectors.leaders.filter((c) => c.obstacles.length > 0)
+    expect(routed.length).toBeGreaterThanOrEqual(7)
+    // At least one case reroutes and at least one falls back, so a broken port cannot pass.
+    expect(routed.some((c) => c.routed && c.segment && c.routed.to[1] !== c.segment.to[1])).toBe(true)
+    expect(routed.some((c) => c.routed && c.segment && c.routed.to[1] === c.segment.to[1])).toBe(true)
+  })
+
+  it('reproduces every ring crossing on and around the thresholds', () => {
+    expect(vectors.ring_crossings.length).toBeGreaterThanOrEqual(8)
+    for (const c of vectors.ring_crossings) {
+      expect(segmentCrossesRing(c.a, c.b, c.circle, c.pad), JSON.stringify(c)).toBe(c.crosses)
     }
   })
 

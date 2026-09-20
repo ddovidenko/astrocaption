@@ -8,6 +8,7 @@ import LabelToolbar from './LabelToolbar'
 import { LabelTextShape } from './LabelTextShape'
 import { disableAll, getMeasurer, isEditable, tryToggleWithPlacement } from './editing'
 import { primaryName } from './names'
+import { PAD_FACTOR } from './placement'
 import { CANVAS_SIZE_ERROR, drawErrorNotice, previewErrorSentence, probeStatus } from './notices'
 import {
   MAX_FONT_SIZE,
@@ -15,17 +16,20 @@ import {
   labelText,
   leaderSegment,
   leaderVisible,
+  routeLeader,
   markerRadius,
+  markerRing,
   markerStrokeRadius,
   measureLabel,
   scaleUnit,
   type Box,
+  type Circle as Ring,
   type LabelBox,
   type LabelLines,
-  type LeaderSegment,
+  type RoutedLeader,
   type TextMeasurer,
 } from './metrics'
-import { enabledLabels, fontFor, useEditor } from './store'
+import { enabledLabels, enabledObjectIds, fontFor, useEditor } from './store'
 import { useTaggedDraft } from './taggedDraft'
 import { toScreen, zoomAt } from './view'
 
@@ -38,12 +42,18 @@ import { toScreen, zoomAt } from './view'
  *  stage anyway. */
 export interface EditorTestHook {
   stage: Konva.Stage
-  /** The original image width, so a caller can pick the scale that matches a server render. */
+  /** The original image size, so a caller can pick the scale that matches a server render and
+   *  keep a moved label inside the frame. */
   imageWidth: number
+  imageHeight: number
   /** How many enabled labels the canvas actually drew (orphaned ones are not counted). */
   labelCount: number
-  /** Where the drawn labels sit, in original image pixels — what a drag has to move. */
-  labelPositions(): { id: number; x: number; y: number }[]
+  /** Where the drawn labels sit and how big their text boxes are, in original image pixels —
+   *  what a drag has to move. */
+  labelPositions(): { id: number; x: number; y: number; w: number; h: number }[]
+  /** Where the leaders the canvas draws end, in original image pixels: the parity spec checks
+   *  that one moved behind another marker was routed around its ring (#14). */
+  leaders(): { id: number; to: [number, number] }[]
   /** The selected object ids, for the spec that drives clicks and shift-clicks. */
   selectedIds(): number[]
   renderAt(scale: number): string
@@ -60,8 +70,8 @@ interface Entry {
   obj: ObjectOut
   box: LabelBox
   text: LabelLines
-  seg: LeaderSegment | null
-  leader: boolean
+  /** The leader as drawn, routed around other markers' rings; null when none is drawn. */
+  leader: RoutedLeader | null
 }
 
 const HOVER_COLOR = '#8ab4ff'
@@ -70,35 +80,71 @@ const HOVER_COLOR = '#8ab4ff'
 // canvas (SPEC § 6.1), and Konva would otherwise start a drag with it.
 Konva.dragButtons = [0]
 
-/** Layout numbers per label, memoised on the label's identity. A drag replaces one `Label` object
- *  per frame (the store never mutates them), so without this every other label would be measured
- *  again 60 times a second. A hit is only reused while the style and the object behind it are the
- *  same objects; the maps are weak, so a replaced label or style needs no eviction. */
-const entryCache = new WeakMap<StyleConfig, WeakMap<Label, Entry>>()
+/** Every enabled object's ring, keyed by object id: the obstacles a leader routes around (#14).
+ *  Its identity only changes with the enabled set, the objects or the style, never on a drag
+ *  frame, so it can key the entry cache. */
+type Rings = ReadonlyMap<number, Ring>
 
-function entryFor(style: StyleConfig, label: Label, obj: ObjectOut, measure: TextMeasurer, unit: number): Entry {
-  let byLabel = entryCache.get(style)
-  if (!byLabel) {
-    byLabel = new WeakMap<Label, Entry>()
-    entryCache.set(style, byLabel)
+interface Measured {
+  obj: ObjectOut
+  box: LabelBox
+  text: LabelLines
+}
+
+/** Text measurements per label, memoised on the label's identity. A drag replaces one `Label`
+ *  object per frame (the store never mutates them), so without this every other label would be
+ *  measured again 60 times a second. A hit is only reused while the style and the object behind
+ *  it are the same objects; the maps are weak, so a replaced label or style needs no eviction. */
+const measureCache = new WeakMap<StyleConfig, WeakMap<Label, Measured>>()
+
+/** The drawn entries, keyed further by the rings: toggling a label changes every other label's
+ *  routed leader but not its measurement, so only this layer is dropped then. */
+const entryCache = new WeakMap<StyleConfig, WeakMap<Rings, WeakMap<Label, Entry>>>()
+
+function cached<K extends object, V>(map: WeakMap<K, V>, key: K, make: () => V): V {
+  let value = map.get(key)
+  if (value === undefined) {
+    value = make()
+    map.set(key, value)
   }
+  return value
+}
+
+function measuredFor(style: StyleConfig, label: Label, obj: ObjectOut, measure: TextMeasurer): Measured {
+  const byLabel = cached(measureCache, style, () => new WeakMap<Label, Measured>())
   const hit = byLabel.get(label)
   if (hit && hit.obj === obj) return hit
-  const box = measureLabel(measure, style, label, obj)
-  const seg = leaderSegment(obj.x, obj.y, markerRadius(obj, style), {
-    left: label.x,
-    top: label.y,
-    right: label.x + box.width,
-    bottom: label.y + box.height,
-  })
-  const entry: Entry = {
-    label,
-    obj,
-    box,
-    text: labelText(obj, label, style),
-    seg,
-    leader: seg !== null && leaderVisible(label, seg.gap, unit),
+  const measured: Measured = { obj, box: measureLabel(measure, style, label, obj), text: labelText(obj, label, style) }
+  byLabel.set(label, measured)
+  return measured
+}
+
+function entryFor(
+  style: StyleConfig,
+  rings: Rings,
+  label: Label,
+  obj: ObjectOut,
+  measure: TextMeasurer,
+  unit: number,
+): Entry {
+  const byLabel = cached(
+    cached(entryCache, style, () => new WeakMap<Rings, WeakMap<Label, Entry>>()),
+    rings,
+    () => new WeakMap<Label, Entry>(),
+  )
+  const hit = byLabel.get(label)
+  if (hit && hit.obj === obj) return hit
+  const { box, text } = measuredFor(style, label, obj, measure)
+  const r = markerRadius(obj, style)
+  const rect = { left: label.x, top: label.y, right: label.x + box.width, bottom: label.y + box.height }
+  const seg = leaderSegment(obj.x, obj.y, r, rect)
+  let leader: RoutedLeader | null = null
+  if (seg !== null && leaderVisible(label, seg.gap, unit)) {
+    const others: Ring[] = []
+    for (const [id, ring] of rings) if (id !== label.object_id) others.push(ring)
+    leader = routeLeader(seg, obj.x, obj.y, r, rect, others, PAD_FACTOR * unit)
   }
+  const entry: Entry = { label, obj, box, text, leader }
   byLabel.set(label, entry)
   return entry
 }
@@ -124,7 +170,7 @@ interface EntryProps {
  *  prop, not part of `Entry`, so a Space press or release still re-renders every label once (it
  *  flips `draggable` on each of them). */
 const LabelEntry = memo(function LabelEntry({
-  entry: { label, obj, box, text, seg, leader },
+  entry: { label, obj, box, text, leader },
   style,
   font,
   editable,
@@ -147,9 +193,9 @@ const LabelEntry = memo(function LabelEntry({
         strokeWidth={style.marker_width}
         listening={false}
       />
-      {seg && leader && (
+      {leader && (
         <Line
-          points={[seg.from[0], seg.from[1], seg.to[0], seg.to[1]]}
+          points={[leader.from[0], leader.from[1], leader.to[0], leader.to[1]]}
           stroke={style.leader_color}
           strokeWidth={style.marker_width}
           listening={false}
@@ -261,6 +307,9 @@ export default function EditorCanvas() {
   // useShallow keeps the array identity while the labels themselves are unchanged, so the
   // measuring memo below does not rerun on every pan frame.
   const labels = useEditor(useShallow(enabledLabels))
+  // The enabled ids alone: stable across a drag (which replaces labels, not the set), so the
+  // rings below, and with them every other label's cached entry, survive the drag's frames.
+  const enabledIds = useEditor(useShallow(enabledObjectIds))
 
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<Konva.Stage>(null)
@@ -365,6 +414,17 @@ export default function EditorCanvas() {
   // 3. The one offscreen context the editor measures with (design § 3); shared with the placer.
   const measure = getMeasurer()
 
+  // The rings every leader has to clear (#14): one per enabled object.
+  const rings = useMemo<Rings>(() => {
+    const out = new Map<number, Ring>()
+    if (!style) return out
+    for (const id of enabledIds) {
+      const obj = objects.get(id)
+      if (obj) out.set(id, markerRing(obj, style))
+    }
+    return out
+  }, [enabledIds, objects, style])
+
   // 4. Every layout number for the enabled labels, recomputed only when the document changes.
   const { entries, orphans } = useMemo<{ entries: Entry[]; orphans: number }>(() => {
     if (!image || !style) return { entries: [], orphans: 0 }
@@ -378,10 +438,10 @@ export default function EditorCanvas() {
         orphans++
         continue
       }
-      out.push(entryFor(style, label, obj, measure, unit))
+      out.push(entryFor(style, rings, label, obj, measure, unit))
     }
     return { entries: out, orphans }
-  }, [image, style, labels, objects, measure])
+  }, [image, style, rings, labels, objects, measure])
 
   // Every label whose draw threw, in failure order; the notice counts them and names the first.
   // A label that keeps failing reports once (the shape stops drawing after its first throw).
@@ -552,11 +612,19 @@ export default function EditorCanvas() {
     window.__astrocaptionEditor = {
       stage,
       imageWidth: image.width,
+      imageHeight: image.height,
       get labelCount() {
         return entriesRef.current.length
       },
       labelPositions: () =>
-        entriesRef.current.map((e) => ({ id: e.label.object_id, x: e.label.x, y: e.label.y })),
+        entriesRef.current.map((e) => ({
+          id: e.label.object_id,
+          x: e.label.x,
+          y: e.label.y,
+          w: e.box.width,
+          h: e.box.height,
+        })),
+      leaders: () => entriesRef.current.flatMap((e) => (e.leader ? [{ id: e.label.object_id, to: e.leader.to }] : [])),
       selectedIds: () => [...useEditor.getState().selectedIds],
       renderAt,
     }

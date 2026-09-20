@@ -121,6 +121,28 @@ def box_crosses_ring(box: Box, c: Circle, pad: float) -> bool:
     return nearest < c.r + pad and farthest > c.r - pad
 
 
+def segment_crosses_ring(
+    a: tuple[float, float], b: tuple[float, float], c: Circle, pad: float
+) -> bool:
+    """True when the segment ``a``–``b`` cuts the circle's outline (inflated by ``pad``).
+
+    The leader counterpart of ``box_crosses_ring``: a leader entirely inside a big marker
+    (a Trapezium star's, inside M 42) or entirely outside it is fine; one that passes through
+    the drawn ring is not. Squared distances only: ``hypot`` is not bit-identical between
+    Python and V8, and a value on the threshold must fall on the same side in both renderers.
+    """
+    ax, ay = a[0] - c.x, a[1] - c.y
+    bx, by = b[0] - c.x, b[1] - c.y
+    dx, dy = bx - ax, by - ay
+    length_sq = dx * dx + dy * dy
+    t = 0.0 if length_sq == 0 else min(1.0, max(0.0, -(ax * dx + ay * dy) / length_sq))
+    px, py = ax + t * dx, ay + t * dy
+    nearest_sq = px * px + py * py
+    farthest_sq = max(ax * ax + ay * ay, bx * bx + by * by)
+    outer, inner = c.r + pad, c.r - pad
+    return nearest_sq < outer * outer and (inner <= 0 or farthest_sq > inner * inner)
+
+
 def box_inside(box: Box, width: float, height: float) -> bool:
     return box.left >= 0 and box.top >= 0 and box.right <= width and box.bottom <= height
 

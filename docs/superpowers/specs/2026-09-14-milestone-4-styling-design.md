@@ -152,13 +152,23 @@ Today the leader runs from the marker edge to the nearest point of the text box.
 renderers, pinned by render vectors:
 
 1. Candidate endpoints on the text box, in order: nearest point (today's), the four edge midpoints
-   (top, right, bottom, left), the four corners (top-left, top-right, bottom-right, bottom-left).
-2. A candidate is rejected if the segment from the marker edge to it passes within `r + pad` of
-   the centre of any *other* enabled object, where `r = max(catalogue radius, marker_min_radius)`
-   (the drawn ring) and `pad` is the placer's `4·s`. Only rings block, as in the placer; text
-   boxes do not.
+   (top, right, bottom, left), the four corners (top-left, top-right, bottom-right, bottom-left),
+   keeping only the midpoints and corners of faces that face the marker (PR 6 review: a segment
+   to the far side runs across the label's own text).
+2. A candidate is rejected if the segment from the marker edge to it *cuts the ring* of any
+   *other* enabled object: its closest approach to the centre is under `r + pad` and its farthest
+   point is beyond `r − pad`, where `r = max(catalogue radius, marker_min_radius)` (the drawn
+   ring) and `pad` is the placer's `4·s`. Only rings block, as in the placer; text boxes do not,
+   and a segment entirely inside a big ring is clear. (Decided at PR 6, 2026-09-19: the first
+   draft rejected any segment passing within `r + pad` of the centre, which would have rejected
+   every candidate for the Trapezium stars inside M 42, the very case of #14, and fallen back to
+   the nearest point.) A ring whose outline already runs through the label's own box is not an
+   obstacle for that label (owner's smoke test, 2026-09-19: M 42's arc through the NGC 1977 label
+   otherwise rejected every endpoint on the box's far half, and 45 Ori the rest).
 3. The first accepted candidate wins; if none is accepted the nearest point is used.
-4. `leader_visible` (the `auto` gap rule) is evaluated on the chosen segment.
+4. `leader_visible` (the `auto` gap rule) is evaluated on the nearest-point segment, and only a
+   leader that will be drawn is routed (PR 6 review, replacing the first draft's "on the chosen
+   segment": avoidance must not turn an adjacent label's hidden leader into a long one).
 
 Vectors gain a crowded-core case (Trapezium region of the Orion fixture) where the nearest point is
 rejected.

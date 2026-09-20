@@ -7,8 +7,20 @@
 // A larger object's marker only blocks its ring line: labels may sit inside a big nebula's
 // circle, they just must not cross the drawn outline. An object whose own circle spills past
 // the frame (M 31 filling the field) is labelled at its centre, as if it were a point.
-import { ANCHORS, anchorBox, markerRadius, measureLabel, scaleUnit, type Box, type TextMeasurer } from './metrics'
+import {
+  ANCHORS,
+  anchorBox,
+  boxCrossesRing,
+  markerRing,
+  measureLabel,
+  scaleUnit,
+  type Box,
+  type Circle,
+  type TextMeasurer,
+} from './metrics'
 import { enabledLabels, type EditorState } from './store'
+
+export { boxCrossesRing }
 
 export const GAP_FACTOR = 6.0
 export const PAD_FACTOR = 4.0
@@ -32,28 +44,8 @@ export interface Placement {
   collided: boolean
 }
 
-export interface Circle {
-  x: number
-  y: number
-  r: number
-}
-
 export function boxesOverlap(a: Box, b: Box, pad: number): boolean {
   return a.left < b.right + pad && b.left < a.right + pad && a.top < b.bottom + pad && b.top < a.bottom + pad
-}
-
-/** True when the circle's outline passes through `box` (inflated by `pad`).
- *
- *  A box entirely inside a large marker (e.g. a star label inside M 42's circle) or entirely
- *  outside it is fine; sitting on the drawn ring is not. */
-export function boxCrossesRing(box: Box, c: Circle, pad: number): boolean {
-  const nx = Math.min(Math.max(c.x, box.left), box.right)
-  const ny = Math.min(Math.max(c.y, box.top), box.bottom)
-  const nearest = Math.hypot(c.x - nx, c.y - ny)
-  const fx = Math.abs(c.x - box.left) > Math.abs(c.x - box.right) ? box.left : box.right
-  const fy = Math.abs(c.y - box.top) > Math.abs(c.y - box.bottom) ? box.top : box.bottom
-  const farthest = Math.hypot(c.x - fx, c.y - fy)
-  return nearest < c.r + pad && farthest > c.r - pad
 }
 
 export function boxInside(box: Box, width: number, height: number): boolean {
@@ -160,14 +152,14 @@ export function placeNewLabels(
     const o = state.objects.get(other.object_id)
     if (!o) continue
     const b = measureLabel(measure, style, other, o)
-    block(obstacle(other.x, other.y, b.width, b.height, { x: o.x, y: o.y, r: markerRadius(o, style) }))
+    block(obstacle(other.x, other.y, b.width, b.height, markerRing(o, style)))
   }
   for (const id of ids) {
     const obj = state.objects.get(id)
     const label = state.labels.get(id)
     if (!obj || !label) continue
     const box = measureLabel(measure, style, label, obj)
-    const circle = { x: obj.x, y: obj.y, r: markerRadius(obj, style) }
+    const circle = markerRing(obj, style)
     const [p] = placeLabels(
       image.width,
       image.height,

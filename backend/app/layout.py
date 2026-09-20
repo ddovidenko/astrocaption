@@ -28,7 +28,7 @@ from .placement import (
     place_labels,
     scale_unit,
 )
-from .render import marker_radius, measure_label
+from .render import marker_ring, measure_label
 
 log = logging.getLogger(__name__)
 
@@ -129,15 +129,17 @@ def autoplace(
         obj = by_id.get(label.object_id)
         if obj is None or not label.enabled:
             continue
-        r = marker_radius(obj, style)
+        ring = marker_ring(obj, style)
         box = measure_label(fonts_dir, style, label, obj)
         sizes[label.object_id] = (box.width, box.height)
-        markers[label.object_id] = Circle(obj.x, obj.y, r)
+        markers[label.object_id] = ring
         if label.object_id in keep:
             fixed_boxes.append(Box(label.x, label.y, label.x + box.width, label.y + box.height))
             fixed_circles.append(markers[label.object_id])
         else:
-            items.append(PlacementItem(label.object_id, obj.x, obj.y, r, box.width, box.height))
+            items.append(
+                PlacementItem(label.object_id, obj.x, obj.y, ring.r, box.width, box.height)
+            )
     placed = {
         p.id: p
         for p in place_labels(
