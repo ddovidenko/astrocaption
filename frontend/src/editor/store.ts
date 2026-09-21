@@ -177,16 +177,36 @@ function committed(s: EditorState, snapshot: Snapshot): Partial<EditorState> {
 function commitLabels(s: EditorState, labels: Map<number, Label>, commit = true): Partial<EditorState> {
   const base = s.committed?.labels
   if (!base) return changedDoc(s, { labels }, commit) ?? {}
-  let diverged = false
+  if (diverges(labels, base)) return changedDoc(s, { labels }, commit) ?? {}
+  return s.labels !== base ? { labels: base } : {}
+}
+
+/** Whether any label in `labels` differs field-wise from `base` (a preview map that came back to
+ *  its starting values is a new Map, but diverges in nothing). */
+function diverges(labels: Map<number, Label>, base: Map<number, Label>): boolean {
   for (const [id, label] of labels) {
     const was = base.get(id)
-    if (!was || (label !== was && !shallow(label, was))) {
-      diverged = true
-      break
-    }
+    if (!was || (label !== was && !shallow(label, was))) return true
   }
-  if (diverged) return changedDoc(s, { labels }, commit) ?? {}
-  return s.labels !== base ? { labels: base } : {}
+  return false
+}
+
+/** The live preview (a drag or a wheel resize still under a held button) that the labels map
+ *  carries beyond the committed document, or null while the two agree. */
+function livePreview(s: EditorState): Snapshot | null {
+  if (!s.committed || s.labels === s.committed.labels || !s.style) return null
+  return diverges(s.labels, s.committed.labels) ? { labels: s.labels, style: s.style } : null
+}
+
+/** The patch that commits a live preview as an entry of its own, so that a commit landing on it
+ *  from elsewhere (Delete while the wheel-resize button is still held, #102) does not fold the
+ *  preview into its own entry: undo then takes the change back and leaves the preview standing,
+ *  as the gesture's own mouseup would have recorded it. The gesture's own resolution (`moveLabel`,
+ *  `updateLabels`, `commitPreview`) never comes through here, so a drag still coalesces into one.
+ *  Empty while there is no preview to record. */
+function previewCommitted(s: EditorState): Partial<EditorState> {
+  const preview = livePreview(s)
+  return (preview && changedDoc(s, preview)) ?? {}
 }
 
 /** Makes the snapshot at the top of the undo or redo stack the document. The restored document is
@@ -195,6 +215,10 @@ function commitLabels(s: EditorState, labels: Map<number, Label>, commit = true)
 function swapHistory(s: EditorState, direction: 'undo' | 'redo'): Partial<EditorState> {
   const from = direction === 'undo' ? s.undo : s.redo
   if (!s.committed || from.length === 0) return {}
+  // Not during a gesture (#88): restoring the committed document under a drag would have the
+  // drag-end commit the pointer position against the restored origin, and the label would jump.
+  // The mouseup commits the preview, and the keys answer again.
+  if (livePreview(s)) return {}
   const snapshot = from[from.length - 1]!
   // Not a commit — the history below is this function's own — but a restored snapshot can
   // disable a label, so the selection still has to be pruned against it.
@@ -334,14 +358,18 @@ export const useEditor = create<EditorState>()((set) => ({
       return commitLabels(s, labels, !(dx === 0 && dy === 0))
     }),
   applyLabels: (updated) =>
-    set((s) => {
+    set((prev) => {
+      const folded = previewCommitted(prev)
+      const s = { ...prev, ...folded }
       const labels = new Map(s.labels)
       for (const label of updated) {
         // Unreachable from the server (one label per object), so a mismatch is a bug: say so.
         if (!labels.has(label.object_id)) throw new Error(`applyLabels: no label for object ${label.object_id}`)
         labels.set(label.object_id, label)
       }
-      return changedDoc(s, { labels }) ?? {}
+      const next = changedDoc(s, { labels })
+      // A refused change (not editable) leaves the preview where it was too.
+      return next ? { ...folded, ...next } : {}
     }),
   updateLabels: (ids, patch, commit = true) =>
     set((s) => {

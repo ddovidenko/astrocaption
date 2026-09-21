@@ -594,6 +594,69 @@ describe('selection and per-label editing', () => {
     expect(a.label).toMatchObject({ pinned: true, collided: false })
   })
 
+  // #102: Delete pressed while the button is still held after a wheel resize. The preview must
+  // become its own entry, not ride along inside the disable's.
+  it('a commit landing on a live wheel-resize preview records the preview first, as its own entry', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.updateLabels([1], { font_size: 25 }, false)
+    useEditor.getState().applyLabels([{ ...useEditor.getState().labels.get(1)!, enabled: false }])
+    expect(useEditor.getState().undo).toHaveLength(2)
+    expect(useEditor.getState().changeSeq).toBe(2)
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ enabled: false, font_size: 25 })
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ enabled: true, font_size: 25 })
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ enabled: true, font_size: null })
+  })
+
+  it('Delete mid-drag: the drag-end that follows records nothing more', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const { x, y } = useEditor.getState().labels.get(1)!
+    useEditor.getState().moveLabel(1, x + 20, y + 30, false) // dragmove
+    useEditor.getState().applyLabels([{ ...useEditor.getState().labels.get(1)!, enabled: false }])
+    expect(useEditor.getState().undo).toHaveLength(2)
+    useEditor.getState().moveLabel(1, x + 20, y + 30) // Konva's dragend
+    useEditor.getState().commitPreview()
+    expect(useEditor.getState().undo).toHaveLength(2)
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ enabled: false, x: x + 20, y: y + 30, pinned: true })
+  })
+
+  it('a preview that diverges in nothing does not become an entry of its own', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.updateLabels([1], { font_size: 25 }, false)
+    useEditor.getState().updateLabels([1], { font_size: null }, false)
+    useEditor.getState().applyLabels([{ ...useEditor.getState().labels.get(1)!, enabled: false }])
+    expect(useEditor.getState().undo).toHaveLength(1)
+  })
+
+  // #88: Ctrl+Z during a drag would restore the committed document under the pointer, and the
+  // drag-end would then commit the pointer position against it. Undo and redo wait for the mouseup.
+  it('undo and redo are ignored while a live preview diverges, and work again once it is committed', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const { x, y } = useEditor.getState().labels.get(1)!
+    useEditor.getState().moveLabel(1, x + 20, y + 30) // an earlier drag, one entry
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().redo).toHaveLength(1)
+    useEditor.getState().moveLabel(1, x + 5, y, false) // a new drag, in progress
+    const mid = useEditor.getState()
+    const same = () => {
+      const now = useEditor.getState()
+      expect([now.labels, now.undo, now.redo, now.historySeq]).toEqual([mid.labels, mid.undo, mid.redo, mid.historySeq])
+      expect(now.labels).toBe(mid.labels)
+    }
+    useEditor.getState().undoLast()
+    same()
+    useEditor.getState().redoLast()
+    same()
+    useEditor.getState().moveLabel(1, x + 5, y) // dragend
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ x, y })
+  })
+
   it('a disabled label leaves the selection', () => {
     const s = useEditor.getState()
     s.load(doc)
