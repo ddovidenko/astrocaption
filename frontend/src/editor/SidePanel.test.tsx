@@ -57,6 +57,34 @@ describe('SidePanel', () => {
     expect((screen.getByLabelText('Search objects') as HTMLInputElement).value).toBe('M 4')
   })
 
+  // #110: collapsing the panel used to unmount every body, and display:none forgets a scroll offset.
+  it('keeps the bodies mounted through a collapse, so their state survives it', () => {
+    const { rerender } = render(<SidePanel open onToggle={() => {}} />)
+    fireEvent.change(screen.getByLabelText('Search objects'), { target: { value: 'M 4' } })
+    rerender(<SidePanel open={false} onToggle={() => {}} />)
+    expect(screen.queryByRole('tab', { name: 'Objects' })).toBeNull()
+    expect((screen.getByLabelText('Search objects').closest('[role=tabpanel]') as HTMLElement).hidden).toBe(true)
+    rerender(<SidePanel open onToggle={() => {}} />)
+    expect(screen.getByRole('tabpanel', { name: 'Objects' }).hidden).toBe(false)
+    expect((screen.getByLabelText('Search objects') as HTMLInputElement).value).toBe('M 4')
+  })
+
+  it('brings a panel back at the scroll offset it was left at', () => {
+    const { rerender } = render(<SidePanel open onToggle={() => {}} />)
+    const panel = screen.getByRole('tabpanel', { name: 'Objects' })
+    // jsdom lays nothing out, so the offset is set by hand and the scroll event carries it.
+    panel.scrollTop = 120
+    fireEvent.scroll(panel)
+    fireEvent.click(tab('Layout'))
+    panel.scrollTop = 0 // what display:none does to it in a browser
+    fireEvent.click(tab('Objects'))
+    expect(panel.scrollTop).toBe(120)
+    rerender(<SidePanel open={false} onToggle={() => {}} />)
+    panel.scrollTop = 0
+    rerender(<SidePanel open onToggle={() => {}} />)
+    expect(panel.scrollTop).toBe(120)
+  })
+
   it('does not mount a tab body before its first visit', () => {
     render(<SidePanel open onToggle={() => {}} />)
     expect(screen.queryByRole('button', { name: 'Auto-arrange' })).toBeNull()
