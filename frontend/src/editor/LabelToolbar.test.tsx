@@ -57,10 +57,35 @@ describe('LabelToolbar', () => {
     fireEvent.change(size(), { target: { value: '' } })
     fireEvent.blur(size())
     expect(label(1).font_size).toBeNull()
+  })
+
+  // #103: the min/max attributes do not stop a typed value, and a dropped edit said nothing.
+  // The field now does what − / + do at the bounds: the typed number is rounded and clamped,
+  // and the committed value shows in the field at once.
+  it('a typed size out of range is clamped, and a fraction is rounded (#103)', () => {
+    render(<LabelToolbar box={box} />)
+    fireEvent.change(size(), { target: { value: '500' } })
+    fireEvent.keyDown(size(), { key: 'Enter' })
+    expect(label(1).font_size).toBe(200)
+    expect(size().value).toBe('200')
     fireEvent.change(size(), { target: { value: '3' } })
     fireEvent.blur(size())
-    expect(label(1).font_size).toBeNull() // out of bounds: ignored
-    expect(size().value).toBe('')
+    expect(label(1).font_size).toBe(6)
+    expect(size().value).toBe('6')
+    fireEvent.change(size(), { target: { value: '12.5' } })
+    fireEvent.blur(size())
+    expect(label(1).font_size).toBe(13)
+    expect(state().undo).toHaveLength(4) // toggleObject + three commits
+  })
+
+  it('a clamped size equal to the stored one records nothing', () => {
+    state().updateLabels([1], { font_size: 200 })
+    render(<LabelToolbar box={box} />)
+    const entries = state().undo.length
+    fireEvent.change(size(), { target: { value: '999' } })
+    fireEvent.blur(size())
+    expect(label(1).font_size).toBe(200)
+    expect(state().undo).toHaveLength(entries)
   })
 
   it('− / + step every selected label from its effective size', () => {

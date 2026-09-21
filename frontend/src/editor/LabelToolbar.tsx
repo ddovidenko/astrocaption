@@ -1,7 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import type { Label, LeaderMode } from '../api'
 import ColorField from '../style/ColorField'
-import { parseNumberField } from '../style/styleForm'
 import { isEditable, resetPositions } from './editing'
 import { MAX_FONT_SIZE, MIN_FONT_SIZE, type Box } from './metrics'
 import { useEditor } from './store'
@@ -86,7 +85,7 @@ export default function LabelToolbar({
   )
   const empty = selected.length === 0
 
-  // The size field is a draft: committed on Enter or blur, reverted on an invalid value. It is
+  // The size field is a draft: committed on Enter or blur, clamped and rounded into the bounds. It is
   // tagged with the selection and the stored size it was typed against (see `useTaggedDraft`), so
   // the stored value shows again the moment either moves on, and every path that acts on it drops
   // it (`dropTyped`).
@@ -149,10 +148,13 @@ export default function LabelToolbar({
       update(ids, { font_size: null })
       return
     }
-    // The same bounds the Style tab's own size field enforces; out of them, the edit is dropped.
-    const n = parseNumberField('font_size', text)
-    if (n === null) return
-    update(ids, { font_size: n })
+    // The same bounds the Style tab's size field enforces, but applied the way − / + apply them:
+    // a typed 500 commits 200 and 12.5 commits 13, and the field shows the committed value at
+    // once. The toolbar has no room for a validation line, so a dropped edit would say nothing
+    // (#103). Only text the number input let through that is still not a number is dropped.
+    const n = Number(text)
+    if (!Number.isFinite(n)) return
+    update(ids, { font_size: Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(n))) })
   }
   const step = (delta: number) => {
     // The stepper acts on the stored sizes, so a draft typed against them is spent — and a draft
