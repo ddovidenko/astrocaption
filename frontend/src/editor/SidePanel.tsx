@@ -1,4 +1,4 @@
-import { useState, type ComponentType, type KeyboardEvent } from 'react'
+import { useLayoutEffect, useRef, useState, type ComponentType, type KeyboardEvent, type UIEvent } from 'react'
 import ImageTab from './ImageTab'
 import LayoutTab from './LayoutTab'
 import ObjectsTab from './ObjectsTab'
@@ -16,13 +16,26 @@ const TABS: { id: Tab; label: string; body: ComponentType }[] = [
 /** The editor's right-hand panel (design § 5). Collapses to a strip so the canvas can have the
  *  whole window; the open/closed state lives in `EditorPage` because the grid column is its CSS.
  *
- *  A tab body mounts on its first visit and then stays mounted behind `hidden`, so an export
- *  still rendering on the Image tab, or a search typed on the Objects tab, survives a switch
- *  (#76); a tab never opened costs nothing. The tablist follows the WAI-ARIA pattern: one tab
- *  stop, arrows / Home / End move and select, the panel itself is focusable. */
+ *  A tab body mounts on its first visit and then stays mounted behind `hidden`, through a tab
+ *  switch and through a collapse alike, so an export still rendering on the Image tab, or a
+ *  search typed on the Objects tab, survives both (#76, #110); a tab never opened costs nothing.
+ *  `display: none` forgets a panel's scroll offset, so each panel's last offset is kept here and
+ *  written back when it shows again. The tablist follows the WAI-ARIA pattern: one tab stop,
+ *  arrows / Home / End move and select, the panel itself is focusable. */
 export default function SidePanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const [tab, setTab] = useState<Tab>('objects')
   const [visited, setVisited] = useState<ReadonlySet<Tab>>(() => new Set<Tab>(['objects']))
+  const scrollTops = useRef<Partial<Record<Tab, number>>>({})
+  const panels = useRef<Partial<Record<Tab, HTMLDivElement | null>>>({})
+  useLayoutEffect(() => {
+    if (!open) return
+    const panel = panels.current[tab]
+    const top = scrollTops.current[tab]
+    if (panel && top !== undefined) panel.scrollTop = top
+  }, [open, tab])
+  const remember = (id: Tab) => (e: UIEvent<HTMLDivElement>) => {
+    scrollTops.current[id] = e.currentTarget.scrollTop
+  }
 
   const show = (id: Tab) => {
     setTab(id)
@@ -80,20 +93,23 @@ export default function SidePanel({ open, onToggle }: { open: boolean; onToggle:
           </div>
         )}
       </div>
-      {open &&
-        TABS.map(({ id, body: Body }) => (
-          <div
-            key={id}
-            id={`panel-${id}`}
-            role="tabpanel"
-            aria-labelledby={`tab-${id}`}
-            tabIndex={0}
-            hidden={tab !== id}
-            className="side-panel-body"
-          >
-            {visited.has(id) && <Body />}
-          </div>
-        ))}
+      {TABS.map(({ id, body: Body }) => (
+        <div
+          key={id}
+          ref={(el) => {
+            panels.current[id] = el
+          }}
+          id={`panel-${id}`}
+          role="tabpanel"
+          aria-labelledby={`tab-${id}`}
+          tabIndex={0}
+          hidden={!open || tab !== id}
+          className="side-panel-body"
+          onScroll={remember(id)}
+        >
+          {visited.has(id) && <Body />}
+        </div>
+      ))}
     </aside>
   )
 }
