@@ -49,6 +49,14 @@ describe('ObjectsTab', () => {
     expect(screen.queryByRole('button', { name: 'M 42' })).toBeNull()
   })
 
+  it('opens with the HD chip on when the document already shows an hd label (#126)', () => {
+    load([hd])
+    useEditor.getState().toggleObject(hd.id, { x: 10, y: 10 })
+    render(<ObjectsTab />)
+    expect(screen.getByRole('button', { name: 'HD stars' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('checkbox', { name: 'Show HD 37742' })).toBeTruthy()
+  })
+
   it('hides hd rows until the HD toggle is on, and the star kind gates both', () => {
     load([hd])
     render(<ObjectsTab />)

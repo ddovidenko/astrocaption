@@ -1,7 +1,7 @@
 // The Objects tab's search and kind filter (SPEC § 6.3). Pure, so the filtering rules are tested
 // without a DOM: the tab owns only the query string and the filter object.
 
-import type { ObjectKind, ObjectOut } from '../api'
+import type { Label, ObjectKind, ObjectOut } from '../api'
 
 export const KINDS: readonly ObjectKind[] = ['galaxy', 'nebula', 'cluster', 'star', 'other']
 
@@ -22,6 +22,18 @@ export interface ObjectsFilter {
 }
 
 export const DEFAULT_FILTER: ObjectsFilter = { kinds: new Set<ObjectKind>(KINDS), hd: false }
+
+/** The filter a document opens with: the defaults, except that the HD chip starts on when an
+ *  `hd` label is already enabled (#126) — the chips describe what the canvas shows, and a list
+ *  reading "1 of 24 objects" over a canvas drawing all 24 explained nothing. A fresh solve
+ *  enables no `hd` label, so a new edit keeps the #37 default. */
+export function initialFilter(objects: ReadonlyMap<number, ObjectOut>, labels: ReadonlyMap<number, Label>): ObjectsFilter {
+  for (const label of labels.values()) {
+    const obj = objects.get(label.object_id)
+    if (label.enabled && obj && isHd(obj)) return { ...DEFAULT_FILTER, hd: true }
+  }
+  return DEFAULT_FILTER
+}
 
 export function isHd(o: ObjectOut): boolean {
   return o.type.toLowerCase() === 'hd'

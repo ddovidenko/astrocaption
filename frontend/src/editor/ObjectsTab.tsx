@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useState } from 'react'
 import type { ObjectKind, ObjectOut } from '../api'
 import { disableAll, enableWithPlacement, isEditable, tryToggleWithPlacement } from './editing'
 import { primaryName } from './names'
-import { DEFAULT_FILTER, KINDS, KIND_LABELS, filterObjects, type ObjectsFilter } from './objectsFilter'
+import { KINDS, KIND_LABELS, filterObjects, initialFilter, type ObjectsFilter } from './objectsFilter'
 import { useEditor } from './store'
 
 /** One row. Memoised with per-row selectors, so a drag frame or a marker hover re-renders the
@@ -93,7 +93,9 @@ export default function ObjectsTab() {
   const preference = useEditor((s) => s.style?.name_preference ?? 'popular')
 
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<ObjectsFilter>(DEFAULT_FILTER)
+  // Read once, at mount: the tab mounts after the document is loaded, and the chip is a plain
+  // list filter from then on (turning it off hides rows, never labels).
+  const [filter, setFilter] = useState<ObjectsFilter>(() => initialFilter(objects, useEditor.getState().labels))
   const [error, setError] = useState<string | null>(null)
 
   const rows = useMemo(() => {

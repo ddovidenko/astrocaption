@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ObjectKind, ObjectOut } from '../api'
-import { DEFAULT_FILTER, KINDS, filterObjects, isHd } from './objectsFilter'
+import type { Label } from '../api'
+import { DEFAULT_FILTER, KINDS, filterObjects, initialFilter, isHd } from './objectsFilter'
 
 /** The `nova-narrow` field (1° Pelican): 8 objects, five of them `hd` — the shape #37 is about. */
 function narrowField(): ObjectOut[] {
@@ -74,5 +75,30 @@ describe('filterObjects', () => {
 
   it('shows nothing when every kind is off', () => {
     expect(filterObjects(narrowField(), '', { kinds: new Set(), hd: true })).toEqual([])
+  })
+})
+
+// #126: the chips describe what the canvas shows, so a document with HD labels enabled opens
+// with the HD chip on; a fresh solve (no HD label enabled) keeps the #37 default.
+describe('initialFilter', () => {
+  const labelsFor = (objects: ObjectOut[], enabledIds: number[]): Map<number, Label> =>
+    new Map(
+      objects.map((o) => [
+        o.id,
+        { object_id: o.id, enabled: enabledIds.includes(o.id), x: o.x, y: o.y } as unknown as Label,
+      ]),
+    )
+
+  it('starts with the HD chip off when no hd label is enabled', () => {
+    const objects = narrowField()
+    const f = initialFilter(new Map(objects.map((o) => [o.id, o])), labelsFor(objects, [6, 8]))
+    expect(f).toEqual(DEFAULT_FILTER)
+  })
+
+  it('starts with the HD chip on when an hd label is enabled', () => {
+    const objects = narrowField()
+    const f = initialFilter(new Map(objects.map((o) => [o.id, o])), labelsFor(objects, [2]))
+    expect(f.hd).toBe(true)
+    expect(f.kinds).toEqual(DEFAULT_FILTER.kinds)
   })
 })
