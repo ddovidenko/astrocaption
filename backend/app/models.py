@@ -491,6 +491,9 @@ class ImageOut(BaseModel):
     published: bool
     object_count: int
     exported_at: str | None
+    #: When the annotations were last stored (null until a solve stores a document). Newer than
+    #: ``exported_at`` means the export no longer matches the document (#91).
+    annotations_updated_at: str | None
     original_format: str
     preview_url: str
     thumb_url: str

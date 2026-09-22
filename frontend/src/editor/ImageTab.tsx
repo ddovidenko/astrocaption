@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api, formatBytes, pageError, type ExportOut } from '../api'
+import { exportState, relativeTime } from '../exportStatus'
 import { flushSave } from './autosave'
 import { useEditor } from './store'
 import { fallbackSentence } from './styleTab'
@@ -13,12 +14,21 @@ export default function ImageTab() {
   // but the export endpoint refuses ("Image is not solved yet."). The button says so by being
   // disabled rather than by failing.
   const solved = useEditor((s) => s.image?.solve_status === 'solved')
+  // For the export line (#91): the stored document's stamp moves with every save that lands, and
+  // anything not saved yet is already a change the last export cannot hold.
+  const annotationsUpdatedAt = useEditor((s) => s.updatedAt)
+  const unsaved = useEditor((s) => s.save.status !== 'saved')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ExportOut | null>(null)
 
   if (!image) return null
   const cal = image.calibration
+  // The export just made from this tab is newer than the loaded image's stamp.
+  const exportedAt = result?.exported_at ?? image.exported_at
+  const state = exportState(exportedAt, annotationsUpdatedAt || null, unsaved)
+  const exportLine =
+    state === 'none' ? 'Not exported yet' : state === 'stale' ? 'Changes since the last export' : `Exported ${relativeTime(exportedAt!)}`
 
   async function exportNow(id: string): Promise<void> {
     if (!solved) return
@@ -76,8 +86,12 @@ export default function ImageTab() {
           )}
         </p>
       )}
+      <p className={state === 'stale' ? 'meta export-state stale' : 'meta export-state'} data-testid="export-state">
+        {exportLine}
+      </p>
       <div className="tab-actions">
         <button
+          className={state === 'stale' ? undefined : 'secondary'}
           disabled={busy || !solved}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => void exportNow(image.id)}

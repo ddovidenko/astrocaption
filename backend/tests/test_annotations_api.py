@@ -359,3 +359,40 @@ def test_put_refuses_reset(client: TestClient, sample_jpeg: Path) -> None:
     resp = client.put(f"/api/images/{image_id}/annotations", json={**ann, "reset": True})
     assert resp.status_code == 422
     assert resp.json()["detail"] == "reset: is not a known field"
+
+
+def test_image_out_carries_the_annotations_timestamp_for_the_export_staleness_rule(
+    client: TestClient, sample_jpeg: Path
+) -> None:
+    """#91: the editor and the images page compare ``annotations_updated_at`` with
+    ``exported_at`` to say when an export no longer matches the document."""
+    image_id, ann, _ = solved_image(client, sample_jpeg)
+    before = client.get(f"/api/images/{image_id}").json()
+    assert before["annotations_updated_at"] == ann["updated_at"]
+    assert before["exported_at"] is None
+    listed = {img["id"]: img for img in client.get("/api/images").json()}
+    assert listed[image_id]["annotations_updated_at"] == ann["updated_at"]
+
+    exported = client.post(f"/api/images/{image_id}/export", json={}).json()
+    after_export = client.get(f"/api/images/{image_id}").json()
+    assert after_export["exported_at"] == exported["exported_at"]
+    assert after_export["annotations_updated_at"] <= after_export["exported_at"]
+
+    ann["labels"][0]["x"] += 10
+    saved = client.put(f"/api/images/{image_id}/annotations", json=ann).json()
+    after_put = client.get(f"/api/images/{image_id}").json()
+    assert after_put["annotations_updated_at"] == saved["updated_at"]
+    assert after_put["annotations_updated_at"] >= after_put["exported_at"]
+
+
+def test_annotations_timestamp_is_null_before_a_solve_stores_a_document(
+    tmp_path: Path, sample_jpeg: Path
+) -> None:
+    settings = make_settings(tmp_path)
+    stuck = FakeSolver(submission_polls=10**9)
+    with make_client(settings, lambda: stuck) as client:
+        login(client)
+        image_id = upload(client, sample_jpeg)["id"]
+        assert client.get(f"/api/images/{image_id}").json()["annotations_updated_at"] is None
+        listed = client.get("/api/images").json()
+        assert listed[0]["annotations_updated_at"] is None

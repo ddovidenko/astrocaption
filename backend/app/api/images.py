@@ -136,7 +136,9 @@ def _slug(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-.") or "image"
 
 
-def image_out(rec: ImageRecord, settings: Settings, object_count: int) -> ImageOut:
+def image_out(
+    rec: ImageRecord, settings: Settings, object_count: int, annotations_updated_at: str | None
+) -> ImageOut:
     base = f"/api/images/{rec.id}"
     exported = quote(rec.exported_at) if rec.exported_at else None
     return ImageOut(
@@ -166,6 +168,7 @@ def image_out(rec: ImageRecord, settings: Settings, object_count: int) -> ImageO
         published=rec.published,
         object_count=object_count,
         exported_at=rec.exported_at,
+        annotations_updated_at=annotations_updated_at,
         original_format=(fmt.name if (fmt := format_of(Path(rec.original_path))) else "image"),
         preview_url=f"{base}/files/preview",
         thumb_url=f"{base}/files/thumb",
@@ -201,7 +204,7 @@ def _start_solve(
     fields.update(extra or {})
     db.update_image(image_id, fields)
     worker.enqueue(image_id)
-    return image_out(_get_or_404(db, image_id), settings, db.count_objects(image_id))
+    return _image_out_for(db, settings, _get_or_404(db, image_id))
 
 
 def _require_idle(rec: ImageRecord) -> None:
@@ -271,19 +274,28 @@ async def upload_image(
     except Exception:  # any failure before the row exists leaves nothing behind on disk
         delete_image_files(settings, image_id)
         raise
-    return image_out(rec, settings, 0)
+    return image_out(rec, settings, 0, None)
+
+
+def _image_out_for(db: Database, settings: Settings, rec: ImageRecord) -> ImageOut:
+    """``image_out`` for one record, with its own object count and annotations timestamp."""
+    ann = db.get_annotations(rec.id)
+    return image_out(rec, settings, db.count_objects(rec.id), ann.updated_at if ann else None)
 
 
 @router.get("")
 async def list_images(settings: SettingsDep, db: DbDep) -> list[ImageOut]:
     counts = db.object_counts()
-    return [image_out(rec, settings, counts.get(rec.id, 0)) for rec in db.list_images()]
+    stamps = db.annotations_updated_at()
+    return [
+        image_out(rec, settings, counts.get(rec.id, 0), stamps.get(rec.id))
+        for rec in db.list_images()
+    ]
 
 
 @router.get("/{image_id}")
 async def get_image(image_id: str, settings: SettingsDep, db: DbDep) -> ImageOut:
-    rec = _get_or_404(db, image_id)
-    return image_out(rec, settings, db.count_objects(image_id))
+    return _image_out_for(db, settings, _get_or_404(db, image_id))
 
 
 @router.delete("/{image_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -542,7 +554,7 @@ async def export_image(
     )
     exported_at = utcnow_iso()
     db.update_image(image_id, {"exported_at": exported_at})
-    out = image_out(_get_or_404(db, image_id), settings, len(objects))
+    out = _image_out_for(db, settings, _get_or_404(db, image_id))
     assert out.export_url and out.annotated_preview_url
     return ExportOut(
         export_url=out.export_url,
