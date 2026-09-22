@@ -284,6 +284,12 @@ class Database:
             rows = conn.execute("SELECT image_id, COUNT(*) AS n FROM objects GROUP BY image_id")
             return {r["image_id"]: int(r["n"]) for r in rows}
 
+    def annotations_updated_at(self) -> dict[str, str]:
+        """``updated_at`` of every stored annotations row, by image id (for the list endpoint)."""
+        with self.connect() as conn:
+            rows = conn.execute("SELECT image_id, updated_at FROM annotations")
+            return {r["image_id"]: str(r["updated_at"]) for r in rows}
+
     # -- annotations --------------------------------------------------------------
 
     def save_annotations(self, ann: Annotations) -> None:

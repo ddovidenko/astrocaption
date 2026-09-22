@@ -25,6 +25,7 @@ export function makeDoc(): LoadedDocument {
     published: false,
     object_count: 2,
     exported_at: null,
+    annotations_updated_at: '2026-01-01T00:00:00Z',
     original_format: 'jpeg',
     preview_url: '/preview',
     thumb_url: '/thumb',

@@ -31,6 +31,9 @@ export interface ImageOut {
   published: boolean
   object_count: number
   exported_at: string | null
+  /** When the annotations were last stored; newer than `exported_at` means the export is out of
+   *  date (#91, `exportState`). Null until a solve stores a document. */
+  annotations_updated_at: string | null
   original_format: string
   preview_url: string
   thumb_url: string
