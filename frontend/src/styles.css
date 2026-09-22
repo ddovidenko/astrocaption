@@ -133,6 +133,7 @@ body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
 .side-panel.collapsed .side-panel-head { padding: 0.4rem 0.1rem; justify-content: center; }
 .panel-toggle { padding: 0.25rem 0.35rem; font-size: 1rem; line-height: 1.2; }
 .tabs { display: flex; gap: 0.25rem; }
+.tabs[hidden] { display: none; }
 .tab { background: transparent; color: var(--muted); border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 0.35rem 0.6rem; font-size: 0.9rem; }
 .tab:hover { color: var(--text); }
 .tab[aria-selected='true'] { color: var(--text); border-bottom-color: var(--accent); }

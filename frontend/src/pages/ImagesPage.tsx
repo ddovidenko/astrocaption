@@ -12,7 +12,7 @@ import {
   type HealthOut,
   type ImageOut,
 } from '../api'
-import { exportState, relativeTime } from '../exportStatus'
+import { exportOf, exportState, relativeTime } from '../exportStatus'
 import ConfirmInline from '../ConfirmInline'
 
 const POLL_MS = 3000
@@ -361,7 +361,7 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
             <p className="meta">
               <a href={image.export_url}>Download full-resolution export</a>
               <span>exported {relativeTime(image.exported_at!)}</span>
-              {exportState(image.exported_at, image.annotations_updated_at, false) === 'stale' && (
+              {exportState(exportOf(image), image.annotations_version) === 'stale' && (
                 <span className="badge stale" title="The annotations changed after this export; export again to refresh it">
                   Export out of date
                 </span>

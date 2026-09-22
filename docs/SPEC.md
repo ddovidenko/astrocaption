@@ -131,10 +131,13 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
 3. Result stored at `data/renders/<id>/annotated.jpg` and served as a download. Re-export overwrites.
    *M1 note:* `POST /export` is synchronous (returns when the file is written; a few seconds for a
    60 MB source) and also writes `annotated_preview.jpg` (≤ 2048 px) for the gallery and the M1 page.
-4. The page says when an export is out of date (#91): `ImageOut.annotations_updated_at` newer than
-   `exported_at` (a tie is current: the editor flushes its save before exporting). The image card
-   shows an "Export out of date" badge next to the download link, and the export time reads as a
-   relative time ("exported 3 minutes ago"). The download link stays valid; only the badge changes.
+4. The page says when an export is out of date (#91): the export records the `version` of the
+   document it rendered (`images.exported_version`, `ImageOut.exported_version`), and the export is
+   current only when that equals `ImageOut.annotations_version` — an exact match, never a clock
+   comparison, so a save that lands while the render runs still counts as newer; an export made
+   before the column existed reads as out of date until the next export. The image card shows an
+   "Export out of date" badge next to the download link, and the export time reads as a relative
+   time ("exported 3 minutes ago"). The download link stays valid; only the badge changes.
 
 ### 5.5 Publish
 
@@ -214,7 +217,7 @@ Tabs:
    Each is one change: the labels being enabled are placed one after another, each around the ones before it, and applied together, so a batch is one undo entry and one save. The min-size slider is not built.
 2. **Style** — global defaults: font (dropdown of bundled fonts, live preview), font size, text colour, marker colour, leader colour, halo (stroke) on/off + colour, marker line width, alias line on/off, max aliases (0–5), **name preference** (`popular`: Messier/Caldwell/Sharpless/Barnard, then NGC, then IC, then other catalogues, then common names; `ngc_ic`: NGC/IC designations first; stars: proper name, then Bayer, then Flamsteed). Every edit is one change (one undo entry, autosaved); a font is applied once the browser has loaded it; colours apply when the picker closes. 'Reset to site defaults' applies the size-relative built-ins with `config.default_style` on top (`GET /images/{id}/default-style`). When the stored font is no longer bundled, the tab and the Image tab say so and the default is used until a font is picked.
 3. **Layout** — "Auto-arrange" button: flushes any pending save, then runs the collision-avoidance placer on every enabled label that is not pinned (same algorithm as the initial placement); pinned labels (dragged, or pinned from the toolbar) stay where they are and the others are placed around them. "Reset positions" asks for confirmation, unpins every label, then places all of them. Neither touches the document until the placed labels come back; both then mark it dirty for the autosave to pick up. A 409 shows as the toolbar's Reload state, with one line in the tab saying the layout was not arranged; a label dragged while the request was in flight drops the answer rather than undoing the drag.
-4. **Image** — read-only solve facts (nova job link, field centre/size/rotation, pixel scale, image size) and the **Export** button (full resolution, matching the original JPEG's encoding). A line above it reads "Not exported yet", "Exported 3 minutes ago", or "Changes since the last export" — the stored document is newer than the export, or a change is still unsaved — with the button emphasised in that last case (#91). *M3 note:* re-solve, publish toggle and delete stay on the image card, not this tab.
+4. **Image** — read-only solve facts (nova job link, field centre/size/rotation, pixel scale, image size) and the **Export** button (full resolution, matching the original JPEG's encoding). A line above it reads "Not exported yet", "Exported 3 minutes ago", or "Changes since the last export" — the export did not render the stored document's version, or a change is still unsaved — with the button emphasised in that last case unless the save is in conflict or failed (#91). Undo and Redo are disabled while a drag or wheel-resize is in progress. *M3 note:* re-solve, publish toggle and delete stay on the image card, not this tab.
 
 The tablist works from the keyboard (arrow keys, Home, End move and select; one tab stop; each panel is focusable). A tab body mounts on its first visit and stays mounted, so an export still rendering on the Image tab or a search typed on the Objects tab survives a switch. While a solve runs, the markers show a `not-allowed` cursor. Editor failure notices each name a next step: a canvas that could not be sized, a preview that failed to load (a 401 says the session has expired), labels that could not be drawn (counted, the first one named, "the export may differ from this preview") and a save the server rejected because the objects changed (Reload, as for a conflict).
 

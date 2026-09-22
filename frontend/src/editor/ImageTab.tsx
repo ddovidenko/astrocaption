@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api, formatBytes, pageError, type ExportOut } from '../api'
-import { exportState, relativeTime } from '../exportStatus'
+import { exportOf, exportState, relativeTime } from '../exportStatus'
 import { flushSave } from './autosave'
 import { useEditor } from './store'
 import { fallbackSentence } from './styleTab'
@@ -14,21 +14,32 @@ export default function ImageTab() {
   // but the export endpoint refuses ("Image is not solved yet."). The button says so by being
   // disabled rather than by failing.
   const solved = useEditor((s) => s.image?.solve_status === 'solved')
-  // For the export line (#91): the stored document's stamp moves with every save that lands, and
-  // anything not saved yet is already a change the last export cannot hold.
-  const annotationsUpdatedAt = useEditor((s) => s.updatedAt)
-  const unsaved = useEditor((s) => s.save.status !== 'saved')
+  // For the export line (#91): the stored document's version moves with every save that lands,
+  // and anything not saved yet is already a change the last export cannot hold.
+  const annotationsVersion = useEditor((s) => s.version)
+  const saveStatus = useEditor((s) => s.save.status)
+  const unsaved = saveStatus !== 'saved'
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ExportOut | null>(null)
+  const exported = image ? exportOf(image) : null
+  const state = exportState(exported, annotationsVersion, unsaved)
+  // "Exported 3 minutes ago" keeps moving while the tab sits idle; the other two sentences do not
+  // depend on the clock, so the tick runs only while that one shows.
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (state !== 'current') return
+    const timer = setInterval(() => setTick((n) => n + 1), 30_000)
+    return () => clearInterval(timer)
+  }, [state])
 
   if (!image) return null
   const cal = image.calibration
-  // The export just made from this tab is newer than the loaded image's stamp.
-  const exportedAt = result?.exported_at ?? image.exported_at
-  const state = exportState(exportedAt, annotationsUpdatedAt || null, unsaved)
-  const exportLine =
-    state === 'none' ? 'Not exported yet' : state === 'stale' ? 'Changes since the last export' : `Exported ${relativeTime(exportedAt!)}`
+  let exportLine = 'Not exported yet'
+  if (exported) exportLine = state === 'stale' ? 'Changes since the last export' : `Exported ${relativeTime(exported.at)}`
+  // Export is the next step when the document has moved on — unless the save is in conflict or
+  // failed, when exportNow can only report that; the toolbar's Reload / Retry is the step then.
+  const emphasise = state === 'stale' && saveStatus !== 'conflict' && saveStatus !== 'error'
 
   async function exportNow(id: string): Promise<void> {
     if (!solved) return
@@ -49,7 +60,11 @@ export default function ImageTab() {
         )
         return
       }
-      setResult(await api.exportImage(id, null, 1))
+      const out = await api.exportImage(id, null, 1)
+      setResult(out)
+      // The image now carries this export; a later failed export clears `result` (its download
+      // link must go) but not this, so the line keeps the last one that succeeded.
+      useEditor.getState().markExported(out.exported_at, out.exported_version)
     } catch (err) {
       setError(pageError(err))
     } finally {
@@ -91,7 +106,7 @@ export default function ImageTab() {
       </p>
       <div className="tab-actions">
         <button
-          className={state === 'stale' ? undefined : 'secondary'}
+          className={emphasise ? undefined : 'secondary'}
           disabled={busy || !solved}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => void exportNow(image.id)}

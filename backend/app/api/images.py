@@ -137,7 +137,7 @@ def _slug(text: str) -> str:
 
 
 def image_out(
-    rec: ImageRecord, settings: Settings, object_count: int, annotations_updated_at: str | None
+    rec: ImageRecord, settings: Settings, object_count: int, annotations_version: int | None
 ) -> ImageOut:
     base = f"/api/images/{rec.id}"
     exported = quote(rec.exported_at) if rec.exported_at else None
@@ -168,7 +168,8 @@ def image_out(
         published=rec.published,
         object_count=object_count,
         exported_at=rec.exported_at,
-        annotations_updated_at=annotations_updated_at,
+        annotations_version=annotations_version,
+        exported_version=rec.exported_version,
         original_format=(fmt.name if (fmt := format_of(Path(rec.original_path))) else "image"),
         preview_url=f"{base}/files/preview",
         thumb_url=f"{base}/files/thumb",
@@ -176,6 +177,11 @@ def image_out(
         annotated_preview_url=f"{base}/files/annotated-preview?v={exported}" if exported else None,
         export_url=f"{base}/export?v={exported}" if exported else None,
     )
+
+
+def _image_out_for(db: Database, settings: Settings, rec: ImageRecord) -> ImageOut:
+    """``image_out`` for one stored record."""
+    return image_out(rec, settings, db.count_objects(rec.id), db.annotations_version(rec.id))
 
 
 def _get_or_404(db: Database, image_id: str) -> ImageRecord:
@@ -277,18 +283,12 @@ async def upload_image(
     return image_out(rec, settings, 0, None)
 
 
-def _image_out_for(db: Database, settings: Settings, rec: ImageRecord) -> ImageOut:
-    """``image_out`` for one record, with its own object count and annotations timestamp."""
-    ann = db.get_annotations(rec.id)
-    return image_out(rec, settings, db.count_objects(rec.id), ann.updated_at if ann else None)
-
-
 @router.get("")
 async def list_images(settings: SettingsDep, db: DbDep) -> list[ImageOut]:
     counts = db.object_counts()
-    stamps = db.annotations_updated_at()
+    versions = db.annotations_versions()
     return [
-        image_out(rec, settings, counts.get(rec.id, 0), stamps.get(rec.id))
+        image_out(rec, settings, counts.get(rec.id, 0), versions.get(rec.id))
         for rec in db.list_images()
     ]
 
@@ -552,9 +552,10 @@ async def export_image(
     width, height, size, encoding = await asyncio.to_thread(
         _render_export, settings, rec, objects, ann, req.quality, req.scale
     )
+    # The version rendered, not the version stored now (#91; the pages compare them exactly).
     exported_at = utcnow_iso()
-    db.update_image(image_id, {"exported_at": exported_at})
-    out = _image_out_for(db, settings, _get_or_404(db, image_id))
+    db.update_image(image_id, {"exported_at": exported_at, "exported_version": ann.version})
+    out = image_out(_get_or_404(db, image_id), settings, len(objects), ann.version)
     assert out.export_url and out.annotated_preview_url
     return ExportOut(
         export_url=out.export_url,
@@ -563,6 +564,7 @@ async def export_image(
         height=height,
         bytes=size,
         exported_at=exported_at,
+        exported_version=ann.version,
         encoding=encoding,
     )
 

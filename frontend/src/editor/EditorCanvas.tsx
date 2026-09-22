@@ -11,8 +11,7 @@ import { primaryName } from './names'
 import { PAD_FACTOR } from './placement'
 import { CANVAS_SIZE_ERROR, drawErrorNotice, previewErrorSentence, probeStatus } from './notices'
 import {
-  MAX_FONT_SIZE,
-  MIN_FONT_SIZE,
+  clampFontSize,
   labelText,
   leaderSegment,
   leaderVisible,
@@ -716,7 +715,7 @@ export default function EditorCanvas() {
       const label = s.labels.get(pressed)
       if (!label || !s.style) return
       const current = label.font_size ?? s.style.font_size
-      const size = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, current + (e.evt.deltaY < 0 ? 1 : -1)))
+      const size = clampFontSize(current + (e.evt.deltaY < 0 ? 1 : -1))
       s.updateLabels([pressed], { font_size: size }, false)
       return
     }

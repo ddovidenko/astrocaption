@@ -70,28 +70,28 @@ export default function SidePanel({ open, onToggle }: { open: boolean; onToggle:
         >
           {open ? '›' : '‹'}
         </button>
-        {open && (
-          <div className="tabs" role="tablist" onKeyDown={onKeyDown}>
-            {/* A mouse click selects without moving the focus (the project's onMouseDown pattern),
-                so a tab reached by keyboard can end up with tabIndex -1; the arrows still work,
-                because the focus stays inside the tablist and its handler reads `tab`. */}
-            {TABS.map(({ id, label }) => (
-              <button
-                key={id}
-                role="tab"
-                id={`tab-${id}`}
-                aria-selected={tab === id}
-                aria-controls={`panel-${id}`}
-                tabIndex={tab === id ? 0 : -1}
-                className="tab"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => show(id)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* Hidden, not unmounted, while collapsed: the panels below stay mounted and their
+            aria-labelledby must keep resolving to these tabs. */}
+        <div className="tabs" role="tablist" onKeyDown={onKeyDown} hidden={!open}>
+          {/* A mouse click selects without moving the focus (the project's onMouseDown pattern),
+              so a tab reached by keyboard can end up with tabIndex -1; the arrows still work,
+              because the focus stays inside the tablist and its handler reads `tab`. */}
+          {TABS.map(({ id, label }) => (
+            <button
+              key={id}
+              role="tab"
+              id={`tab-${id}`}
+              aria-selected={tab === id}
+              aria-controls={`panel-${id}`}
+              tabIndex={tab === id ? 0 : -1}
+              className="tab"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => show(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
       {TABS.map(({ id, body: Body }) => (
         <div

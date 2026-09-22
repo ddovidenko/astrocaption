@@ -17,11 +17,12 @@ def test_migration_from_v1_adds_hints_column(tmp_path: Path) -> None:
     with db.connect() as conn:  # rewind to the version-1 shape
         conn.execute("ALTER TABLE images DROP COLUMN solve_hints_json")
         conn.execute("ALTER TABLE images DROP COLUMN solve_failure")
+        conn.execute("ALTER TABLE images DROP COLUMN exported_version")
         conn.execute("PRAGMA user_version = 1")
     db.init()
     with db.connect() as conn:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(images)")}
-        assert {"solve_hints_json", "solve_failure"} <= columns
+        assert {"solve_hints_json", "solve_failure", "exported_version"} <= columns
         assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     db.init()  # idempotent
 
@@ -33,11 +34,28 @@ def test_migration_from_v2_adds_the_failure_kind_column(tmp_path: Path) -> None:
     db.init()
     with db.connect() as conn:  # rewind to the version-2 shape
         conn.execute("ALTER TABLE images DROP COLUMN solve_failure")
+        conn.execute("ALTER TABLE images DROP COLUMN exported_version")
         conn.execute("PRAGMA user_version = 2")
     db.init()
     with db.connect() as conn:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(images)")}
         assert "solve_failure" in columns
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    db.init()  # idempotent
+
+
+def test_migration_from_v3_adds_the_exported_version_column(tmp_path: Path) -> None:
+    """An export made before this column existed reads NULL there: the pages then call it out
+    of date until the next export records which document it rendered (#91)."""
+    db = Database(tmp_path / "x.sqlite")
+    db.init()
+    with db.connect() as conn:  # rewind to the version-3 shape
+        conn.execute("ALTER TABLE images DROP COLUMN exported_version")
+        conn.execute("PRAGMA user_version = 3")
+    db.init()
+    with db.connect() as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(images)")}
+        assert "exported_version" in columns
         assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     db.init()  # idempotent
 

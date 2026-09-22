@@ -87,6 +87,8 @@ export interface EditorState {
   markSaved(version: number, updatedAt: string): void
   markSaveError(message: string): void
   markConflict(message: string): void
+  /** An export just made: the image now carries the time and the document version it rendered. */
+  markExported(exportedAt: string, exportedVersion: number): void
 }
 
 const initial = {
@@ -191,22 +193,31 @@ function diverges(labels: Map<number, Label>, base: Map<number, Label>): boolean
   return false
 }
 
-/** The live preview (a drag or a wheel resize still under a held button) that the labels map
- *  carries beyond the committed document, or null while the two agree. */
-function livePreview(s: EditorState): Snapshot | null {
-  if (!s.committed || s.labels === s.committed.labels || !s.style) return null
-  return diverges(s.labels, s.committed.labels) ? { labels: s.labels, style: s.style } : null
+/** Whether a drag or wheel-resize gesture is in flight, for the toolbar's Undo / Redo buttons:
+ *  they disable meanwhile rather than look clickable and do nothing (undo and redo wait for the
+ *  mouseup, #88). An identity check: this runs as a store selector on every preview frame, and a
+ *  gesture back at its start is still a gesture. */
+export function hasLivePreview(s: EditorState): boolean {
+  return s.committed !== null && s.labels !== s.committed.labels
 }
 
-/** The patch that commits a live preview as an entry of its own, so that a commit landing on it
- *  from elsewhere (Delete while the wheel-resize button is still held, #102) does not fold the
- *  preview into its own entry: undo then takes the change back and leaves the preview standing,
- *  as the gesture's own mouseup would have recorded it. The gesture's own resolution (`moveLabel`,
- *  `updateLabels`, `commitPreview`) never comes through here, so a drag still coalesces into one.
- *  Empty while there is no preview to record. */
+/** Commits the live preview the labels map carries (a drag or a wheel resize still under a held
+ *  button) as an entry of its own; empty when there is none. The gesture's mouseup (`commitPreview`)
+ *  records it this way, and so does a commit landing on it from elsewhere (Delete while the
+ *  wheel-resize button is still held, #102): undo then takes that change back and leaves the
+ *  preview standing, instead of the two folded into one entry. The gesture's own resolution
+ *  (`moveLabel`, `updateLabels`) never comes through here, so a drag still coalesces into one. */
 function previewCommitted(s: EditorState): Partial<EditorState> {
-  const preview = livePreview(s)
-  return (preview && changedDoc(s, preview)) ?? {}
+  return s.committed && s.labels !== s.committed.labels ? commitLabels(s, s.labels) : {}
+}
+
+/** A commit from outside the gesture (a toggle, a batch of placed labels, a style change): the
+ *  live preview, if any, is recorded first as an entry of its own, then `patch` on top. A refused
+ *  change (not editable) leaves the preview where it was too. */
+function committedElsewhere(prev: EditorState, patch: DocPatch): Partial<EditorState> {
+  const folded = previewCommitted(prev)
+  const next = changedDoc({ ...prev, ...folded }, patch)
+  return next ? { ...folded, ...next } : {}
 }
 
 /** Makes the snapshot at the top of the undo or redo stack the document. The restored document is
@@ -218,7 +229,7 @@ function swapHistory(s: EditorState, direction: 'undo' | 'redo'): Partial<Editor
   // Not during a gesture (#88): restoring the committed document under a drag would have the
   // drag-end commit the pointer position against the restored origin, and the label would jump.
   // The mouseup commits the preview, and the keys answer again.
-  if (livePreview(s)) return {}
+  if (hasLivePreview(s)) return {}
   const snapshot = from[from.length - 1]!
   // Not a commit — the history below is this function's own — but a restored snapshot can
   // disable a label, so the selection still has to be pruned against it.
@@ -317,7 +328,7 @@ export const useEditor = create<EditorState>()((set) => ({
           }
       const labels = new Map(s.labels)
       labels.set(id, next)
-      return changedDoc(s, { labels }) ?? {}
+      return committedElsewhere(s, { labels })
     }),
   moveLabel: (id, x, y, commit = true) =>
     set((s) => {
@@ -358,18 +369,14 @@ export const useEditor = create<EditorState>()((set) => ({
       return commitLabels(s, labels, !(dx === 0 && dy === 0))
     }),
   applyLabels: (updated) =>
-    set((prev) => {
-      const folded = previewCommitted(prev)
-      const s = { ...prev, ...folded }
+    set((s) => {
       const labels = new Map(s.labels)
       for (const label of updated) {
         // Unreachable from the server (one label per object), so a mismatch is a bug: say so.
         if (!labels.has(label.object_id)) throw new Error(`applyLabels: no label for object ${label.object_id}`)
         labels.set(label.object_id, label)
       }
-      const next = changedDoc(s, { labels })
-      // A refused change (not editable) leaves the preview where it was too.
-      return next ? { ...folded, ...next } : {}
+      return committedElsewhere(s, { labels })
     }),
   updateLabels: (ids, patch, commit = true) =>
     set((s) => {
@@ -389,7 +396,7 @@ export const useEditor = create<EditorState>()((set) => ({
       // patch that touched nothing collapses the same way. `commitLabels` answers both.
       return commitLabels(s, labels)
     }),
-  commitPreview: () => set((s) => (s.committed && s.labels !== s.committed.labels ? commitLabels(s, s.labels) : {})),
+  commitPreview: () => set(previewCommitted),
   setStyle: (patch) =>
     set((s) => {
       const current = s.style
@@ -406,8 +413,8 @@ export const useEditor = create<EditorState>()((set) => ({
       // (StyleTab.changeFont skips its own same-font early return in that case for the same reason.)
       const hasFontPatch = 'font_file' in patch
       if (!changed && !(hasFontPatch && s.fontFallback !== null)) return {}
-      const next = changedDoc(s, { style: { ...current, ...patch } })
-      if (!next) return {}
+      const next = committedElsewhere(s, { style: { ...current, ...patch } })
+      if (!('committed' in next)) return {}
       return { ...next, ...(hasFontPatch ? { fontFallback: null } : {}) }
     }),
   markSaving: () => set({ pendingChanges: 0, save: { status: 'saving', message: null } }),
@@ -420,6 +427,8 @@ export const useEditor = create<EditorState>()((set) => ({
     })),
   markSaveError: (message) => set({ save: { status: 'error', message } }),
   markConflict: (message) => set({ save: { status: 'conflict', message }, undo: [], redo: [] }),
+  markExported: (exportedAt, exportedVersion) =>
+    set((s) => (s.image ? { image: { ...s.image, exported_at: exportedAt, exported_version: exportedVersion } } : {})),
   undoLast: () => set((s) => swapHistory(s, 'undo')),
   redoLast: () => set((s) => swapHistory(s, 'redo')),
 }))
