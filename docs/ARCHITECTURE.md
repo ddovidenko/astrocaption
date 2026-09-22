@@ -107,6 +107,7 @@ measures on its own canvas), and `frontend/e2e/smoke.spec.ts` can locate a label
 `frontend/e2e/` runs under Playwright against the built frontend served by uvicorn (`make e2e`) or
 the Docker image (CI), with `frontend/e2e/fake-nova.mjs` standing in for nova.astrometry.net: one
 worker, one data dir, and the spec files run in alphabetical order as one story —
+`gestures.spec.ts` (Space-pan and middle-button pan over a label, clicks after a moved gesture, #87),
 `parity.spec.ts` (the pixel diff above), `smoke.spec.ts` (setup, solve, export, edit, config, sign
 out) and `solve-failure.spec.ts` last, so the Orion image already exists by then. That spec's three
 steps are "nova reports failure", "re-solve times out" and "Check again resumes": a solve nova
