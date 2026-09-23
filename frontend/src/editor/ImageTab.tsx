@@ -14,16 +14,16 @@ export default function ImageTab() {
   // but the export endpoint refuses ("Image is not solved yet."). The button says so by being
   // disabled rather than by failing.
   const solved = useEditor((s) => s.image?.solve_status === 'solved')
-  // For the export line (#91): the stored document's version moves with every save that lands,
+  // For the export line (#91): the stored document's hash moves with every save that lands,
   // and anything not saved yet is already a change the last export cannot hold.
-  const annotationsVersion = useEditor((s) => s.version)
+  const annotationsHash = useEditor((s) => s.contentHash)
   const saveStatus = useEditor((s) => s.save.status)
   const unsaved = saveStatus !== 'saved'
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ExportOut | null>(null)
   const exported = image ? exportOf(image) : null
-  const state = exportState(exported, annotationsVersion, unsaved)
+  const state = exportState(exported, annotationsHash, unsaved)
   // "Exported 3 minutes ago" keeps moving while the tab sits idle; the other two sentences do not
   // depend on the clock, so the tick runs only while that one shows.
   const [, setTick] = useState(0)
@@ -64,7 +64,7 @@ export default function ImageTab() {
       setResult(out)
       // The image now carries this export; a later failed export clears `result` (its download
       // link must go) but not this, so the line keeps the last one that succeeded.
-      useEditor.getState().markExported(out.exported_at, out.exported_version)
+      useEditor.getState().markExported(out.exported_at, out.exported_hash)
     } catch (err) {
       setError(pageError(err))
     } finally {

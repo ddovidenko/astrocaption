@@ -361,7 +361,7 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
             <p className="meta">
               <a href={image.export_url}>Download full-resolution export</a>
               <span>exported {relativeTime(image.exported_at!)}</span>
-              {exportState(exportOf(image), image.annotations_version) === 'stale' && (
+              {exportState(exportOf(image), image.annotations_hash) === 'stale' && (
                 <span className="badge stale" title="The annotations changed after this export; export again to refresh it">
                   Export out of date
                 </span>

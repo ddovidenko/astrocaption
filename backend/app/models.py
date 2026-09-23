@@ -357,6 +357,9 @@ class Annotations(BaseModel):
     updated_at: str = Field(default_factory=utcnow_iso)
     # the stored font_file when `style.font_file` had to be replaced by the default (GET only)
     font_fallback: str | None = None
+    #: The stored document's identity by content (``db.content_hash``), filled on every read; what
+    #: ``images.exported_hash`` is compared with (#91).
+    content_hash: str | None = None
 
 
 class AnnotationsUpdate(BaseModel):
@@ -376,6 +379,9 @@ class AnnotationsUpdate(BaseModel):
     labels: list[Label] = Field(max_length=MAX_LABELS)
     version: int = Field(ge=1)
     font_fallback: str | None = (
+        None  # the server's; accepted so a GET body can be sent back, never read
+    )
+    content_hash: str | None = (
         None  # the server's; accepted so a GET body can be sent back, never read
     )
 
@@ -444,8 +450,8 @@ class ImageRecord(BaseModel):
     solve_hints: SolveHints | None = None  # persisted so a restart keeps the owner's hints
     published: bool = False
     exported_at: str | None = None
-    #: ``version`` of the annotations document the last export rendered (#91).
-    exported_version: int | None = None
+    #: ``content_hash`` of the annotations document the last export rendered (#91).
+    exported_hash: str | None = None
 
     @property
     def check_available(self) -> bool:
@@ -493,10 +499,11 @@ class ImageOut(BaseModel):
     published: bool
     object_count: int
     exported_at: str | None
-    #: The stored document's ``version`` (null until a solve stores one) and the version the last
-    #: export rendered; the pages call the export out of date when they differ (#91).
-    annotations_version: int | None
-    exported_version: int | None
+    #: The stored document's content hash (null until a solve stores one) and the hash of the
+    #: document the last export rendered; the pages call the export out of date when they differ
+    #: (#91). By content, so an undo back to the exported document reads as exported.
+    annotations_hash: str | None
+    exported_hash: str | None
     original_format: str
     preview_url: str
     thumb_url: str
@@ -534,7 +541,7 @@ class ExportOut(BaseModel):
     height: int
     bytes: int
     exported_at: str
-    exported_version: int
+    exported_hash: str
     encoding: str
 
 

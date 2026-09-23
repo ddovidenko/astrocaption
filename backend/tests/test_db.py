@@ -17,12 +17,12 @@ def test_migration_from_v1_adds_hints_column(tmp_path: Path) -> None:
     with db.connect() as conn:  # rewind to the version-1 shape
         conn.execute("ALTER TABLE images DROP COLUMN solve_hints_json")
         conn.execute("ALTER TABLE images DROP COLUMN solve_failure")
-        conn.execute("ALTER TABLE images DROP COLUMN exported_version")
+        conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
         conn.execute("PRAGMA user_version = 1")
     db.init()
     with db.connect() as conn:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(images)")}
-        assert {"solve_hints_json", "solve_failure", "exported_version"} <= columns
+        assert {"solve_hints_json", "solve_failure", "exported_hash"} <= columns
         assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     db.init()  # idempotent
 
@@ -34,7 +34,7 @@ def test_migration_from_v2_adds_the_failure_kind_column(tmp_path: Path) -> None:
     db.init()
     with db.connect() as conn:  # rewind to the version-2 shape
         conn.execute("ALTER TABLE images DROP COLUMN solve_failure")
-        conn.execute("ALTER TABLE images DROP COLUMN exported_version")
+        conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
         conn.execute("PRAGMA user_version = 2")
     db.init()
     with db.connect() as conn:
@@ -44,18 +44,37 @@ def test_migration_from_v2_adds_the_failure_kind_column(tmp_path: Path) -> None:
     db.init()  # idempotent
 
 
-def test_migration_from_v3_adds_the_exported_version_column(tmp_path: Path) -> None:
+def test_migration_from_v3_adds_the_exported_hash_column(tmp_path: Path) -> None:
     """An export made before this column existed reads NULL there: the pages then call it out
     of date until the next export records which document it rendered (#91)."""
     db = Database(tmp_path / "x.sqlite")
     db.init()
     with db.connect() as conn:  # rewind to the version-3 shape
-        conn.execute("ALTER TABLE images DROP COLUMN exported_version")
+        conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
         conn.execute("PRAGMA user_version = 3")
     db.init()
     with db.connect() as conn:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(images)")}
-        assert "exported_version" in columns
+        assert "exported_hash" in columns
+        assert "exported_version" not in columns
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    db.init()  # idempotent
+
+
+def test_migration_from_v4_swaps_the_exported_version_column_for_the_hash(tmp_path: Path) -> None:
+    """Schema 4 (one build, never released) recorded the exported document's version; 5 records
+    its content hash instead, so an undo back to the exported document reads as exported."""
+    db = Database(tmp_path / "x.sqlite")
+    db.init()
+    with db.connect() as conn:  # rewind to the version-4 shape
+        conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
+        conn.execute("ALTER TABLE images ADD COLUMN exported_version INTEGER")
+        conn.execute("PRAGMA user_version = 4")
+    db.init()
+    with db.connect() as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(images)")}
+        assert "exported_hash" in columns
+        assert "exported_version" not in columns
         assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     db.init()  # idempotent
 

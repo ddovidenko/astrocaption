@@ -1,29 +1,29 @@
 import { describe, expect, it } from 'vitest'
 import { exportOf, exportState, relativeTime } from './exportStatus'
 
-// #91: whether the last export still matches the document: an exact match of the version the
-// export rendered against the stored version, never a clock comparison (a save landing during
-// the render has a later stamp than the document the render read, but an earlier one than the
-// export's).
+// #91: whether the last export still matches the document, by content: the hash of the document
+// the export rendered against the stored document's hash. Never a version or a clock: an undo back
+// to the exported document is a new version with the same content, and a save landing during the
+// render has a later stamp than the document the render read.
 describe('exportState', () => {
   const at = '2026-09-21T04:22:57+00:00'
   it('is "none" without an export', () => {
-    expect(exportState(null, 3)).toBe('none')
+    expect(exportState(null, 'abc')).toBe('none')
     expect(exportState(null, null, true)).toBe('none')
   })
-  it('is current when the export rendered the stored version, stale when it did not', () => {
-    expect(exportState({ at, version: 3 }, 3)).toBe('current')
-    expect(exportState({ at, version: 3 }, 4)).toBe('stale')
+  it('is current when the export rendered the stored document, stale when the content differs', () => {
+    expect(exportState({ at, hash: 'abc' }, 'abc')).toBe('current')
+    expect(exportState({ at, hash: 'abc' }, 'abd')).toBe('stale')
   })
   it('is stale while a change has not reached the server yet', () => {
-    expect(exportState({ at, version: 3 }, 3, true)).toBe('stale')
+    expect(exportState({ at, hash: 'abc' }, 'abc', true)).toBe('stale')
   })
-  it('is stale for an export made before the version was recorded (it cannot vouch for itself)', () => {
-    expect(exportState({ at, version: null }, 3)).toBe('stale')
+  it('is stale for an export made before the hash was recorded (it cannot vouch for itself)', () => {
+    expect(exportState({ at, hash: null }, 'abc')).toBe('stale')
   })
   it('exportOf reads the pair off an image', () => {
-    expect(exportOf({ exported_at: null, exported_version: null })).toBeNull()
-    expect(exportOf({ exported_at: at, exported_version: 2 })).toEqual({ at, version: 2 })
+    expect(exportOf({ exported_at: null, exported_hash: null })).toBeNull()
+    expect(exportOf({ exported_at: at, exported_hash: 'abc' })).toEqual({ at, hash: 'abc' })
   })
 })
 

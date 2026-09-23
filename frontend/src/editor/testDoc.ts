@@ -25,8 +25,8 @@ export function makeDoc(): LoadedDocument {
     published: false,
     object_count: 2,
     exported_at: null,
-    annotations_version: 1,
-    exported_version: null,
+    annotations_hash: 'hash-1',
+    exported_hash: null,
     original_format: 'jpeg',
     preview_url: '/preview',
     thumb_url: '/thumb',
@@ -88,6 +88,7 @@ export function makeDoc(): LoadedDocument {
       },
     ],
     version: 1,
+    content_hash: 'hash-1',
     updated_at: '2026-01-01T00:00:00Z',
     font_fallback: null,
   }
