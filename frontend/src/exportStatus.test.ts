@@ -1,24 +1,29 @@
 import { describe, expect, it } from 'vitest'
-import { exportState, relativeTime } from './exportStatus'
+import { exportOf, exportState, relativeTime } from './exportStatus'
 
-// #91: whether the last export still matches the document. Both stamps come from the server's
-// utcnow_iso (second resolution, UTC), so a save and an export in the same second tie — and a
-// tie is "current": the export flushes the save before it renders.
+// #91: whether the last export still matches the document: an exact match of the version the
+// export rendered against the stored version, never a clock comparison (a save landing during
+// the render has a later stamp than the document the render read, but an earlier one than the
+// export's).
 describe('exportState', () => {
+  const at = '2026-09-21T04:22:57+00:00'
   it('is "none" without an export', () => {
-    expect(exportState(null, '2026-09-21T04:22:57+00:00', false)).toBe('none')
+    expect(exportState(null, 3)).toBe('none')
     expect(exportState(null, null, true)).toBe('none')
   })
-  it('is "current" when the export is as new as the document, stale when the document is newer', () => {
-    expect(exportState('2026-09-21T04:22:57+00:00', '2026-09-21T04:22:57+00:00', false)).toBe('current')
-    expect(exportState('2026-09-21T04:22:57+00:00', '2026-09-21T04:20:00+00:00', false)).toBe('current')
-    expect(exportState('2026-09-21T04:22:57+00:00', '2026-09-21T04:23:00+00:00', false)).toBe('stale')
+  it('is current when the export rendered the stored version, stale when it did not', () => {
+    expect(exportState({ at, version: 3 }, 3)).toBe('current')
+    expect(exportState({ at, version: 3 }, 4)).toBe('stale')
   })
   it('is stale while a change has not reached the server yet', () => {
-    expect(exportState('2026-09-21T04:22:57+00:00', '2026-09-21T04:20:00+00:00', true)).toBe('stale')
+    expect(exportState({ at, version: 3 }, 3, true)).toBe('stale')
   })
-  it('is current when the document has no stored timestamp (nothing newer exists)', () => {
-    expect(exportState('2026-09-21T04:22:57+00:00', null, false)).toBe('current')
+  it('is stale for an export made before the version was recorded (it cannot vouch for itself)', () => {
+    expect(exportState({ at, version: null }, 3)).toBe('stale')
+  })
+  it('exportOf reads the pair off an image', () => {
+    expect(exportOf({ exported_at: null, exported_version: null })).toBeNull()
+    expect(exportOf({ exported_at: at, exported_version: 2 })).toEqual({ at, version: 2 })
   })
 })
 

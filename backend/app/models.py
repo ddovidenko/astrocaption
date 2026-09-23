@@ -444,6 +444,8 @@ class ImageRecord(BaseModel):
     solve_hints: SolveHints | None = None  # persisted so a restart keeps the owner's hints
     published: bool = False
     exported_at: str | None = None
+    #: ``version`` of the annotations document the last export rendered (#91).
+    exported_version: int | None = None
 
     @property
     def check_available(self) -> bool:
@@ -491,9 +493,10 @@ class ImageOut(BaseModel):
     published: bool
     object_count: int
     exported_at: str | None
-    #: When the annotations were last stored (null until a solve stores a document). Newer than
-    #: ``exported_at`` means the export no longer matches the document (#91).
-    annotations_updated_at: str | None
+    #: The stored document's ``version`` (null until a solve stores one) and the version the last
+    #: export rendered; the pages call the export out of date when they differ (#91).
+    annotations_version: int | None
+    exported_version: int | None
     original_format: str
     preview_url: str
     thumb_url: str
@@ -531,6 +534,7 @@ class ExportOut(BaseModel):
     height: int
     bytes: int
     exported_at: str
+    exported_version: int
     encoding: str
 
 

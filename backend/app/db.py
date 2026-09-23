@@ -29,12 +29,13 @@ from .models import (
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Statements that bring an existing database from version N-1 to N.
 MIGRATIONS: dict[int, tuple[str, ...]] = {
     2: ("ALTER TABLE images ADD COLUMN solve_hints_json TEXT",),
     3: ("ALTER TABLE images ADD COLUMN solve_failure TEXT",),
+    4: ("ALTER TABLE images ADD COLUMN exported_version INTEGER",),
 }
 
 SCHEMA = """
@@ -59,7 +60,8 @@ CREATE TABLE IF NOT EXISTS images (
     calibration_json   TEXT,
     solve_hints_json   TEXT,
     published          INTEGER NOT NULL DEFAULT 0,
-    exported_at        TEXT
+    exported_at        TEXT,
+    exported_version   INTEGER
 );
 CREATE INDEX IF NOT EXISTS images_created_at ON images (created_at);
 
@@ -284,11 +286,19 @@ class Database:
             rows = conn.execute("SELECT image_id, COUNT(*) AS n FROM objects GROUP BY image_id")
             return {r["image_id"]: int(r["n"]) for r in rows}
 
-    def annotations_updated_at(self) -> dict[str, str]:
-        """``updated_at`` of every stored annotations row, by image id (for the list endpoint)."""
+    def annotations_versions(self) -> dict[str, int]:
+        """``version`` of every stored annotations row, by image id (for the list endpoint)."""
         with self.connect() as conn:
-            rows = conn.execute("SELECT image_id, updated_at FROM annotations")
-            return {r["image_id"]: str(r["updated_at"]) for r in rows}
+            rows = conn.execute("SELECT image_id, version FROM annotations")
+            return {r["image_id"]: int(r["version"]) for r in rows}
+
+    def annotations_version(self, image_id: str) -> int | None:
+        """One row's ``version`` without decoding its document (``image_out`` needs no more)."""
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT version FROM annotations WHERE image_id = ?", (image_id,)
+            ).fetchone()
+        return int(row["version"]) if row else None
 
     # -- annotations --------------------------------------------------------------
 

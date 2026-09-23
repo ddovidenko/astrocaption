@@ -63,6 +63,8 @@ describe('SidePanel', () => {
     fireEvent.change(screen.getByLabelText('Search objects'), { target: { value: 'M 4' } })
     rerender(<SidePanel open={false} onToggle={() => {}} />)
     expect(screen.queryByRole('tab', { name: 'Objects' })).toBeNull()
+    // Hidden, not gone: the panels' aria-labelledby still resolves while collapsed.
+    expect(document.getElementById('tab-objects')?.closest('[hidden]')).toBeTruthy()
     expect((screen.getByLabelText('Search objects').closest('[role=tabpanel]') as HTMLElement).hidden).toBe(true)
     rerender(<SidePanel open onToggle={() => {}} />)
     expect(screen.getByRole('tabpanel', { name: 'Objects' }).hidden).toBe(false)

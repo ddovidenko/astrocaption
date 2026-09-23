@@ -6,7 +6,7 @@ import EditorCanvas from './EditorCanvas'
 import { isEditable } from './editing'
 import { loadEditor } from './load'
 import SidePanel from './SidePanel'
-import { useEditor } from './store'
+import { hasLivePreview, useEditor } from './store'
 
 /** A save that needs the owner: the message and its one way out. `onMouseDown` keeps the canvas
  *  shortcuts working after the click (a focused button would take Space as a click). */
@@ -60,8 +60,8 @@ export default function EditorPage() {
   const error = id ? (settled?.error ?? null) : 'That image could not be found.'
   const image = useEditor((s) => s.image)
   const scale = useEditor((s) => s.view.scale)
-  const canUndo = useEditor((s) => s.undo.length > 0 && isEditable(s))
-  const canRedo = useEditor((s) => s.redo.length > 0 && isEditable(s))
+  const canUndo = useEditor((s) => s.undo.length > 0 && isEditable(s) && !hasLivePreview(s))
+  const canRedo = useEditor((s) => s.redo.length > 0 && isEditable(s) && !hasLivePreview(s))
   const [panelOpen, setPanelOpen] = useState(true)
 
   useEffect(() => {

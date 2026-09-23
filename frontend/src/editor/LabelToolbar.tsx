@@ -2,7 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'rea
 import type { Label, LeaderMode } from '../api'
 import ColorField from '../style/ColorField'
 import { isEditable, resetPositions } from './editing'
-import { MAX_FONT_SIZE, MIN_FONT_SIZE, type Box } from './metrics'
+import { clampFontSize, MAX_FONT_SIZE, MIN_FONT_SIZE, type Box } from './metrics'
 import { useEditor } from './store'
 import { useTaggedDraft } from './taggedDraft'
 import { toScreen } from './view'
@@ -154,7 +154,7 @@ export default function LabelToolbar({
     // (#103). Only text the number input let through that is still not a number is dropped.
     const n = Number(text)
     if (!Number.isFinite(n)) return
-    update(ids, { font_size: Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(n))) })
+    update(ids, { font_size: clampFontSize(n) })
   }
   const step = (delta: number) => {
     // The stepper acts on the stored sizes, so a draft typed against them is spent — and a draft
@@ -164,7 +164,7 @@ export default function LabelToolbar({
     // One commit for the set: each label steps from its own effective size.
     const updated = selected.map((l) => ({
       ...l,
-      font_size: Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, (l.font_size ?? s.style!.font_size) + delta)),
+      font_size: clampFontSize((l.font_size ?? s.style!.font_size) + delta),
     }))
     // At the clamp every label already holds the size it would step to. `applyLabels` has no
     // same-value dedupe of its own, so committing here would be an undo entry and a save for a

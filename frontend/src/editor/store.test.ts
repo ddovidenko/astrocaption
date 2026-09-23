@@ -3,6 +3,7 @@ import {
   documentForSave,
   enabledLabels,
   fontFor,
+  hasLivePreview,
   HISTORY_LIMIT,
   isEditable,
   labelFor,
@@ -438,6 +439,46 @@ describe('undo/redo', () => {
     expect(useEditor.getState().historySeq).toBe(0)
     useEditor.getState().reset()
     expect(useEditor.getState().historySeq).toBe(0)
+  })
+})
+
+  it('a style change landing on a live preview records the preview first too', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    s.updateLabels([1], { font_size: 25 }, false)
+    useEditor.getState().setStyle({ font_size: 30 })
+    expect(useEditor.getState().undo).toHaveLength(2)
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().style!.font_size).toBe(24)
+    expect(useEditor.getState().labels.get(1)!.font_size).toBe(25)
+  })
+
+  it('undo is ignored for a drag that is back at its origin but still under the button', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const { x, y } = useEditor.getState().labels.get(1)!
+    useEditor.getState().moveLabel(1, x + 20, y + 30)
+    useEditor.getState().moveLabel(1, x + 25, y + 30, false) // dragmove away...
+    useEditor.getState().moveLabel(1, x + 20, y + 30, false) // ...and back to where the drag began
+    useEditor.getState().undoLast()
+    expect(useEditor.getState().undo).toHaveLength(1)
+    expect(useEditor.getState().labels.get(1)).toMatchObject({ x: x + 20, y: y + 30 })
+  })
+
+describe('hasLivePreview', () => {
+  it('is true from the first preview frame until the gesture commits, back at the start included', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    expect(hasLivePreview(useEditor.getState())).toBe(false)
+    s.updateLabels([1], { font_size: 25 }, false)
+    expect(hasLivePreview(useEditor.getState())).toBe(true)
+    useEditor.getState().updateLabels([1], { font_size: null }, false)
+    expect(hasLivePreview(useEditor.getState())).toBe(true) // still under the button
+    useEditor.getState().commitPreview()
+    expect(hasLivePreview(useEditor.getState())).toBe(false)
+    useEditor.getState().updateLabels([1], { font_size: 25 }, false)
+    useEditor.getState().commitPreview()
+    expect(hasLivePreview(useEditor.getState())).toBe(false)
   })
 })
 

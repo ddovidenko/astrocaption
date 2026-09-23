@@ -3,14 +3,26 @@
 
 export type ExportState = 'none' | 'stale' | 'current'
 
-/** `exportedAt` and `annotationsUpdatedAt` are the server's ISO stamps (utcnow_iso: UTC, second
- *  resolution, one format), so a plain string compare orders them. A tie is current: the editor
- *  flushes the save before it exports, so the export made in the same second holds that save.
- *  `unsaved` is the editor's own knowledge of a change the server has not stored yet. */
-export function exportState(exportedAt: string | null, annotationsUpdatedAt: string | null, unsaved: boolean): ExportState {
-  if (!exportedAt) return 'none'
-  if (unsaved) return 'stale'
-  if (annotationsUpdatedAt && annotationsUpdatedAt > exportedAt) return 'stale'
+/** The last export as `ImageOut` (or `ExportOut`) reports it, or null when there is none. */
+export interface Exported {
+  at: string
+  /** The document version the export rendered; null for one made before it was recorded. */
+  version: number | null
+}
+
+export function exportOf(image: { exported_at: string | null; exported_version: number | null }): Exported | null {
+  return image.exported_at ? { at: image.exported_at, version: image.exported_version } : null
+}
+
+/** Current only when the export rendered the stored document's version. An exact match, not a
+ *  clock comparison: a save landing while the render runs is stamped after the document the
+ *  render read but before the export, and a time rule would call that export current. An export
+ *  with no recorded version (made before the column existed) cannot vouch for itself, so it reads
+ *  stale until the next export. `unsaved` is the editor's own knowledge of a change the server
+ *  has not stored yet. */
+export function exportState(exported: Exported | null, annotationsVersion: number | null, unsaved = false): ExportState {
+  if (!exported) return 'none'
+  if (unsaved || exported.version === null || exported.version !== annotationsVersion) return 'stale'
   return 'current'
 }
 

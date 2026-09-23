@@ -12,6 +12,12 @@ import { aliasNames, primaryName } from './names'
 
 export const MIN_FONT_SIZE = 6
 export const MAX_FONT_SIZE = 200
+
+/** A size the document accepts: whole pixels inside the bounds. The toolbar's field and stepper
+ *  both land here, so a typed 500 and a + at 200 agree. */
+export function clampFontSize(size: number): number {
+  return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(size)))
+}
 export const ALIAS_SCALE = 0.7
 export const LINE_HEIGHT = 1.2
 export const ALIAS_SEP = ' · '

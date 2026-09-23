@@ -361,31 +361,60 @@ def test_put_refuses_reset(client: TestClient, sample_jpeg: Path) -> None:
     assert resp.json()["detail"] == "reset: is not a known field"
 
 
-def test_image_out_carries_the_annotations_timestamp_for_the_export_staleness_rule(
+def test_image_out_carries_the_versions_for_the_export_staleness_rule(
     client: TestClient, sample_jpeg: Path
 ) -> None:
-    """#91: the editor and the images page compare ``annotations_updated_at`` with
-    ``exported_at`` to say when an export no longer matches the document."""
+    """#91: the editor and the images page say an export is out of date when
+    ``exported_version`` is not the document's ``annotations_version``."""
     image_id, ann, _ = solved_image(client, sample_jpeg)
     before = client.get(f"/api/images/{image_id}").json()
-    assert before["annotations_updated_at"] == ann["updated_at"]
-    assert before["exported_at"] is None
+    assert before["annotations_version"] == ann["version"]
+    assert before["exported_at"] is None and before["exported_version"] is None
     listed = {img["id"]: img for img in client.get("/api/images").json()}
-    assert listed[image_id]["annotations_updated_at"] == ann["updated_at"]
+    assert listed[image_id]["annotations_version"] == ann["version"]
+    assert listed[image_id]["exported_version"] is None
 
     exported = client.post(f"/api/images/{image_id}/export", json={}).json()
+    assert exported["exported_version"] == ann["version"]
     after_export = client.get(f"/api/images/{image_id}").json()
     assert after_export["exported_at"] == exported["exported_at"]
-    assert after_export["annotations_updated_at"] <= after_export["exported_at"]
+    assert after_export["exported_version"] == after_export["annotations_version"]
 
     ann["labels"][0]["x"] += 10
     saved = client.put(f"/api/images/{image_id}/annotations", json=ann).json()
     after_put = client.get(f"/api/images/{image_id}").json()
-    assert after_put["annotations_updated_at"] == saved["updated_at"]
-    assert after_put["annotations_updated_at"] >= after_put["exported_at"]
+    assert after_put["annotations_version"] == saved["version"]
+    assert after_put["exported_version"] == exported["exported_version"] != saved["version"]
+    listed = {img["id"]: img for img in client.get("/api/images").json()}
+    assert listed[image_id]["exported_version"] != listed[image_id]["annotations_version"]
 
 
-def test_annotations_timestamp_is_null_before_a_solve_stores_a_document(
+def test_a_save_landing_during_the_render_leaves_the_export_out_of_date(
+    client: TestClient, sample_jpeg: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The export records the document it rendered, not the clock when it finished: a save that
+    lands while the render runs must still read as newer than the export."""
+    from app.api import images as images_api
+
+    image_id, ann, _ = solved_image(client, sample_jpeg)
+    real_render = images_api._render_export
+
+    def render_with_a_save_in_the_middle(*args: Any, **kwargs: Any) -> Any:
+        ann["labels"][0]["x"] += 10
+        assert client.put(f"/api/images/{image_id}/annotations", json=ann).status_code == 200
+        return real_render(*args, **kwargs)
+
+    monkeypatch.setattr(images_api, "_render_export", render_with_a_save_in_the_middle)
+    exported = client.post(f"/api/images/{image_id}/export", json={}).json()
+    after = client.get(f"/api/images/{image_id}").json()
+    # `ann` still holds the version the PUT was sent with; the render saw that one, and the PUT
+    # stored the next.
+    assert after["exported_version"] == exported["exported_version"] == ann["version"]
+    assert after["annotations_version"] == ann["version"] + 1
+    assert after["annotations_version"] != after["exported_version"]
+
+
+def test_annotations_version_is_null_before_a_solve_stores_a_document(
     tmp_path: Path, sample_jpeg: Path
 ) -> None:
     settings = make_settings(tmp_path)
@@ -393,6 +422,6 @@ def test_annotations_timestamp_is_null_before_a_solve_stores_a_document(
     with make_client(settings, lambda: stuck) as client:
         login(client)
         image_id = upload(client, sample_jpeg)["id"]
-        assert client.get(f"/api/images/{image_id}").json()["annotations_updated_at"] is None
+        assert client.get(f"/api/images/{image_id}").json()["annotations_version"] is None
         listed = client.get("/api/images").json()
-        assert listed[0]["annotations_updated_at"] is None
+        assert listed[0]["annotations_version"] is None
