@@ -1,7 +1,7 @@
 // The Objects tab's search and kind filter (SPEC § 6.3). Pure, so the filtering rules are tested
 // without a DOM: the tab owns only the query string and the filter object.
 
-import type { Label, ObjectKind, ObjectOut } from '../api'
+import type { ObjectKind, ObjectOut } from '../api'
 
 export const KINDS: readonly ObjectKind[] = ['galaxy', 'nebula', 'cluster', 'star', 'other']
 
@@ -23,32 +23,26 @@ export interface ObjectsFilter {
 
 export const DEFAULT_FILTER: ObjectsFilter = { kinds: new Set<ObjectKind>(KINDS), hd: false }
 
-/** The filter a document opens with: the defaults, except that the HD chip starts on when an
- *  `hd` label is already enabled (#126) — the chips describe what the canvas shows, and a list
- *  reading "1 of 24 objects" over a canvas drawing all 24 explained nothing. A fresh solve
- *  enables no `hd` label, so a new edit keeps the #37 default. */
-export function initialFilter(objects: ReadonlyMap<number, ObjectOut>, labels: ReadonlyMap<number, Label>): ObjectsFilter {
-  for (const label of labels.values()) {
-    const obj = objects.get(label.object_id)
-    if (label.enabled && obj && isHd(obj)) return { ...DEFAULT_FILTER, hd: true }
-  }
-  return DEFAULT_FILTER
-}
-
 export function isHd(o: ObjectOut): boolean {
   return o.type.toLowerCase() === 'hd'
 }
 
-/** The rows to show: objects whose kind is on (an `hd` row also needs the toggle) and whose *any*
- *  catalogue name contains `query` (case-insensitive substring — searching "198" has to find
- *  HD 198639 by its full name, not only by the primary name the preference picked). Input order
- *  is preserved. */
-export function filterObjects(objects: ObjectOut[], query: string, filter: ObjectsFilter): ObjectOut[] {
+/** The rows to show: every object whose label is enabled (the list always describes what the
+ *  canvas draws), plus the disabled ones whose kind is on (an `hd` row also needs the toggle) —
+ *  so HD can be switched on to enable one star and off again to drop the rest — and in both
+ *  cases whose *any* catalogue name contains `query` (case-insensitive substring — searching
+ *  "198" has to find HD 198639 by its full name, not only by the primary name the preference
+ *  picked). Input order is preserved. */
+export function filterObjects(
+  objects: ObjectOut[],
+  query: string,
+  filter: ObjectsFilter,
+  enabled: ReadonlySet<number> = new Set(),
+): ObjectOut[] {
   const q = query.trim().toLowerCase()
   return objects.filter(
     (o) =>
-      filter.kinds.has(o.kind) &&
-      (filter.hd || !isHd(o)) &&
+      (enabled.has(o.id) || (filter.kinds.has(o.kind) && (filter.hd || !isHd(o)))) &&
       (q === '' || o.catalog_names.some((n) => n.toLowerCase().includes(q))),
   )
 }

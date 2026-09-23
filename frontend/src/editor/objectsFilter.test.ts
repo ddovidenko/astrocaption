@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ObjectKind, ObjectOut } from '../api'
-import type { Label } from '../api'
-import { DEFAULT_FILTER, KINDS, filterObjects, initialFilter, isHd } from './objectsFilter'
+import { DEFAULT_FILTER, KINDS, filterObjects, isHd } from './objectsFilter'
 
 /** The `nova-narrow` field (1° Pelican): 8 objects, five of them `hd` — the shape #37 is about. */
 function narrowField(): ObjectOut[] {
@@ -78,27 +77,18 @@ describe('filterObjects', () => {
   })
 })
 
-// #126: the chips describe what the canvas shows, so a document with HD labels enabled opens
-// with the HD chip on; a fresh solve (no HD label enabled) keeps the #37 default.
-describe('initialFilter', () => {
-  const labelsFor = (objects: ObjectOut[], enabledIds: number[]): Map<number, Label> =>
-    new Map(
-      objects.map((o) => [
-        o.id,
-        { object_id: o.id, enabled: enabledIds.includes(o.id), x: o.x, y: o.y } as unknown as Label,
-      ]),
-    )
-
-  it('starts with the HD chip off when no hd label is enabled', () => {
-    const objects = narrowField()
-    const f = initialFilter(new Map(objects.map((o) => [o.id, o])), labelsFor(objects, [6, 8]))
-    expect(f).toEqual(DEFAULT_FILTER)
+// An enabled label is always listed, whatever the chips say: the chips decide which *disabled*
+// rows are offered, so HD can be switched on to enable one star and off again to drop the rest.
+describe('filterObjects with enabled labels', () => {
+  const enabled = new Set([2, 8]) // HD 198639 and IC 5070 are drawn on the canvas
+  it('lists an enabled hd row with the HD chip off', () => {
+    expect(names(filterObjects(narrowField(), '', DEFAULT_FILTER, enabled))).toEqual(['HD 198639', '56 Cyg', '57 Cyg', 'IC 5070'])
   })
-
-  it('starts with the HD chip on when an hd label is enabled', () => {
-    const objects = narrowField()
-    const f = initialFilter(new Map(objects.map((o) => [o.id, o])), labelsFor(objects, [2]))
-    expect(f.hd).toBe(true)
-    expect(f.kinds).toEqual(DEFAULT_FILTER.kinds)
+  it('lists an enabled row of a kind whose chip is off', () => {
+    const kinds = new Set<ObjectKind>(['nebula'])
+    expect(names(filterObjects(narrowField(), '', { kinds, hd: false }, enabled))).toEqual(['HD 198639', 'IC 5070'])
+  })
+  it('still applies the search to enabled rows', () => {
+    expect(names(filterObjects(narrowField(), 'cyg', DEFAULT_FILTER, enabled))).toEqual(['56 Cyg', '57 Cyg'])
   })
 })
