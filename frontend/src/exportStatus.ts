@@ -6,23 +6,24 @@ export type ExportState = 'none' | 'stale' | 'current'
 /** The last export as `ImageOut` (or `ExportOut`) reports it, or null when there is none. */
 export interface Exported {
   at: string
-  /** The document version the export rendered; null for one made before it was recorded. */
-  version: number | null
+  /** The content hash of the document the export rendered; null for one made before it was
+   *  recorded. */
+  hash: string | null
 }
 
-export function exportOf(image: { exported_at: string | null; exported_version: number | null }): Exported | null {
-  return image.exported_at ? { at: image.exported_at, version: image.exported_version } : null
+export function exportOf(image: { exported_at: string | null; exported_hash: string | null }): Exported | null {
+  return image.exported_at ? { at: image.exported_at, hash: image.exported_hash } : null
 }
 
-/** Current only when the export rendered the stored document's version. An exact match, not a
- *  clock comparison: a save landing while the render runs is stamped after the document the
- *  render read but before the export, and a time rule would call that export current. An export
- *  with no recorded version (made before the column existed) cannot vouch for itself, so it reads
- *  stale until the next export. `unsaved` is the editor's own knowledge of a change the server
- *  has not stored yet. */
-export function exportState(exported: Exported | null, annotationsVersion: number | null, unsaved = false): ExportState {
+/** Current only when the export rendered exactly the stored document, by content: an undo back
+ *  to what was exported is a new version but the same document, and reads as exported again;
+ *  a save landing while the render runs is a different document, however the clock orders it.
+ *  An export with no recorded hash (made before the column existed) cannot vouch for itself, so
+ *  it reads stale until the next export. `unsaved` is the editor's own knowledge of a change the
+ *  server has not stored yet. */
+export function exportState(exported: Exported | null, annotationsHash: string | null, unsaved = false): ExportState {
   if (!exported) return 'none'
-  if (unsaved || exported.version === null || exported.version !== annotationsVersion) return 'stale'
+  if (unsaved || exported.hash === null || exported.hash !== annotationsHash) return 'stale'
   return 'current'
 }
 

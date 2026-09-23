@@ -33,8 +33,7 @@ describe('ImageTab export state', () => {
 
   it('says when the export is current, with a relative time', () => {
     const doc = makeDoc()
-    doc.image = { ...doc.image, exported_at: '2026-09-21T11:50:00Z', exported_version: 1, export_url: '/x', annotated_preview_url: '/p' }
-    doc.annotations = { ...doc.annotations, version: 1 }
+    doc.image = { ...doc.image, exported_at: '2026-09-21T11:50:00Z', exported_hash: 'hash-1', export_url: '/x', annotated_preview_url: '/p' }
     useEditor.getState().load(doc)
     render(<ImageTab />)
     expect(exportLine().textContent).toBe('Exported 10 minutes ago')
@@ -47,15 +46,14 @@ describe('ImageTab export state', () => {
 
   it('flags changes since the export, from a saved document and from a pending one, and Export clears it', async () => {
     const doc = makeDoc()
-    doc.image = { ...doc.image, exported_at: '2026-09-21T11:50:00Z', exported_version: 1, export_url: '/x', annotated_preview_url: '/p' }
-    doc.annotations = { ...doc.annotations, version: 2 }
+    doc.image = { ...doc.image, exported_at: '2026-09-21T11:50:00Z', exported_hash: 'hash-0', export_url: '/x', annotated_preview_url: '/p' }
     useEditor.getState().load(doc)
     render(<ImageTab />)
     expect(exportLine().textContent).toBe('Changes since the last export')
     expect(exportLine().classList.contains('stale')).toBe(true)
     expect(screen.getByRole('button', { name: 'Export' }).classList.contains('secondary')).toBe(false)
 
-    // Export: renders version 2 → current again.
+    // Export: renders the stored document → current again.
     vi.mocked(api.exportImage).mockResolvedValue({
       export_url: '/x',
       annotated_preview_url: '/p',
@@ -63,7 +61,7 @@ describe('ImageTab export state', () => {
       height: 2000,
       bytes: 1024,
       exported_at: '2026-09-21T12:00:00Z',
-      exported_version: 2,
+      exported_hash: 'hash-1',
       encoding: 'q',
     })
     await act(async () => {
@@ -75,6 +73,20 @@ describe('ImageTab export state', () => {
     // An edit not yet saved is already "changes": the export cannot hold it.
     act(() => useEditor.getState().setStyle({ font_size: 30 }))
     expect(exportLine().textContent).toBe('Changes since the last export')
+    // ...and a save that lands with a different content is still "changes"...
+    act(() => {
+      useEditor.getState().markSaving() // what the autosave does before its PUT
+      useEditor.getState().markSaved(3, '2026-09-21T12:01:00Z', 'hash-2')
+    })
+    expect(exportLine().textContent).toBe('Changes since the last export')
+    // ...but an undo back to the exported document (a new version, the same content) reads as
+    // exported again — the reason the rule is by content, not by version.
+    act(() => {
+      useEditor.getState().undoLast()
+      useEditor.getState().markSaving()
+      useEditor.getState().markSaved(4, '2026-09-21T12:01:30Z', 'hash-1')
+    })
+    expect(exportLine().textContent).toBe('Exported just now')
 
     // A save in conflict is still "changes", but Export is not pushed as the next step: it would
     // only fail with the conflict message.
@@ -93,7 +105,7 @@ describe('ImageTab export state', () => {
       height: 2000,
       bytes: 1024,
       exported_at: '2026-09-21T12:00:00Z',
-      exported_version: 1,
+      exported_hash: 'hash-1',
       encoding: 'q',
     })
     await act(async () => {

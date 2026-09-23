@@ -18,7 +18,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ..catalog import kind_for
 from ..config import Settings, SettingsSource
-from ..db import Database
+from ..db import Database, hash_of
 from ..fonts import list_fonts, resolved_style
 from ..layout import autoplace, default_style
 from ..models import (
@@ -137,7 +137,7 @@ def _slug(text: str) -> str:
 
 
 def image_out(
-    rec: ImageRecord, settings: Settings, object_count: int, annotations_version: int | None
+    rec: ImageRecord, settings: Settings, object_count: int, annotations_hash: str | None
 ) -> ImageOut:
     base = f"/api/images/{rec.id}"
     exported = quote(rec.exported_at) if rec.exported_at else None
@@ -168,8 +168,8 @@ def image_out(
         published=rec.published,
         object_count=object_count,
         exported_at=rec.exported_at,
-        annotations_version=annotations_version,
-        exported_version=rec.exported_version,
+        annotations_hash=annotations_hash,
+        exported_hash=rec.exported_hash,
         original_format=(fmt.name if (fmt := format_of(Path(rec.original_path))) else "image"),
         preview_url=f"{base}/files/preview",
         thumb_url=f"{base}/files/thumb",
@@ -181,7 +181,7 @@ def image_out(
 
 def _image_out_for(db: Database, settings: Settings, rec: ImageRecord) -> ImageOut:
     """``image_out`` for one stored record."""
-    return image_out(rec, settings, db.count_objects(rec.id), db.annotations_version(rec.id))
+    return image_out(rec, settings, db.count_objects(rec.id), db.annotations_hash(rec.id))
 
 
 def _get_or_404(db: Database, image_id: str) -> ImageRecord:
@@ -286,9 +286,9 @@ async def upload_image(
 @router.get("")
 async def list_images(settings: SettingsDep, db: DbDep) -> list[ImageOut]:
     counts = db.object_counts()
-    versions = db.annotations_versions()
+    hashes = db.annotations_hashes()
     return [
-        image_out(rec, settings, counts.get(rec.id, 0), versions.get(rec.id))
+        image_out(rec, settings, counts.get(rec.id, 0), hashes.get(rec.id))
         for rec in db.list_images()
     ]
 
@@ -464,7 +464,7 @@ async def put_annotations(
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Image not found.")
         log.info("annotations for %s: compare-and-swap lost", image_id)
         raise HTTPException(status.HTTP_409_CONFLICT, CONFLICT_MESSAGE)  # lost the race
-    return ann
+    return ann.model_copy(update={"content_hash": hash_of(ann)})
 
 
 @router.post("/{image_id}/autoarrange")
@@ -552,10 +552,11 @@ async def export_image(
     width, height, size, encoding = await asyncio.to_thread(
         _render_export, settings, rec, objects, ann, req.quality, req.scale
     )
-    # The version rendered, not the version stored now (#91; the pages compare them exactly).
+    # The document rendered, not the one stored now (#91; the pages compare the hashes).
+    assert ann.content_hash is not None  # every read fills it
     exported_at = utcnow_iso()
-    db.update_image(image_id, {"exported_at": exported_at, "exported_version": ann.version})
-    out = image_out(_get_or_404(db, image_id), settings, len(objects), ann.version)
+    db.update_image(image_id, {"exported_at": exported_at, "exported_hash": ann.content_hash})
+    out = image_out(_get_or_404(db, image_id), settings, len(objects), ann.content_hash)
     assert out.export_url and out.annotated_preview_url
     return ExportOut(
         export_url=out.export_url,
@@ -564,7 +565,7 @@ async def export_image(
         height=height,
         bytes=size,
         exported_at=exported_at,
-        exported_version=ann.version,
+        exported_hash=ann.content_hash,
         encoding=encoding,
     )
 

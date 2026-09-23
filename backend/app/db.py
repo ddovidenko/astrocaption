@@ -6,6 +6,7 @@ request handlers independent without a shared-connection lock.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sqlite3
@@ -29,13 +30,19 @@ from .models import (
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # Statements that bring an existing database from version N-1 to N.
 MIGRATIONS: dict[int, tuple[str, ...]] = {
     2: ("ALTER TABLE images ADD COLUMN solve_hints_json TEXT",),
     3: ("ALTER TABLE images ADD COLUMN solve_failure TEXT",),
     4: ("ALTER TABLE images ADD COLUMN exported_version INTEGER",),
+    # 5 replaces the exported document's version with its content hash (#91): an undo back to the
+    # exported document is a new version but the same content, and should read as exported.
+    5: (
+        "ALTER TABLE images ADD COLUMN exported_hash TEXT",
+        "ALTER TABLE images DROP COLUMN exported_version",
+    ),
 }
 
 SCHEMA = """
@@ -61,7 +68,7 @@ CREATE TABLE IF NOT EXISTS images (
     solve_hints_json   TEXT,
     published          INTEGER NOT NULL DEFAULT 0,
     exported_at        TEXT,
-    exported_version   INTEGER
+    exported_hash      TEXT
 );
 CREATE INDEX IF NOT EXISTS images_created_at ON images (created_at);
 
@@ -148,6 +155,19 @@ def _annotation_row(ann: Annotations) -> tuple[str, str]:
     """``(style_json, labels_json)`` for the ``annotations`` table's write path, shared by
     ``save_annotations`` and ``update_annotations_if_version``."""
     return ann.style.model_dump_json(), json.dumps([lab.model_dump() for lab in ann.labels])
+
+
+def hash_of(ann: Annotations) -> str:
+    """``content_hash`` of ``ann`` as the write path would store it (the PUT response carries it
+    without a second read)."""
+    return content_hash(*_annotation_row(ann))
+
+
+def content_hash(style_json: str, labels_json: str) -> str:
+    """The document's identity by content, over the text the row stores (the write path dumps
+    the models deterministically, so equal documents hash alike). ``Annotations.content_hash``
+    and ``images.exported_hash`` are this; the pages compare them (#91)."""
+    return hashlib.sha256(f"{style_json}\n{labels_json}".encode()).hexdigest()[:32]
 
 
 def _row_to_object(row: sqlite3.Row) -> SolveObject:
@@ -286,19 +306,19 @@ class Database:
             rows = conn.execute("SELECT image_id, COUNT(*) AS n FROM objects GROUP BY image_id")
             return {r["image_id"]: int(r["n"]) for r in rows}
 
-    def annotations_versions(self) -> dict[str, int]:
-        """``version`` of every stored annotations row, by image id (for the list endpoint)."""
+    def annotations_hashes(self) -> dict[str, str]:
+        """``content_hash`` of every stored annotations row, by image id (for the list endpoint)."""
         with self.connect() as conn:
-            rows = conn.execute("SELECT image_id, version FROM annotations")
-            return {r["image_id"]: int(r["version"]) for r in rows}
+            rows = conn.execute("SELECT image_id, style_json, labels_json FROM annotations")
+            return {r["image_id"]: content_hash(r["style_json"], r["labels_json"]) for r in rows}
 
-    def annotations_version(self, image_id: str) -> int | None:
-        """One row's ``version`` without decoding its document (``image_out`` needs no more)."""
+    def annotations_hash(self, image_id: str) -> str | None:
+        """One row's ``content_hash`` without decoding its document (``image_out`` needs no more)."""
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT version FROM annotations WHERE image_id = ?", (image_id,)
+                "SELECT style_json, labels_json FROM annotations WHERE image_id = ?", (image_id,)
             ).fetchone()
-        return int(row["version"]) if row else None
+        return content_hash(row["style_json"], row["labels_json"]) if row else None
 
     # -- annotations --------------------------------------------------------------
 
@@ -347,4 +367,5 @@ class Database:
             labels=[Label.model_validate(lab) for lab in json.loads(row["labels_json"])],
             version=row["version"],
             updated_at=row["updated_at"],
+            content_hash=content_hash(row["style_json"], row["labels_json"]),
         )

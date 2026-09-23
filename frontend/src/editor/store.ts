@@ -44,6 +44,9 @@ export interface EditorState {
   labels: Map<number, Label> // by object id, insertion order kept for save
   version: number
   updatedAt: string
+  /** The stored document's content hash, from the load and every save that lands; what the
+   *  Image tab compares with the export's (#91). */
+  contentHash: string | null
   fonts: Map<string, FontOut> // by file
   fontFallback: FontFallback | null // set by load when the stored font was swapped for the default
   selectedIds: ReadonlySet<number>
@@ -84,11 +87,11 @@ export interface EditorState {
   /** Global style fields; one commit (one undo entry) per call. */
   setStyle(patch: Partial<StyleConfig>): void
   markSaving(): void
-  markSaved(version: number, updatedAt: string): void
+  markSaved(version: number, updatedAt: string, contentHash: string | null): void
   markSaveError(message: string): void
   markConflict(message: string): void
-  /** An export just made: the image now carries the time and the document version it rendered. */
-  markExported(exportedAt: string, exportedVersion: number): void
+  /** An export just made: the image now carries the time and the hash of the document it rendered. */
+  markExported(exportedAt: string, exportedHash: string): void
 }
 
 const initial = {
@@ -99,6 +102,7 @@ const initial = {
   labels: new Map<number, Label>(),
   version: 0,
   updatedAt: '',
+  contentHash: null,
   fonts: new Map<string, FontOut>(),
   fontFallback: null as FontFallback | null,
   selectedIds: new Set<number>() as ReadonlySet<number>,
@@ -257,6 +261,7 @@ export const useEditor = create<EditorState>()((set) => ({
       labels,
       version: doc.annotations.version,
       updatedAt: doc.annotations.updated_at,
+      contentHash: doc.annotations.content_hash,
       fonts: new Map(doc.fonts.map((f) => [f.file, f])),
       fontFallback: doc.fontFallback,
       selectedIds: new Set(),
@@ -418,17 +423,18 @@ export const useEditor = create<EditorState>()((set) => ({
       return { ...next, ...(hasFontPatch ? { fontFallback: null } : {}) }
     }),
   markSaving: () => set({ pendingChanges: 0, save: { status: 'saving', message: null } }),
-  markSaved: (version, updatedAt) =>
+  markSaved: (version, updatedAt, contentHash) =>
     set((s) => ({
       version,
       updatedAt,
+      contentHash,
       fontFallback: null,
       save: s.pendingChanges > 0 ? { status: 'dirty', message: null } : { status: 'saved', message: null },
     })),
   markSaveError: (message) => set({ save: { status: 'error', message } }),
   markConflict: (message) => set({ save: { status: 'conflict', message }, undo: [], redo: [] }),
-  markExported: (exportedAt, exportedVersion) =>
-    set((s) => (s.image ? { image: { ...s.image, exported_at: exportedAt, exported_version: exportedVersion } } : {})),
+  markExported: (exportedAt, exportedHash) =>
+    set((s) => (s.image ? { image: { ...s.image, exported_at: exportedAt, exported_hash: exportedHash } } : {})),
   undoLast: () => set((s) => swapHistory(s, 'undo')),
   redoLast: () => set((s) => swapHistory(s, 'redo')),
 }))

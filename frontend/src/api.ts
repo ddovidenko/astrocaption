@@ -31,10 +31,11 @@ export interface ImageOut {
   published: boolean
   object_count: number
   exported_at: string | null
-  /** The stored document's version (null until a solve stores one) and the version the last
-   *  export rendered (null for one made before it was recorded); `exportState` compares them (#91). */
-  annotations_version: number | null
-  exported_version: number | null
+  /** The stored document's content hash (null until a solve stores one) and the hash of the
+   *  document the last export rendered (null for one made before it was recorded); `exportState`
+   *  compares them (#91). */
+  annotations_hash: string | null
+  exported_hash: string | null
   original_format: string
   preview_url: string
   thumb_url: string
@@ -101,6 +102,9 @@ export interface Annotations {
   /** Set when the stored style names a font file the server no longer bundles: the server
    *  already served the default in its place, and this names the one it replaced. */
   font_fallback: string | null
+  /** The stored document's identity by content, on every GET and PUT response (null on an
+   *  autoarrange result, which stores nothing); `exportState` compares it with `exported_hash`. */
+  content_hash: string | null
 }
 
 /** What the editor sends back: its document minus the server-owned fields. Mirrors AnnotationsUpdate. */
@@ -185,7 +189,7 @@ export interface ExportOut {
   height: number
   bytes: number
   exported_at: string
-  exported_version: number
+  exported_hash: string
   encoding: string
 }
 

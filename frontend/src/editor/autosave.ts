@@ -69,7 +69,7 @@ function run(c: Controller): Promise<void> | null {
     try {
       const res = await c.deps.save(c.imageId, doc)
       if (!c.alive) return // retired while the request was out: its result is stale
-      useEditor.getState().markSaved(res.version, res.updated_at)
+      useEditor.getState().markSaved(res.version, res.updated_at, res.content_hash)
     } catch (err) {
       if (!c.alive) return
       if (err instanceof ApiError && err.status === 409) {
