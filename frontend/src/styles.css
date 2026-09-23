@@ -53,6 +53,7 @@ a.button { text-decoration: none; display: inline-block; font-family: inherit; f
 .badge.solved { background: rgba(95, 211, 154, 0.15); color: var(--ok); }
 .badge.failed { background: rgba(255, 107, 107, 0.15); color: var(--danger); }
 .badge.stale { background: rgba(255, 213, 74, 0.15); color: var(--accent); }
+.badge.published { background: rgba(120, 170, 255, 0.15); color: #9cc2ff; }
 .export-state.stale { color: var(--accent); }
 .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.75rem; }
 .hints { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; color: var(--muted); font-size: 0.9rem; }

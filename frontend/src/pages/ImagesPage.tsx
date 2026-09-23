@@ -174,7 +174,7 @@ function UploadPanel({
   )
 }
 
-function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promise<void> }) {
+export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promise<void> }) {
   const [working, setWorking] = useState(false)
   // The card's own error describes the row as it was when the action ran, so it carries the
   // version it belongs to: once the row changes underneath the card — its own refresh, or the
@@ -218,6 +218,7 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
     run(async () => {
       setLastExport(await api.exportImage(image.id, quality, scale))
     })
+  const setPublished = (published: boolean) => run(() => api.setPublished(image.id, published))
   const remove = () => {
     setConfirming(false)
     return run(async () => {
@@ -241,6 +242,7 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
         <h3>{image.title}</h3>
         <div className="meta">
           <span className={`badge ${image.solve_status}`}>{statusLabel(image.solve_status)}</span>
+          {image.published && <span className="badge published">Published</span>}
           <span>
             {image.width} × {image.height} px
           </span>
@@ -299,6 +301,20 @@ function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promi
               <button onClick={exportNow} disabled={working}>
                 {working ? 'Rendering…' : 'Export'}
               </button>
+              {image.published ? (
+                <button className="secondary" onClick={() => setPublished(false)} disabled={working}>
+                  Unpublish
+                </button>
+              ) : (
+                <button
+                  className="secondary"
+                  onClick={() => setPublished(true)}
+                  disabled={working || !image.export_url}
+                  title={image.export_url ? 'Show this image in the public gallery' : 'Export the image first'}
+                >
+                  Publish
+                </button>
+              )}
               <Link className="button" to={`/images/${image.id}`}>
                 Edit
               </Link>
