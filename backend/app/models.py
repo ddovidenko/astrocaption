@@ -533,6 +533,21 @@ class PublishRequest(BaseModel):
     published: bool
 
 
+class GalleryItem(BaseModel):
+    """One published image as a visitor sees it (SPEC § 8, public). Only URLs under
+    ``/api/gallery``; never a path, never anything about the solve."""
+
+    id: str
+    title: str
+    width: int
+    height: int
+    exported_at: str
+    thumb_url: str
+    preview_url: str
+    annotated_preview_url: str
+    export_url: str
+
+
 class ExportRequest(BaseModel):
     """``quality`` ``None`` (the default) reuses the uploaded JPEG's own quantisation tables and
     chroma subsampling, which keeps size and fidelity close to the original; a number forces

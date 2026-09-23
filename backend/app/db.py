@@ -242,8 +242,13 @@ class Database:
         return _row_to_image(row) if row else None
 
     def list_images(self) -> list[ImageRecord]:
+        # created_at has whole-second resolution (utcnow_iso), so two rows inserted within the
+        # same second tie there; rowid (insertion order) breaks the tie the way "id" (a random
+        # UUID) cannot.
         with self.connect() as conn:
-            rows = conn.execute("SELECT * FROM images ORDER BY created_at DESC, id").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM images ORDER BY created_at DESC, rowid DESC"
+            ).fetchall()
         return [_row_to_image(r) for r in rows]
 
     def list_published_images(self) -> list[ImageRecord]:
@@ -251,7 +256,7 @@ class Database:
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM images WHERE published = 1 AND solve_status = ? "
-                "ORDER BY created_at DESC, id",
+                "ORDER BY created_at DESC, rowid DESC",
                 (SolveStatus.SOLVED.value,),
             ).fetchall()
         return [_row_to_image(r) for r in rows]

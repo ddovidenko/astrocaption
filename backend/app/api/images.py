@@ -133,7 +133,7 @@ def _copy_limited(src: BinaryIO, dest: Path, limit: int) -> int:
     return total
 
 
-def _slug(text: str) -> str:
+def slug_of(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-.") or "image"
 
 
@@ -605,7 +605,7 @@ async def download_export(image_id: str, settings: SettingsDep, db: DbDep) -> Fi
     return FileResponse(
         path,
         media_type="image/jpeg",
-        filename=f"{_slug(rec.title)}-annotated.jpg",
+        filename=f"{slug_of(rec.title)}-annotated.jpg",
         headers={"Cache-Control": "private, no-cache"},
     )
 
