@@ -525,6 +525,14 @@ class ObjectOut(BaseModel):
     radius: float
 
 
+class PublishRequest(BaseModel):
+    """``PUT /images/{id}/published``: publishing needs a solved image with an export (§ 5.5)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    published: bool
+
+
 class ExportRequest(BaseModel):
     """``quality`` ``None`` (the default) reuses the uploaded JPEG's own quantisation tables and
     chroma subsampling, which keeps size and fidelity close to the original; a number forces

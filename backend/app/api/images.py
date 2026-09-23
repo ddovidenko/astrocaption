@@ -32,6 +32,7 @@ from ..models import (
     NamePreference,
     ObjectKind,
     ObjectOut,
+    PublishRequest,
     SolveHints,
     SolveObject,
     SolveStatus,
@@ -303,6 +304,31 @@ async def delete_image(image_id: str, settings: SettingsDep, db: DbDep) -> None:
     if not db.delete_image(image_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Image not found.")
     await asyncio.to_thread(delete_image_files, settings, image_id)
+
+
+PUBLISH_NEEDS_EXPORT = "Export the image before publishing it."
+
+
+def export_exists(settings: Settings, rec: ImageRecord) -> bool:
+    """Whether the gallery has both bitmaps for ``rec``: a solved row, an export stamp, and the
+    files it points at (the owner may have emptied data/renders by hand)."""
+    if rec.solve_status is not SolveStatus.SOLVED or not rec.exported_at:
+        return False
+    out = render_dir(settings, rec.id)
+    return (out / "annotated.jpg").is_file() and (out / "annotated_preview.jpg").is_file()
+
+
+@router.put("/{image_id}/published")
+async def set_published(
+    image_id: str, body: PublishRequest, settings: SettingsDep, db: DbDep
+) -> ImageOut:
+    rec = _get_or_404(db, image_id)
+    if body.published and not export_exists(settings, rec):
+        raise HTTPException(status.HTTP_409_CONFLICT, PUBLISH_NEEDS_EXPORT)
+    if rec.published != body.published:  # a no-op must not bump updated_at
+        db.update_image(image_id, {"published": body.published})
+        rec = _get_or_404(db, image_id)
+    return _image_out_for(db, settings, rec)
 
 
 @router.post("/{image_id}/solve")
