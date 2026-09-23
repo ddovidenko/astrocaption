@@ -36,6 +36,7 @@ afterEach(() => {
   cleanup()
   placer.throws = false
   useEditor.getState().reset()
+  localStorage.clear()
 })
 
 const row = (name: string) => screen.getByRole('checkbox', { name: `Show ${name}` }).closest('li')!
@@ -60,6 +61,18 @@ describe('ObjectsTab', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Show HD 37742' }))
     expect(screen.queryByRole('checkbox', { name: 'Show HD 37742' })).toBeNull()
     act(() => useEditor.getState().toggleObject(hd.id))
+    expect(screen.getByRole('checkbox', { name: 'Show HD 37742' })).toBeTruthy()
+  })
+
+  it('remembers the chips per image in this browser', () => {
+    load([hd])
+    const { unmount } = render(<ObjectsTab />)
+    fireEvent.click(screen.getByRole('button', { name: 'HD stars' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Nebulae' }))
+    unmount()
+    render(<ObjectsTab />) // the same image, opened again
+    expect(screen.getByRole('button', { name: 'HD stars' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Nebulae' }).getAttribute('aria-pressed')).toBe('false')
     expect(screen.getByRole('checkbox', { name: 'Show HD 37742' })).toBeTruthy()
   })
 

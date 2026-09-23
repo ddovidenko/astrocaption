@@ -3,7 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import type { ObjectKind, ObjectOut } from '../api'
 import { disableAll, enableWithPlacement, isEditable, tryToggleWithPlacement } from './editing'
 import { primaryName } from './names'
-import { DEFAULT_FILTER, KINDS, KIND_LABELS, filterObjects, type ObjectsFilter } from './objectsFilter'
+import { KINDS, KIND_LABELS, filterObjects, loadFilter, saveFilter, type ObjectsFilter } from './objectsFilter'
 import { enabledObjectIds, useEditor } from './store'
 
 /** One row. Memoised with per-row selectors, so a drag frame or a marker hover re-renders the
@@ -94,7 +94,11 @@ export default function ObjectsTab() {
   const preference = useEditor((s) => s.style?.name_preference ?? 'popular')
 
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<ObjectsFilter>(DEFAULT_FILTER)
+  // The chips are remembered per image in this browser (the tab mounts after the document is
+  // loaded, so the id is known); the search box is not.
+  const imageId = useEditor((s) => s.image?.id ?? '')
+  const [filter, setFilter] = useState<ObjectsFilter>(() => loadFilter(imageId))
+  useEffect(() => saveFilter(imageId, filter), [imageId, filter])
   const [error, setError] = useState<string | null>(null)
 
   // An enabled label is always listed (the chips only filter the disabled rows). useShallow keeps

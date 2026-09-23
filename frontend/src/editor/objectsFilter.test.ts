@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ObjectKind, ObjectOut } from '../api'
-import { DEFAULT_FILTER, KINDS, filterObjects, isHd } from './objectsFilter'
+import { DEFAULT_FILTER, KINDS, filterObjects, isHd, loadFilter, saveFilter } from './objectsFilter'
 
 /** The `nova-narrow` field (1° Pelican): 8 objects, five of them `hd` — the shape #37 is about. */
 function narrowField(): ObjectOut[] {
@@ -90,5 +90,50 @@ describe('filterObjects with enabled labels', () => {
   })
   it('still applies the search to enabled rows', () => {
     expect(names(filterObjects(narrowField(), 'cyg', DEFAULT_FILTER, enabled))).toEqual(['56 Cyg', '57 Cyg'])
+  })
+})
+
+// The chips are remembered per image in this browser: coming back to a narrow field finds HD on
+// if it was left on. A per-viewer convenience, so a missing, broken or refusing storage means the
+// defaults, never an error.
+describe('loadFilter / saveFilter', () => {
+  const memory = (): Storage => {
+    const m = new Map<string, string>()
+    return {
+      getItem: (k) => m.get(k) ?? null,
+      setItem: (k, v) => void m.set(k, v),
+      removeItem: (k) => void m.delete(k),
+      clear: () => m.clear(),
+      key: () => null,
+      get length() {
+        return m.size
+      },
+    }
+  }
+  it('round-trips the chips for one image and leaves another at the defaults', () => {
+    const store = memory()
+    const chips = { kinds: new Set<ObjectKind>(['star', 'nebula']), hd: true }
+    saveFilter('img-1', chips, store)
+    expect(loadFilter('img-1', store)).toEqual(chips)
+    expect(loadFilter('img-2', store)).toBe(DEFAULT_FILTER)
+  })
+  it('falls back to the defaults on unreadable or foreign values', () => {
+    const store = memory()
+    store.setItem('astrocaption.objects-filter.img-1', 'not json')
+    expect(loadFilter('img-1', store)).toBe(DEFAULT_FILTER)
+    store.setItem('astrocaption.objects-filter.img-1', JSON.stringify({ kinds: ['planet'], hd: 'yes' }))
+    expect(loadFilter('img-1', store)).toBe(DEFAULT_FILTER)
+  })
+  it('survives a storage that throws', () => {
+    const broken = {
+      getItem: () => {
+        throw new Error('blocked')
+      },
+      setItem: () => {
+        throw new Error('blocked')
+      },
+    } as unknown as Storage
+    expect(loadFilter('img-1', broken)).toBe(DEFAULT_FILTER)
+    expect(() => saveFilter('img-1', DEFAULT_FILTER, broken)).not.toThrow()
   })
 })
