@@ -452,7 +452,7 @@ Build in this order; each is shippable.
 1. **Solve & render (CLI parity)** — backend upload, nova solve, objects stored, Pillow export with auto-placement. No editor yet; a plain page shows the export. Docker image builds. *Proves the core.* **Done 2026-09-07.**
 2. **Setup & auth** — first-run setup, login, config page, lockout CLI, INSTALL.md, browser smoke test in CI. *Design approved 2026-09-08.*
 3. **Editor v1** — canvas with zoom/pan, object list with checkboxes, hover/click to enable, drag labels, autosave, export button. Parity test between Konva and Pillow.
-4. **Styling** — fonts, colours, halo, per-label overrides, wheel-to-resize while dragging, undo/redo.
+4. **Styling** — fonts, colours, halo, per-label overrides, wheel-to-resize while dragging, undo/redo. **Done 2026-09-22.**
 5. **Gallery** — publish toggle, public gallery with hover overlay, responsive.
 6. **Release** — GHCR multi-arch, release workflow, Codespaces, issue templates, README with screenshots.
 
