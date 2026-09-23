@@ -46,12 +46,16 @@ frontend/src/App.tsx ──fetch──▶ /api/images ...           (backend/app
 | `app/api/auth.py` | `/api/setup`, `/api/login`, `/api/logout`. |
 | `app/api/config.py` | Owner settings: `GET`, and `PUT` with locked-field and style validation, serialised through the atomic writer. |
 | `app/api/docs.py` | Owner-only Swagger UI and OpenAPI document (`/api/docs`, `/api/openapi.json`). |
+| `app/api/gallery.py` | Public gallery: published + solved + exported images and their files; every handler gates itself, every miss is one 404. Off when `public_gallery_enabled` is false. |
 | `app/cli.py` | `python -m app.cli reset-password`: rewrites the password hash (or completes setup) through the same writer as the API. |
 
-Every router except health and the setup/login/logout router carries the require_owner
-dependency; the cookie is validated per request against the secret and password hash in
-config.json, so a password reset logs everyone out. `/api/docs` and `/api/openapi.json` are
-mounted on their own gated router, so the API schema and Swagger UI are owner-only too.
+Every router except health, the setup/login/logout router, and the gallery router carries
+the require_owner dependency; the cookie is validated per request against the secret and
+password hash in config.json, so a password reset logs everyone out. The gallery router is
+safe ungated because it reads only published, solved, exported images and serves only their
+thumb, preview, annotated preview and export, answering one 404 for everything else. `/api/docs`
+and `/api/openapi.json` are mounted on their own gated router, so the API schema and Swagger UI
+are owner-only too.
 
 ## Coordinate contract
 
