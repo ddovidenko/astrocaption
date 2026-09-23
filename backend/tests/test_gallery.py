@@ -144,7 +144,7 @@ def test_gallery_item_and_files_for_a_published_image(
         file_resp = anon_client.get(item[key])
         assert file_resp.status_code == 200, (key, file_resp.text)
         assert file_resp.headers["content-type"] == "image/jpeg"
-        assert file_resp.headers["cache-control"] == "public, max-age=86400"
+        assert file_resp.headers["cache-control"] == "public, no-cache"
         assert file_resp.content[:2] == b"\xff\xd8", key  # a JPEG, not an error page
     export = anon_client.get(item["export_url"])
     assert 'filename="Orion-Field-annotated.jpg"' in export.headers["content-disposition"]

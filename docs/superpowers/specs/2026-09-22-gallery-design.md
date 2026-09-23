@@ -56,7 +56,7 @@ image (`Image not found.`), so a visitor cannot tell the two apart.
 - `GET /api/gallery/{id}/files/{thumb|preview|annotated-preview|export}` → the file. 404 if
   unknown, unpublished, or (should never happen once published) the file is missing. `export`
   is served as an attachment named `<slug>-annotated.jpg` like the owner route. Cache header
-  `public, max-age=86400`: the URLs carry `?v=<exported_at>`, so a re-export changes the URL.
+  `public, no-cache`, so an unpublished image cannot outlive its unpublish in a cache; the URLs still carry `?v=<exported_at>` so the browser refreshes an `<img>` after a re-export.
 
 ```
 GalleryItem

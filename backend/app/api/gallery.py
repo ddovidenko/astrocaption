@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/gallery", tags=["gallery"])
 
 NOT_FOUND = "Image not found."
-CACHE = "public, max-age=86400"  # the URLs carry ?v=<exported_at>, so a re-export changes them
+CACHE = "public, no-cache"  # revalidate every use: an unpublished image must not live on in a cache (FileResponse's ETag makes that a 304)
 
 PublicFileKind = Literal["thumb", "preview", "annotated-preview", "export"]
 
