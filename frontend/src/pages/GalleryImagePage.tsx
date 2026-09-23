@@ -19,7 +19,10 @@ export default function GalleryImagePage() {
     api
       .galleryImage(id)
       .then((got) => {
-        if (!cancelled) setItem(got)
+        if (!cancelled) {
+          setItem(got)
+          setError(null)
+        }
       })
       .catch((err: unknown) => {
         if (cancelled) return

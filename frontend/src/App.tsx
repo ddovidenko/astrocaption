@@ -3,6 +3,8 @@ import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from
 import { api, describeError, setUnauthorizedHandler, type HealthOut } from './api'
 import EditorPage from './editor/EditorPage'
 import ConfigPage from './pages/ConfigPage'
+import GalleryImagePage from './pages/GalleryImagePage'
+import GalleryPage from './pages/GalleryPage'
 import ImagesPage from './pages/ImagesPage'
 import LoginPage from './pages/LoginPage'
 import PasswordPanel from './pages/PasswordPanel'
@@ -84,15 +86,22 @@ export default function App() {
           <Link to="/">{health?.site_title ?? 'AstroCaption'}</Link>
         </h1>
         {health && <span className="version">v{health.version}</span>}
-        {health?.authenticated && (
+        {health && !health.setup_required && (
           <nav>
-            <NavLink to="/" end>
-              Images
-            </NavLink>
-            <NavLink to="/config">Config</NavLink>
-            <button className="secondary" onClick={() => void logout()}>
-              Log out
-            </button>
+            {health.authenticated ? (
+              <>
+                <NavLink to="/" end>
+                  Images
+                </NavLink>
+                <NavLink to="/gallery">Gallery</NavLink>
+                <NavLink to="/config">Config</NavLink>
+                <button className="secondary" onClick={() => void logout()}>
+                  Log out
+                </button>
+              </>
+            ) : (
+              <NavLink to="/login">Log in</NavLink>
+            )}
           </nav>
         )}
       </header>
@@ -114,10 +123,22 @@ export default function App() {
             <Route
               path="/"
               element={
-                <Guard health={health}>
+                health.setup_required ? (
+                  <Navigate to="/setup" replace />
+                ) : health.authenticated ? (
                   <ImagesPage health={health} refreshHealth={refreshHealth} />
-                </Guard>
+                ) : (
+                  <GalleryPage health={health} />
+                )
               }
+            />
+            <Route
+              path="/gallery"
+              element={health.setup_required ? <Navigate to="/setup" replace /> : <GalleryPage health={health} />}
+            />
+            <Route
+              path="/gallery/:id"
+              element={health.setup_required ? <Navigate to="/setup" replace /> : <GalleryImagePage />}
             />
             <Route
               path="/config"
