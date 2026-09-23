@@ -16,6 +16,7 @@ async def health(request: Request, settings: SettingsDep) -> HealthOut:
         site_title=settings.site_title,
         setup_required=settings.setup_required,
         authenticated=is_authenticated(request, settings),
+        public_gallery_enabled=settings.public_gallery_enabled,
         config_error=settings.config_error,
         locked=sorted(settings.locked_by),
     )

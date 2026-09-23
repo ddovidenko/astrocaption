@@ -54,6 +54,7 @@ def test_health_and_fonts(client: TestClient) -> None:
         "site_title": "Test Site",
         "setup_required": False,
         "authenticated": True,
+        "public_gallery_enabled": True,
         "config_error": None,
         "locked": [],
     }
@@ -62,6 +63,7 @@ def test_health_and_fonts(client: TestClient) -> None:
     assert config == {
         "site_title": "Test Site",
         "max_upload_mb": 5,
+        "public_gallery_enabled": True,
         "nova_api_key_set": False,
         "default_style": {},
         "locked": [],
