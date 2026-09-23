@@ -36,6 +36,7 @@ afterEach(() => {
   cleanup()
   placer.throws = false
   useEditor.getState().reset()
+  localStorage.clear()
 })
 
 const row = (name: string) => screen.getByRole('checkbox', { name: `Show ${name}` }).closest('li')!
@@ -49,11 +50,29 @@ describe('ObjectsTab', () => {
     expect(screen.queryByRole('button', { name: 'M 42' })).toBeNull()
   })
 
-  it('opens with the HD chip on when the document already shows an hd label (#126)', () => {
+  it('lists an enabled hd row with the HD chip off, and a row enabled later appears at once', () => {
     load([hd])
     useEditor.getState().toggleObject(hd.id, { x: 10, y: 10 })
     render(<ObjectsTab />)
+    expect(screen.getByRole('button', { name: 'HD stars' }).getAttribute('aria-pressed')).toBe('false')
+    expect(screen.getByRole('checkbox', { name: 'Show HD 37742' })).toBeTruthy()
+    // Disabling it from the list drops it again (the chip is off), enabling on the canvas brings
+    // it back: the list follows what the canvas shows.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show HD 37742' }))
+    expect(screen.queryByRole('checkbox', { name: 'Show HD 37742' })).toBeNull()
+    act(() => useEditor.getState().toggleObject(hd.id))
+    expect(screen.getByRole('checkbox', { name: 'Show HD 37742' })).toBeTruthy()
+  })
+
+  it('remembers the chips per image in this browser', () => {
+    load([hd])
+    const { unmount } = render(<ObjectsTab />)
+    fireEvent.click(screen.getByRole('button', { name: 'HD stars' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Nebulae' }))
+    unmount()
+    render(<ObjectsTab />) // the same image, opened again
     expect(screen.getByRole('button', { name: 'HD stars' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Nebulae' }).getAttribute('aria-pressed')).toBe('false')
     expect(screen.getByRole('checkbox', { name: 'Show HD 37742' })).toBeTruthy()
   })
 

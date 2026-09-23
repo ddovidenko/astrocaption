@@ -1,5 +1,5 @@
 import { expect, test } from './fixtures'
-import { currentImageId, ensureSetUpAndSignedIn, ensureSolvedImage, fetchAnnotations } from './helpers'
+import { currentImageId, ensureSetUpAndSignedIn, ensureSolvedImage, fetchAnnotations, fetchObjects } from './helpers'
 
 // Side panel (SPEC § 6.3): the Objects tab filters by kind with the HD toggle, its names follow
 // the Style tab's preference without a reload (#94), the tablist works from the keyboard and a
@@ -12,12 +12,17 @@ test('the side panel: kind chips, keyboard tabs, kept state, names follow the pr
   await page.waitForFunction(() => window.__astrocaptionEditor?.labelPositions !== undefined)
   const imageId = currentImageId(page)
 
-  // Kind chips: the Orion fixture has 8 bright stars, 9 NGC and 3 IC rows.
+  // Kind chips: the Orion fixture has 8 bright stars, 9 NGC and 3 IC rows. A chip only hides the
+  // *disabled* rows of its kind: a star whose label is drawn stays listed with Stars off.
   const rows = page.locator('.object-list .object-row')
   await expect(page.getByText('20 of 20 objects')).toBeVisible()
+  const objects = await fetchObjects(page, imageId)
+  const enabledIds = new Set((await fetchAnnotations(page, imageId)).labels.filter((l) => l.enabled).map((l) => l.object_id))
+  const drawnStars = objects.filter((o) => o.kind === 'star' && enabledIds.has(o.id)).length
   await page.getByRole('button', { name: 'Stars', exact: true }).click()
-  await expect(page.getByText('12 of 20 objects')).toBeVisible()
-  await expect(rows.filter({ hasText: 'star' })).toHaveCount(0)
+  await expect(page.getByText(`${12 + drawnStars} of 20 objects`)).toBeVisible()
+  await expect(rows.filter({ hasText: 'star' })).toHaveCount(drawnStars)
+  await expect(rows.filter({ hasText: 'star' }).locator('input[type=checkbox]:not(:checked)')).toHaveCount(0)
   await page.getByRole('button', { name: 'Stars', exact: true }).click()
   await expect(page.getByText('20 of 20 objects')).toBeVisible()
   // No hd rows in this field: the toggle changes nothing but stays pressable.

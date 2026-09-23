@@ -1,9 +1,10 @@
 import { memo, useEffect, useMemo, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import type { ObjectKind, ObjectOut } from '../api'
 import { disableAll, enableWithPlacement, isEditable, tryToggleWithPlacement } from './editing'
 import { primaryName } from './names'
-import { KINDS, KIND_LABELS, filterObjects, initialFilter, type ObjectsFilter } from './objectsFilter'
-import { useEditor } from './store'
+import { KINDS, KIND_LABELS, filterObjects, loadFilter, saveFilter, type ObjectsFilter } from './objectsFilter'
+import { enabledObjectIds, useEditor } from './store'
 
 /** One row. Memoised with per-row selectors, so a drag frame or a marker hover re-renders the
  *  rows it concerns and not the whole list (#75). Keyboard focus inside the row highlights it and
@@ -93,19 +94,24 @@ export default function ObjectsTab() {
   const preference = useEditor((s) => s.style?.name_preference ?? 'popular')
 
   const [query, setQuery] = useState('')
-  // Read once, at mount: the tab mounts after the document is loaded, and the chip is a plain
-  // list filter from then on (turning it off hides rows, never labels).
-  const [filter, setFilter] = useState<ObjectsFilter>(() => initialFilter(objects, useEditor.getState().labels))
+  // The chips are remembered per image in this browser (the tab mounts after the document is
+  // loaded, so the id is known); the search box is not.
+  const imageId = useEditor((s) => s.image?.id ?? '')
+  const [filter, setFilter] = useState<ObjectsFilter>(() => loadFilter(imageId))
+  useEffect(() => saveFilter(imageId, filter), [imageId, filter])
   const [error, setError] = useState<string | null>(null)
 
+  // An enabled label is always listed (the chips only filter the disabled rows). useShallow keeps
+  // the array identity while the same ids are enabled, so a drag frame does not rebuild the list.
+  const enabledIds = useEditor(useShallow(enabledObjectIds))
   const rows = useMemo(() => {
     const all: ObjectOut[] = []
     for (const id of objectOrder) {
       const obj = objects.get(id)
       if (obj) all.push(obj)
     }
-    return filterObjects(all, query, filter)
-  }, [objectOrder, objects, query, filter])
+    return filterObjects(all, query, filter, new Set(enabledIds))
+  }, [objectOrder, objects, query, filter, enabledIds])
 
   const toggleKind = (kind: ObjectKind) =>
     setFilter((prev) => {
@@ -144,7 +150,7 @@ export default function ObjectsTab() {
             {KIND_LABELS[kind]}
           </Chip>
         ))}
-        <Chip pressed={filter.hd} onClick={toggleHd} title="Nova's HD-catalogue rows, hidden by default: most duplicate a brighter star">
+        <Chip pressed={filter.hd} onClick={toggleHd} title="Offer nova's HD-catalogue rows for enabling: most duplicate a brighter star. A star already shown stays listed either way">
           HD stars
         </Chip>
       </div>
