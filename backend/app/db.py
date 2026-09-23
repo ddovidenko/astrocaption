@@ -246,6 +246,16 @@ class Database:
             rows = conn.execute("SELECT * FROM images ORDER BY created_at DESC, id").fetchall()
         return [_row_to_image(r) for r in rows]
 
+    def list_published_images(self) -> list[ImageRecord]:
+        """The gallery's rows: published and currently solved, newest first (SPEC § 5.5)."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM images WHERE published = 1 AND solve_status = ? "
+                "ORDER BY created_at DESC, id",
+                (SolveStatus.SOLVED.value,),
+            ).fetchall()
+        return [_row_to_image(r) for r in rows]
+
     def images_needing_solve(self) -> list[ImageRecord]:
         with self.connect() as conn:
             rows = conn.execute(

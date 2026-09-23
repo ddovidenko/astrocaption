@@ -7,7 +7,7 @@ import pytest
 
 from app.config import Settings
 from app.db import SCHEMA_VERSION, Database
-from app.models import Annotations, Label, SolveHints, StyleConfig
+from app.models import Annotations, ImageRecord, Label, SolveHints, SolveStatus, StyleConfig
 from tests.conftest import seed_image
 
 
@@ -193,3 +193,33 @@ def test_get_annotations_drops_a_legacy_colour_instead_of_500ing(
     assert ann.style.marker_color == "#112233"  # the other field survived
     assert "text_color" in caplog.text
     assert "white" not in caplog.text
+
+
+def test_list_published_images_is_published_solved_newest_first(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    rows = [
+        ("old-pub", "2026-09-01T00:00:00Z", True, SolveStatus.SOLVED),
+        ("new-pub", "2026-09-02T00:00:00Z", True, SolveStatus.SOLVED),
+        ("unpub", "2026-09-03T00:00:00Z", False, SolveStatus.SOLVED),
+        ("pub-solving", "2026-09-04T00:00:00Z", True, SolveStatus.SOLVING),
+        ("pub-failed", "2026-09-05T00:00:00Z", True, SolveStatus.FAILED),
+    ]
+    for image_id, created, published, status in rows:
+        db.insert_image(
+            ImageRecord(
+                id=image_id,
+                created_at=created,
+                updated_at=created,
+                title=image_id,
+                original_name="x.jpg",
+                original_path=f"uploads/{image_id}/original.jpg",
+                preview_path=f"uploads/{image_id}/preview.jpg",
+                thumb_path=f"uploads/{image_id}/thumb.jpg",
+                width=100,
+                height=80,
+                published=published,
+                solve_status=status,
+            )
+        )
+    assert [r.id for r in db.list_published_images()] == ["new-pub", "old-pub"]
