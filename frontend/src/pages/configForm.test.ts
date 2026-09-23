@@ -34,6 +34,7 @@ describe('config form helpers', () => {
     const config: ConfigOut = {
       site_title: 'Sky',
       max_upload_mb: 60,
+      public_gallery_enabled: true,
       nova_api_key_set: true,
       default_style: { font_file: 'Roboto-Bold.ttf' },
       style_defaults: {
