@@ -525,6 +525,29 @@ class ObjectOut(BaseModel):
     radius: float
 
 
+class PublishRequest(BaseModel):
+    """``PUT /images/{id}/published``: publishing needs a solved image with an export (§ 5.5)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    published: bool
+
+
+class GalleryItem(BaseModel):
+    """One published image as a visitor sees it (SPEC § 8, public). Only URLs under
+    ``/api/gallery``; never a path, never anything about the solve."""
+
+    id: str
+    title: str
+    width: int
+    height: int
+    exported_at: str
+    thumb_url: str
+    preview_url: str
+    annotated_preview_url: str
+    export_url: str
+
+
 class ExportRequest(BaseModel):
     """``quality`` ``None`` (the default) reuses the uploaded JPEG's own quantisation tables and
     chroma subsampling, which keeps size and fidelity close to the original; a number forces
@@ -565,6 +588,7 @@ class HealthOut(BaseModel):
     site_title: str
     setup_required: bool
     authenticated: bool
+    public_gallery_enabled: bool = True
     config_error: str | None = None
     locked: list[str] = []  # field names pinned by environment variables, never their values
 
@@ -592,6 +616,7 @@ class ConfigOut(BaseModel):
 
     site_title: str
     max_upload_mb: int
+    public_gallery_enabled: bool
     nova_api_key_set: bool
     default_style: dict[str, object]
     locked: list[str]  # fields pinned by environment variables
@@ -641,13 +666,14 @@ class ConfigUpdate(BaseModel):
         | None
     ) = None
     max_upload_mb: int | None = Field(default=None, ge=MIN_UPLOAD_MB, le=MAX_UPLOAD_MB)
+    public_gallery_enabled: bool | None = None
     nova_api_key: str | None = Field(default=None, max_length=200)
     default_style: StyleOverrides | None = None
 
-    @field_validator("site_title", "max_upload_mb", mode="before")
+    @field_validator("site_title", "max_upload_mb", "public_gallery_enabled", mode="before")
     @classmethod
     def _null_is_not_a_value(cls, value: object, info: ValidationInfo) -> object:
-        # ``None`` here only means "absent"; an explicit null has no meaning for these two
+        # ``None`` here only means "absent"; an explicit null has no meaning for these
         # fields (unlike ``nova_api_key``), so it is rejected instead of silently kept (#47).
         # Worded by VALIDATION_MESSAGES under these types, not by the message given here.
         if value is None:

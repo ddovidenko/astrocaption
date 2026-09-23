@@ -34,6 +34,7 @@ def config_out(settings: Settings) -> ConfigOut:
     return ConfigOut(
         site_title=settings.site_title,
         max_upload_mb=settings.max_upload_mb,
+        public_gallery_enabled=settings.public_gallery_enabled,
         nova_api_key_set=settings.nova_api_key_set,
         default_style=dict(settings.default_style),
         style_defaults=STYLE_DEFAULTS,
@@ -66,6 +67,8 @@ def _updates_for(body: ConfigUpdate, settings: Settings) -> dict[str, object | N
         updates["site_title"] = body.site_title  # the model already stripped and length-checked it
     if body.max_upload_mb is not None:
         updates["max_upload_mb"] = body.max_upload_mb
+    if body.public_gallery_enabled is not None:
+        updates["public_gallery_enabled"] = body.public_gallery_enabled
     if "nova_api_key" in body.model_fields_set:  # only here does an explicit null mean something
         key = (body.nova_api_key or "").strip()
         updates["nova_api_key"] = key or None  # null (or blank) clears the key

@@ -30,8 +30,17 @@ from app.config import SettingsSource, update_config
 from tests.conftest import TEST_PASSWORD, env_app_client, login
 
 # Routes that must stay reachable while logged out: health for the Docker healthcheck,
-# setup/login/logout because a session cookie is exactly what they exist to obtain.
-PUBLIC_API_ROUTES = {"/api/health", "/api/setup", "/api/login", "/api/logout"}
+# setup/login/logout because a session cookie is exactly what they exist to obtain, and the
+# public gallery (SPEC § 5.5), which gates itself (test_gallery.py) rather than via require_owner.
+PUBLIC_API_ROUTES = {
+    "/api/health",
+    "/api/setup",
+    "/api/login",
+    "/api/logout",
+    "/api/gallery",
+    "/api/gallery/{image_id}",
+    "/api/gallery/{image_id}/files/{kind}",
+}
 
 
 def _flatten_routes(routes: Iterable[BaseRoute]) -> Iterator[BaseRoute]:

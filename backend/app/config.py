@@ -42,6 +42,7 @@ LOCKABLE: dict[str, tuple[str, ...]] = {
     "nova_api_key": ("NOVA_API_KEY", "ASTROMETRY_API_KEY"),
     "max_upload_mb": ("ASTROCAPTION_MAX_UPLOAD_MB",),
     "site_title": ("ASTROCAPTION_SITE_TITLE",),
+    "public_gallery_enabled": ("ASTROCAPTION_PUBLIC_GALLERY",),
 }
 """Env vars that pin each lockable config.json field (read-only in the UI when one is set).
 
@@ -95,6 +96,7 @@ class Settings:
     nova_api_key: str | None = field(repr=False)
     max_upload_mb: int
     site_title: str
+    public_gallery_enabled: bool = True  # SPEC § 5.5: the logged-out gallery can be switched off
     nova_base_url: str = DEFAULT_NOVA_BASE_URL
     # The two solve knobs are process-level: read once at start from the environment, never
     # lockable and never on the config page (changing them means restarting the app).
@@ -188,6 +190,34 @@ def _upload_mb(raw: object) -> int:
     return clamped
 
 
+_FLAG_WORDS = {
+    "1": True,
+    "true": True,
+    "yes": True,
+    "on": True,
+    "0": False,
+    "false": False,
+    "no": False,
+    "off": False,
+}
+
+
+def _gallery_flag(raw: object, source: str, *, words: bool = False) -> bool:
+    """``public_gallery_enabled`` from the env (``words=True``, flag words) or config.json
+    (a JSON boolean only); default on.
+
+    ``source`` names where the value came from for the log line; the value itself is never
+    logged (CLAUDE.md: reasons only)."""
+    if raw is None:
+        return True
+    if isinstance(raw, bool):
+        return raw
+    if words and isinstance(raw, str) and raw.strip().lower() in _FLAG_WORDS:
+        return _FLAG_WORDS[raw.strip().lower()]
+    log.warning("ignoring %s: not true/false; the public gallery stays on", source)
+    return True
+
+
 def _positive_seconds(raw: object, *, default: float, name: str, lo: float, hi: float) -> float:
     """A number of seconds from the environment, bounded by ``lo``-``hi``.
 
@@ -263,6 +293,14 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     key = from_env["nova_api_key"][0] or cfg.get("nova_api_key")
     max_mb = _upload_mb(from_env["max_upload_mb"][0] or cfg.get("max_upload_mb"))
     title = from_env["site_title"][0] or cfg.get("site_title") or DEFAULT_SITE_TITLE
+    gallery_env, gallery_var = from_env["public_gallery_enabled"]
+    gallery_on = (
+        _gallery_flag(gallery_env, gallery_var or "ASTROCAPTION_PUBLIC_GALLERY", words=True)
+        if gallery_env is not None
+        else _gallery_flag(
+            cfg.get("public_gallery_enabled"), "public_gallery_enabled in config.json"
+        )
+    )
     default_style = _normalise_style(cfg.get("default_style"))
     poll_seconds = _positive_seconds(
         e.get("ASTROCAPTION_SOLVE_POLL_SECONDS"),
@@ -295,6 +333,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         nova_api_key=str(key).strip() if key else None,
         max_upload_mb=max_mb,
         site_title=str(title),
+        public_gallery_enabled=gallery_on,
         nova_base_url=e.get("NOVA_BASE_URL", DEFAULT_NOVA_BASE_URL).rstrip("/"),
         solve_poll_seconds=poll_seconds,
         solve_timeout_seconds=solve_timeout,

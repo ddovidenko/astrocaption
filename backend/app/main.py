@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .api import auth, config, docs, fonts, health, images
+from .api import auth, config, docs, fonts, gallery, health, images
 from .auth import LoginLimiter, set_owner_password, validate_new_password
 from .config import Settings, SettingsSource
 from .db import Database
@@ -113,6 +113,7 @@ def create_app(
     app.include_router(config.router)
     app.include_router(docs.router)
     app.include_router(fonts.router)
+    app.include_router(gallery.router)
     app.include_router(images.router)
 
     if cfg.fonts_dir.is_dir():

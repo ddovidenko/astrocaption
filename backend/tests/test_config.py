@@ -243,14 +243,23 @@ def test_lockable_covers_every_lockable_field(tmp_path: Path) -> None:
 
     s = load_settings(
         env_for(
-            tmp_path, NOVA_API_KEY="k", ASTROCAPTION_MAX_UPLOAD_MB="7", ASTROCAPTION_SITE_TITLE="T"
+            tmp_path,
+            NOVA_API_KEY="k",
+            ASTROCAPTION_MAX_UPLOAD_MB="7",
+            ASTROCAPTION_SITE_TITLE="T",
+            ASTROCAPTION_PUBLIC_GALLERY="false",
         )
     )
-    assert set(LOCKABLE) == set(s.locked_by) == {"nova_api_key", "max_upload_mb", "site_title"}
+    assert (
+        set(LOCKABLE)
+        == set(s.locked_by)
+        == {"nova_api_key", "max_upload_mb", "site_title", "public_gallery_enabled"}
+    )
     assert s.locked_by == {
         "nova_api_key": "NOVA_API_KEY",
         "max_upload_mb": "ASTROCAPTION_MAX_UPLOAD_MB",
         "site_title": "ASTROCAPTION_SITE_TITLE",
+        "public_gallery_enabled": "ASTROCAPTION_PUBLIC_GALLERY",
     }
 
 
@@ -389,3 +398,43 @@ def test_unset_or_blank_solve_knobs_are_silent(
         assert s.solve_poll_seconds == DEFAULT_POLL_SECONDS
         assert s.solve_timeout_seconds == DEFAULT_SOLVE_TIMEOUT_SECONDS
     assert caplog.records == []
+
+
+def test_public_gallery_flag_defaults_on_and_reads_the_file(tmp_path: Path) -> None:
+    assert load_settings(env_for(tmp_path)).public_gallery_enabled is True
+    (tmp_path / "config.json").write_text(json.dumps({"public_gallery_enabled": False}))
+    assert load_settings(env_for(tmp_path)).public_gallery_enabled is False
+
+
+def test_public_gallery_flag_from_the_environment_locks_the_field(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "config.json").write_text(json.dumps({"public_gallery_enabled": True}))
+    s = load_settings(env_for(tmp_path, ASTROCAPTION_PUBLIC_GALLERY="false"))
+    assert s.public_gallery_enabled is False
+    assert s.locked_by == {"public_gallery_enabled": "ASTROCAPTION_PUBLIC_GALLERY"}
+    for raw in ("0", "no", "off", "FALSE"):
+        assert (
+            load_settings(env_for(tmp_path, ASTROCAPTION_PUBLIC_GALLERY=raw)).public_gallery_enabled
+            is False
+        )
+    for raw in ("1", "yes", "on", "TRUE"):
+        assert (
+            load_settings(env_for(tmp_path, ASTROCAPTION_PUBLIC_GALLERY=raw)).public_gallery_enabled
+            is True
+        )
+    # Anything else is logged and ignored: the default wins and the field is still locked.
+    with caplog.at_level(logging.WARNING):
+        s = load_settings(env_for(tmp_path, ASTROCAPTION_PUBLIC_GALLERY="maybe"))
+    assert s.public_gallery_enabled is True
+    assert "ASTROCAPTION_PUBLIC_GALLERY" in caplog.text and "maybe" not in caplog.text
+
+
+def test_public_gallery_flag_in_the_file_must_be_a_boolean(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "config.json").write_text(json.dumps({"public_gallery_enabled": "no"}))
+    with caplog.at_level(logging.WARNING):
+        s = load_settings(env_for(tmp_path))
+    assert s.public_gallery_enabled is True
+    assert "public_gallery_enabled" in caplog.text

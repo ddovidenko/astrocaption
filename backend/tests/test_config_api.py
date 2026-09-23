@@ -355,3 +355,34 @@ def test_put_409_on_config_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         assert resp.json() == {"detail": CONFIG_NOT_JSON}
         assert str(tmp_path) not in resp.text
         assert "Traceback" not in resp.text
+
+
+def test_public_gallery_flag_round_trips_through_config_and_health(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with owner_client(tmp_path, monkeypatch) as client:
+        assert client.get("/api/config").json()["public_gallery_enabled"] is True
+        assert client.get("/api/health").json()["public_gallery_enabled"] is True
+        resp = client.put("/api/config", json={"public_gallery_enabled": False})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["public_gallery_enabled"] is False
+        assert read_config(tmp_path)["public_gallery_enabled"] is False
+        assert client.get("/api/health").json()["public_gallery_enabled"] is False
+        # null is "absent" for every field but the key: rejected, not silently kept (#47).
+        resp = client.put("/api/config", json={"public_gallery_enabled": None})
+        assert resp.status_code == 422, resp.text
+
+
+def test_public_gallery_flag_pinned_by_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with owner_client(tmp_path, monkeypatch, ASTROCAPTION_PUBLIC_GALLERY="false") as client:
+        body = client.get("/api/config").json()
+        assert body["public_gallery_enabled"] is False
+        assert body["locked_by"] == {"public_gallery_enabled": "ASTROCAPTION_PUBLIC_GALLERY"}
+        resp = client.put("/api/config", json={"public_gallery_enabled": True})
+        assert resp.status_code == 422
+        assert resp.json() == {
+            "detail": "public_gallery_enabled is set by ASTROCAPTION_PUBLIC_GALLERY; "
+            "unset it to change it here."
+        }
