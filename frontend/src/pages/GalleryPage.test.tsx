@@ -3,6 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError, type HealthOut } from '../api'
+import { galleryItem as item } from './galleryTestItem'
 import GalleryImagePage from './GalleryImagePage'
 import GalleryPage from './GalleryPage'
 
@@ -28,18 +29,6 @@ const health = (over: Partial<HealthOut> = {}): HealthOut => ({
   public_gallery_enabled: true,
   ...over,
 })
-
-const item = {
-  id: 'img-1',
-  title: 'Orion',
-  width: 3000,
-  height: 2000,
-  exported_at: '2026-09-22T10:05:00Z',
-  thumb_url: '/api/gallery/img-1/files/thumb',
-  preview_url: '/api/gallery/img-1/files/preview',
-  annotated_preview_url: '/api/gallery/img-1/files/annotated-preview?v=x',
-  export_url: '/api/gallery/img-1/files/export?v=x',
-}
 
 describe('GalleryPage', () => {
   it('lists published images as links to the full view', async () => {

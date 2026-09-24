@@ -193,5 +193,5 @@ body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
 .gallery-view { display: grid; gap: 1rem; }
 .gallery-view .gallery-frame { max-height: calc(100vh - 8rem); }
 .gallery-view .gallery-frame img { max-height: calc(100vh - 8rem); }
-.gallery-view .actions { display: flex; flex-wrap: wrap; gap: 1rem; align-items: baseline; }
+.gallery-view .actions { gap: 1rem; align-items: baseline; }
 @media (max-width: 640px) { .gallery { grid-template-columns: 1fr; } }
