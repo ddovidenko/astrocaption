@@ -311,7 +311,8 @@ unpublished or not currently solved, its export files are missing, or the galler
   `/api/gallery/{id}/files/…` and carry `?v=<exported_at>` where the file changes with an export
 - `GET /gallery/{id}` → one `GalleryItem`
 - `GET /gallery/{id}/files/{thumb|preview|annotated-preview|export}` → the file, `Cache-Control:
-  public, no-cache`; `export` is an attachment named `<slug>-annotated.jpg`
+  public, no-cache`; `export` is an attachment named `<slug>-annotated.jpg`; an unknown kind is
+  the same 404
 
 Owner (cookie session):
 - `POST /setup` {password, nova_api_key?, site_title?} → 404 once set up; `POST /login` {password} → sets the

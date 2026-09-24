@@ -10,7 +10,7 @@ the same ``Image not found.``, so a visitor cannot tell "off" from "unpublished"
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import Literal, get_args
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, status
@@ -85,10 +85,10 @@ async def get_gallery_item(image_id: str, settings: SettingsDep, db: DbDep) -> G
 
 
 @router.get("/{image_id}/files/{kind}")
-async def gallery_file(
-    image_id: str, kind: PublicFileKind, settings: SettingsDep, db: DbDep
-) -> FileResponse:
+async def gallery_file(image_id: str, kind: str, settings: SettingsDep, db: DbDep) -> FileResponse:
     rec = _visible(settings, db, image_id)
+    if kind not in get_args(PublicFileKind):
+        raise _not_found()
     out = render_dir(settings, image_id)
     if kind == "thumb":
         path = settings.data_dir / rec.thumb_path
