@@ -16,6 +16,7 @@ export interface ConfigForm {
   uploadMb: string
   novaKey: string
   style: StyleForm
+  publicGallery: boolean
 }
 
 /** The partial update for a save: only what changed, never a locked field, and
@@ -33,6 +34,9 @@ export function buildUpdate(form: ConfigForm, config: ConfigOut): ConfigUpdate {
   const mb = form.uploadMb.trim()
   if (!locked('max_upload_mb') && mb !== '' && mb !== String(config.max_upload_mb)) {
     body.max_upload_mb = Number(mb)
+  }
+  if (!locked('public_gallery_enabled') && form.publicGallery !== config.public_gallery_enabled) {
+    body.public_gallery_enabled = form.publicGallery
   }
   if (!locked('nova_api_key') && form.novaKey.trim()) body.nova_api_key = form.novaKey.trim()
   return body

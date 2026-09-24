@@ -46,7 +46,7 @@ export async function ensureSetUpAndSignedIn(page: Page): Promise<void> {
 
   if (health.setup_required || !health.authenticated) {
     if (!/\/login$/.test(page.url())) {
-      await page.goto('/')
+      await page.goto('/login')
       await expect(page).toHaveURL(/\/login$/)
     }
     await page.getByLabel('Password').fill(PASSWORD)

@@ -50,6 +50,9 @@ export interface HealthOut {
   site_title: string
   setup_required: boolean
   authenticated: boolean
+  /** False when the owner switched the public gallery off: the logged-out shell then shows
+   *  only the title and a sign-in link, and never calls /api/gallery. */
+  public_gallery_enabled: boolean
   config_error: string | null
   /** Field names pinned by environment variables; the setup page shows them disabled. */
   locked: string[]
@@ -146,6 +149,7 @@ export interface StyleDefaults {
 export interface ConfigOut {
   site_title: string
   max_upload_mb: number
+  public_gallery_enabled: boolean
   nova_api_key_set: boolean
   default_style: StyleOverrides
   style_defaults: StyleDefaults
@@ -158,6 +162,7 @@ export interface ConfigOut {
 export interface ConfigUpdate {
   site_title?: string
   max_upload_mb?: number
+  public_gallery_enabled?: boolean
   nova_api_key?: string | null
   default_style?: StyleOverrides
 }
@@ -191,6 +196,20 @@ export interface ExportOut {
   exported_at: string
   exported_hash: string
   encoding: string
+}
+
+/** One published image as the public gallery serves it. Mirrors GalleryItem. All URLs are
+ *  under /api/gallery and need no session. */
+export interface GalleryItem {
+  id: string
+  title: string
+  width: number
+  height: number
+  exported_at: string
+  thumb_url: string
+  preview_url: string
+  annotated_preview_url: string
+  export_url: string
 }
 
 export interface SolveHints {
@@ -397,6 +416,12 @@ export const api = {
   exportImage: (id: string, quality: number | null, scale: number) =>
     request<ExportOut>(`/api/images/${id}/export`, json('POST', { quality, scale })),
   deleteImage: (id: string) => request<void>(`/api/images/${id}`, { method: 'DELETE' }),
+  /** 409 (ApiError.status) = the image has no export yet; show err.message. */
+  setPublished: (id: string, published: boolean) =>
+    request<ImageOut>(`/api/images/${id}/published`, json('PUT', { published })),
+  // Public: no session. A 404 means unpublished, unknown, or the gallery is switched off.
+  gallery: () => request<GalleryItem[]>('/api/gallery', undefined, { sessionAware: false }),
+  galleryImage: (id: string) => request<GalleryItem>(`/api/gallery/${id}`, undefined, { sessionAware: false }),
 }
 
 export function statusLabel(status: SolveStatus): string {

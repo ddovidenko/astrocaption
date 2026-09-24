@@ -155,7 +155,12 @@ test('first run: setup, sign in, solve, export, edit, config, sign out', async (
 
   await page.getByRole('button', { name: 'Log out' }).click()
   await expect(page).toHaveURL(/\/login$/)
+  // Signed out, `/` is the public gallery, and the editor's nav is gone.
   await page.goto('/')
+  await expect(page).toHaveURL(/\/$/)
+  await expect(page.getByRole('link', { name: 'Log in' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Config' })).toHaveCount(0)
+  await page.getByRole('link', { name: 'Log in' }).click()
   await expect(page).toHaveURL(/\/login$/)
   // The restored password still signs in: the round trip above really put it back.
   await page.getByLabel('Password').fill(PASSWORD)

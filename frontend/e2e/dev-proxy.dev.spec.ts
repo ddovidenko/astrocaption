@@ -25,8 +25,9 @@ test('the dev server proxies /api and /fonts, and the app mounts', async ({ page
   expect(font.status(), 'GET /fonts/Inter-Regular.ttf through the proxy').toBe(200)
   expect(font.headers()['content-type']).toContain('font/ttf')
 
-  // Where the shell sends a fresh browser, given what health just said.
-  const landing = body.setup_required ? /\/setup$/ : body.authenticated ? /\/$/ : /\/login$/
+  // Where the shell sends a fresh browser, given what health just said: /setup until the site is
+  // set up, otherwise `/` whether signed in (Images) or not (the public gallery).
+  const landing = body.setup_required ? /\/setup$/ : /\/$/
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
   await expect(page).toHaveURL(landing)

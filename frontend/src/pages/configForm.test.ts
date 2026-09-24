@@ -34,6 +34,7 @@ describe('config form helpers', () => {
     const config: ConfigOut = {
       site_title: 'Sky',
       max_upload_mb: 60,
+      public_gallery_enabled: true,
       nova_api_key_set: true,
       default_style: { font_file: 'Roboto-Bold.ttf' },
       style_defaults: {
@@ -50,7 +51,13 @@ describe('config form helpers', () => {
       locked: [],
       locked_by: {},
     }
-    const form = { siteTitle: 'Sky', uploadMb: '60', novaKey: '', style: { ...empty, font_file: 'Roboto-Bold.ttf' } }
+    const form = {
+      siteTitle: 'Sky',
+      uploadMb: '60',
+      novaKey: '',
+      style: { ...empty, font_file: 'Roboto-Bold.ttf' },
+      publicGallery: true,
+    }
 
     it('sends nothing when nothing changed', () => {
       expect(buildUpdate(form, config)).toEqual({})
@@ -88,6 +95,50 @@ describe('config form helpers', () => {
     it('sends default_style as the whole set only when it differs, keeping the stored font', () => {
       const changed = buildUpdate({ ...form, style: { ...form.style, text_color: '#ff8800' } }, config)
       expect(changed).toEqual({ default_style: { font_file: 'Roboto-Bold.ttf', text_color: '#ff8800' } })
+    })
+  })
+
+  describe('buildUpdate public gallery', () => {
+    const config: ConfigOut = {
+      site_title: 'Sky',
+      max_upload_mb: 60,
+      public_gallery_enabled: true,
+      nova_api_key_set: true,
+      default_style: { font_file: 'Roboto-Bold.ttf' },
+      style_defaults: {
+        font_file: 'Inter-Regular.ttf',
+        text_color: '#FFFFFF',
+        marker_color: '#FFD54A',
+        leader_color: '#FFD54A',
+        halo: true,
+        halo_color: '#000000',
+        show_aliases: true,
+        max_aliases: 2,
+        name_preference: 'popular',
+      },
+      locked: [],
+      locked_by: {},
+    }
+    const form = {
+      siteTitle: 'Sky',
+      uploadMb: '60',
+      novaKey: '',
+      style: { ...empty, font_file: 'Roboto-Bold.ttf' },
+      publicGallery: true,
+    }
+
+    it('sends the flag only when it changed', () => {
+      expect(buildUpdate(form, config)).not.toHaveProperty('public_gallery_enabled')
+      expect(buildUpdate({ ...form, publicGallery: false }, config).public_gallery_enabled).toBe(false)
+    })
+
+    it('never sends a locked flag', () => {
+      const locked = {
+        ...config,
+        locked: ['public_gallery_enabled'],
+        locked_by: { public_gallery_enabled: 'ASTROCAPTION_PUBLIC_GALLERY' },
+      }
+      expect(buildUpdate({ ...form, publicGallery: false }, locked)).not.toHaveProperty('public_gallery_enabled')
     })
   })
 })

@@ -12,6 +12,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
   const [siteTitle, setSiteTitle] = useState('')
   const [uploadMb, setUploadMb] = useState('')
   const [novaKey, setNovaKey] = useState('')
+  const [publicGallery, setPublicGallery] = useState(true)
   const [style, setStyle] = useState<StyleFormValues>(styleFormFromOverrides({}))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -30,6 +31,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
       setFonts(list.status === 'fulfilled' ? list.value : null)
       setSiteTitle(cfg.value.site_title)
       setUploadMb(String(cfg.value.max_upload_mb))
+      setPublicGallery(cfg.value.public_gallery_enabled)
       setStyle(styleFormFromOverrides(cfg.value.default_style))
     })
     return () => {
@@ -53,6 +55,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
     setConfig(fresh)
     setSiteTitle(fresh.site_title)
     setUploadMb(String(fresh.max_upload_mb))
+    setPublicGallery(fresh.public_gallery_enabled)
     setStyle(styleFormFromOverrides(fresh.default_style))
     setNovaKey('')
   }
@@ -63,7 +66,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
     setBusy(true)
     setError(null)
     setSaved(null)
-    const body = buildUpdate({ siteTitle, uploadMb, novaKey, style }, config)
+    const body = buildUpdate({ siteTitle, uploadMb, novaKey, style, publicGallery }, config)
     try {
       adopt(await api.updateConfig(body))
       const health = await refreshHealth() // the header title follows site_title
@@ -125,6 +128,21 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
             {locked('max_upload_mb') && <span className="field-note">{lockedNote('max_upload_mb')}</span>}
           </label>
         </div>
+        <label className="field checkbox">
+          <span>
+            <input
+              type="checkbox"
+              checked={publicGallery}
+              disabled={locked('public_gallery_enabled')}
+              onChange={(e) => edit(setPublicGallery, e.target.checked)}
+            />{' '}
+            Public gallery
+          </span>
+          <span className="field-note">
+            Show published images to visitors who are not signed in.
+            {locked('public_gallery_enabled') && <> · {lockedNote('public_gallery_enabled')}</>}
+          </span>
+        </label>
       </section>
 
       <section className="panel">
