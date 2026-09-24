@@ -1,39 +1,48 @@
 """The public gallery (SPEC § 5.5, § 8): published, solved, exported images for visitors.
 
 This router carries no owner dependency, so it is the one file whose every handler must gate
-itself. The rules are: the whole gallery is 404 when ``public_gallery_enabled`` is off; an
-image is served only when it is published, solved and its export files exist; every miss is
-the same ``Image not found.``, so a visitor cannot tell "off" from "unpublished" from
-"unknown". Nothing here reads the original, the objects or the annotations.
+itself. The rules are: the whole gallery is 404 when ``public_gallery_enabled`` is off (a
+router-level dependency answers 404 for every route then); an image is served only when it
+is published, solved and its export files exist; every miss is the same ``Image not found.``,
+so a visitor cannot tell "off" from "unpublished" from "unknown". Nothing here reads the
+original, the objects or the annotations.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Literal, get_args
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
 from ..config import Settings
 from ..db import Database
 from ..models import GalleryItem, ImageRecord
-from ..storage import render_dir
+from ..storage import export_exists, render_dir, slug_of
 from .deps import DbDep, SettingsDep
-from .images import export_exists, slug_of
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/gallery", tags=["gallery"])
 
 NOT_FOUND = "Image not found."
 CACHE = "public, no-cache"  # revalidate every use: an unpublished image must not live on in a cache (FileResponse's ETag makes that a 304)
 
-PublicFileKind = Literal["thumb", "preview", "annotated-preview", "export"]
+PUBLIC_FILE_KINDS = ("thumb", "preview", "annotated-preview", "export")
 
 
 def _not_found() -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, NOT_FOUND)
+
+
+def require_gallery_open(settings: SettingsDep) -> None:
+    """Router-level gate: every route in this router answers 404 when the gallery is off."""
+    if not settings.public_gallery_enabled:
+        raise _not_found()
+
+
+router = APIRouter(
+    prefix="/api/gallery", tags=["gallery"], dependencies=[Depends(require_gallery_open)]
+)
 
 
 def gallery_item(rec: ImageRecord) -> GalleryItem:
@@ -55,8 +64,6 @@ def gallery_item(rec: ImageRecord) -> GalleryItem:
 
 def _visible(settings: Settings, db: Database, image_id: str) -> ImageRecord:
     """The record a visitor may see, or the one 404."""
-    if not settings.public_gallery_enabled:
-        raise _not_found()
     rec = db.get_image(image_id)
     if rec is None or not rec.published or not export_exists(settings, rec):
         raise _not_found()
@@ -65,8 +72,6 @@ def _visible(settings: Settings, db: Database, image_id: str) -> ImageRecord:
 
 @router.get("")
 async def list_gallery(settings: SettingsDep, db: DbDep) -> list[GalleryItem]:
-    if not settings.public_gallery_enabled:
-        raise _not_found()
     items: list[GalleryItem] = []
     for rec in db.list_published_images():
         if not export_exists(settings, rec):
@@ -87,7 +92,7 @@ async def get_gallery_item(image_id: str, settings: SettingsDep, db: DbDep) -> G
 @router.get("/{image_id}/files/{kind}")
 async def gallery_file(image_id: str, kind: str, settings: SettingsDep, db: DbDep) -> FileResponse:
     rec = _visible(settings, db, image_id)
-    if kind not in get_args(PublicFileKind):
+    if kind not in PUBLIC_FILE_KINDS:
         raise _not_found()
     out = render_dir(settings, image_id)
     if kind == "thumb":
