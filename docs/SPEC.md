@@ -144,9 +144,21 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
 
 ### 5.5 Publish
 
-- Each image has `published: bool`. Default false.
+- Each image has `published: bool`. Default false. Publish and Unpublish live on the image card.
+- Publishing needs an export: `PUT /images/{id}/published {published: true}` is refused (409,
+  `Export the image before publishing it.`) unless the image is solved and `annotated.jpg` exists.
+  Unpublishing always works. A published image stays published across re-exports and re-solves,
+  but the gallery serves only rows that are currently `solved`, so it drops out while a re-solve
+  runs and returns when it succeeds; visitors then see the old export until the owner exports again.
 - Gallery shows published images only, newest first. Hover (or tap on touch) swaps the preview
-  to the annotated preview. Click opens a full-size view with the same hover behaviour.
+  to the annotated preview. Click opens a full-size view (the 2048 px preview) with the same
+  hover behaviour and a link to download the full-resolution annotated export. The unannotated
+  original is never public.
+- `public_gallery_enabled` (config, default true; env `ASTROCAPTION_PUBLIC_GALLERY`) switches
+  the whole public surface off: every `/api/gallery` route answers 404 and the logged-out `/`
+  shows only the site title and a sign-in link.
+- Routes: signed out, `/` is the gallery; `/gallery` and `/gallery/:id` work signed in and out,
+  so the owner sees exactly what visitors see; `/login` is unchanged.
 
 ## 6. Editor — interactions
 
@@ -292,9 +304,15 @@ Config (`data/config.json`, never in DB): `password_hash`, `session_secret`, `no
 
 ## 8. API (all JSON, `/api/...`)
 
-Public:
-- `GET /gallery` → published images (thumb, preview, annotated preview, title)
-- `GET /images/{id}/public` → same for one image, 404 if unpublished
+Public (no cookie; every miss is 404 `Image not found.`, whether the id is unknown, the image is
+unpublished or not currently solved, its export files are missing, or the gallery is switched off):
+- `GET /gallery` → published images newest first as `GalleryItem` {id, title, width, height,
+  exported_at, thumb_url, preview_url, annotated_preview_url, export_url}; the URLs are all under
+  `/api/gallery/{id}/files/…` and carry `?v=<exported_at>` where the file changes with an export
+- `GET /gallery/{id}` → one `GalleryItem`
+- `GET /gallery/{id}/files/{thumb|preview|annotated-preview|export}` → the file, `Cache-Control:
+  public, no-cache`; `export` is an attachment named `<slug>-annotated.jpg`; an unknown kind is
+  the same 404
 
 Owner (cookie session):
 - `POST /setup` {password, nova_api_key?, site_title?} → 404 once set up; `POST /login` {password} → sets the
@@ -306,7 +324,7 @@ Owner (cookie session):
   read or no longer holds a usable password; 500 when the new password was written but the file could not
   be read back afterwards (the password did change; the browser is not re-signed-in).
 - `GET/PUT /config` → {site_title, max_upload_mb, nova_api_key_set, default_style, style_defaults, locked,
-  locked_by}. `PUT` is partial: absent fields are kept, `nova_api_key: null` clears the key, and
+  locked_by, public_gallery_enabled}. `PUT` is partial: absent fields are kept, `nova_api_key: null` clears the key, and
   `default_style` replaces the owner's whole override set — a save from the page therefore stores exactly the
   fields it shows filled in, and every field left blank goes back to the built-in default (derived from the
   image size for `font_size`, `halo_width`, `marker_width` and `marker_min_radius`). It is validated against
@@ -321,6 +339,7 @@ Owner (cookie session):
   never rewrites it.
 - `POST /images` (multipart) → id, starts solve
 - `GET /images`, `GET /images/{id}`, `DELETE /images/{id}`
+- `PUT /images/{id}/published` {published} → the updated image; 409 when publishing without an export (§ 5.5)
 - `POST /images/{id}/solve` (re-solve, optional scale hints)
 - `POST /images/{id}/check` (check again: resume polling the stored nova job without uploading, #10).
   409 unless the row's `check_available` is true (a failed solve that timed out and still holds a
@@ -344,13 +363,13 @@ Owner (cookie session):
   every allowed size (index `size − 6`, sizes 6–200), which the editor adds to a label's `y` to draw on the
   canvas baseline where the export draws (§ 9). The files are served at `/fonts/<file>`
 - `GET /health` (public, used by the Docker healthcheck) → {status, version, site_title, setup_required,
-  authenticated, config_error, locked}; `config_error` is a fixed plain sentence about an unreadable
+  authenticated, config_error, locked, public_gallery_enabled}; `config_error` is a fixed plain sentence about an unreadable
   `config.json` (details in the server log) and `locked` lists the field names pinned by environment
   variables, never their values, so the setup page can disable those inputs. Everything owner-facing
   (`nova_api_key_set`) lives in `GET /config`. Image payloads carry `original_format` (JPEG/PNG/TIFF) and the
   nova status/job-log URLs.
 
-Public besides the two gallery routes: `/api/health`, the font files under `/fonts/`, and the SPA shell.
+Public besides `/api/gallery`: `/api/health`, the font files under `/fonts/`, and the SPA shell.
 
 *M1 note:* `PUT annotations` and `autoarrange` arrive with the editor in milestone 3.
 
@@ -453,7 +472,7 @@ Build in this order; each is shippable.
 2. **Setup & auth** — first-run setup, login, config page, lockout CLI, INSTALL.md, browser smoke test in CI. *Design approved 2026-09-08.*
 3. **Editor v1** — canvas with zoom/pan, object list with checkboxes, hover/click to enable, drag labels, autosave, export button. Parity test between Konva and Pillow.
 4. **Styling** — fonts, colours, halo, per-label overrides, wheel-to-resize while dragging, undo/redo. **Done 2026-09-22.**
-5. **Gallery** — publish toggle, public gallery with hover overlay, responsive.
+5. **Gallery** — publish toggle, public gallery with hover overlay, responsive. **Done 2026-09-23.**
 6. **Release** — GHCR multi-arch, release workflow, Codespaces, issue templates, README with screenshots.
 
 Later (not v1): local ASTAP solver option, custom object entries (user-added labels at arbitrary RA/Dec or pixels), constellation lines, SVG/PNG-with-alpha export, multiple owners.

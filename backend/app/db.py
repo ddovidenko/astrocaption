@@ -241,25 +241,24 @@ class Database:
             row = conn.execute("SELECT * FROM images WHERE id = ?", (image_id,)).fetchone()
         return _row_to_image(row) if row else None
 
-    def list_images(self) -> list[ImageRecord]:
+    def _list_images(self, where: str = "", params: tuple[object, ...] = ()) -> list[ImageRecord]:
         # created_at has whole-second resolution (utcnow_iso), so two rows inserted within the
         # same second tie there; rowid (insertion order) breaks the tie the way "id" (a random
         # UUID) cannot.
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM images ORDER BY created_at DESC, rowid DESC"
+                f"SELECT * FROM images{where} ORDER BY created_at DESC, rowid DESC", params
             ).fetchall()
         return [_row_to_image(r) for r in rows]
 
+    def list_images(self) -> list[ImageRecord]:
+        return self._list_images()
+
     def list_published_images(self) -> list[ImageRecord]:
         """The gallery's rows: published and currently solved, newest first (SPEC § 5.5)."""
-        with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM images WHERE published = 1 AND solve_status = ? "
-                "ORDER BY created_at DESC, rowid DESC",
-                (SolveStatus.SOLVED.value,),
-            ).fetchall()
-        return [_row_to_image(r) for r in rows]
+        return self._list_images(
+            " WHERE published = 1 AND solve_status = ?", (SolveStatus.SOLVED.value,)
+        )
 
     def images_needing_solve(self) -> list[ImageRecord]:
         with self.connect() as conn:

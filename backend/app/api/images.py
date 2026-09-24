@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import uuid
 from collections import Counter
 from collections.abc import Mapping
@@ -44,12 +43,14 @@ from ..solver.nova import job_log_url, status_url
 from ..storage import (
     UnsupportedImageError,
     delete_image_files,
+    export_exists,
     format_of,
     image_dir,
     make_derivatives,
     normalised_extension,
     probe_image,
     render_dir,
+    slug_of,
 )
 from ..worker import SolveWorker
 from .deps import (
@@ -131,10 +132,6 @@ def _copy_limited(src: BinaryIO, dest: Path, limit: int) -> int:
                 raise UploadTooLargeError(total)
             out.write(chunk)
     return total
-
-
-def slug_of(text: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-.") or "image"
 
 
 def image_out(
@@ -307,15 +304,6 @@ async def delete_image(image_id: str, settings: SettingsDep, db: DbDep) -> None:
 
 
 PUBLISH_NEEDS_EXPORT = "Export the image before publishing it."
-
-
-def export_exists(settings: Settings, rec: ImageRecord) -> bool:
-    """Whether the gallery has both bitmaps for ``rec``: a solved row, an export stamp, and the
-    files it points at (the owner may have emptied data/renders by hand)."""
-    if rec.solve_status is not SolveStatus.SOLVED or not rec.exported_at:
-        return False
-    out = render_dir(settings, rec.id)
-    return (out / "annotated.jpg").is_file() and (out / "annotated_preview.jpg").is_file()
 
 
 @router.put("/{image_id}/published")

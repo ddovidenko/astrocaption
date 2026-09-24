@@ -202,19 +202,30 @@ _FLAG_WORDS = {
 }
 
 
-def _gallery_flag(raw: object, source: str, *, words: bool = False) -> bool:
-    """``public_gallery_enabled`` from the env (``words=True``, flag words) or config.json
-    (a JSON boolean only); default on.
+def _flag_from_env(raw: str, var: str) -> bool:
+    """``public_gallery_enabled`` from an environment variable's flag word (1/true/yes/on,
+    0/false/no/off, case-insensitive); anything else is logged and treated as on.
 
-    ``source`` names where the value came from for the log line; the value itself is never
-    logged (CLAUDE.md: reasons only)."""
+    ``var`` names the variable for the log line; the value itself is never logged
+    (CLAUDE.md: reasons only)."""
+    word = raw.strip().lower()
+    if word in _FLAG_WORDS:
+        return _FLAG_WORDS[word]
+    log.warning("ignoring %s: not true/false; the public gallery stays on", var)
+    return True
+
+
+def _flag_from_config(raw: object) -> bool:
+    """``public_gallery_enabled`` from config.json: unset means on, a JSON boolean is taken as
+    is, anything else is logged and treated as on."""
     if raw is None:
         return True
     if isinstance(raw, bool):
         return raw
-    if words and isinstance(raw, str) and raw.strip().lower() in _FLAG_WORDS:
-        return _FLAG_WORDS[raw.strip().lower()]
-    log.warning("ignoring %s: not true/false; the public gallery stays on", source)
+    log.warning(
+        "ignoring public_gallery_enabled in config.json: not true/false; the public gallery"
+        " stays on"
+    )
     return True
 
 
@@ -295,11 +306,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     title = from_env["site_title"][0] or cfg.get("site_title") or DEFAULT_SITE_TITLE
     gallery_env, gallery_var = from_env["public_gallery_enabled"]
     gallery_on = (
-        _gallery_flag(gallery_env, gallery_var or "ASTROCAPTION_PUBLIC_GALLERY", words=True)
+        _flag_from_env(gallery_env, gallery_var or "ASTROCAPTION_PUBLIC_GALLERY")
         if gallery_env is not None
-        else _gallery_flag(
-            cfg.get("public_gallery_enabled"), "public_gallery_enabled in config.json"
-        )
+        else _flag_from_config(cfg.get("public_gallery_enabled"))
     )
     default_style = _normalise_style(cfg.get("default_style"))
     poll_seconds = _positive_seconds(

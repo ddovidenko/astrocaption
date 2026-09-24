@@ -233,6 +233,20 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
   }
 
   const busy = isBusy(image.solve_status)
+  const publishToggle = image.published ? (
+    <button className="secondary" onClick={() => setPublished(false)} disabled={working}>
+      Unpublish
+    </button>
+  ) : image.solve_status === 'solved' ? (
+    <button
+      className="secondary"
+      onClick={() => setPublished(true)}
+      disabled={working || !image.export_url}
+      title={image.export_url ? 'Show this image in the public gallery' : 'Export the image first'}
+    >
+      Publish
+    </button>
+  ) : null
   return (
     <article className="card">
       <a href={image.preview_url} target="_blank" rel="noreferrer">
@@ -301,20 +315,6 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
               <button onClick={exportNow} disabled={working}>
                 {working ? 'Rendering…' : 'Export'}
               </button>
-              {image.published ? (
-                <button className="secondary" onClick={() => setPublished(false)} disabled={working}>
-                  Unpublish
-                </button>
-              ) : (
-                <button
-                  className="secondary"
-                  onClick={() => setPublished(true)}
-                  disabled={working || !image.export_url}
-                  title={image.export_url ? 'Show this image in the public gallery' : 'Export the image first'}
-                >
-                  Publish
-                </button>
-              )}
               <Link className="button" to={`/images/${image.id}`}>
                 Edit
               </Link>
@@ -358,6 +358,7 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
               </button>
             </>
           )}
+          {publishToggle}
           {confirming ? (
             <ConfirmInline
               question={`Delete “${image.title}” and its export?`}
