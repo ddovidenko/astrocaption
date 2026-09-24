@@ -54,12 +54,19 @@ a new one inside the running container and logs every browser out; on a source c
 | nova API key | `NOVA_API_KEY` env (alias: `ASTROMETRY_API_KEY`), or `"nova_api_key"` in `data/config.json`, or the config page | unset (solves fail with a hint) |
 | Upload limit | `ASTROCAPTION_MAX_UPLOAD_MB` env, or `"max_upload_mb"`, or the config page | 60 (and 300 megapixels) |
 | Site title | `ASTROCAPTION_SITE_TITLE` env, or `"site_title"`, or the config page | AstroCaption |
+| Public gallery | `ASTROCAPTION_PUBLIC_GALLERY` env (`true`/`false`), or `"public_gallery_enabled"`, or the config page | on |
 | Data directory | `ASTROCAPTION_DATA_DIR` env | `/data` in the container |
 | Default label style | `"default_style"` object in `data/config.json`, or the config page | built-in defaults (size-relative for the four size fields) |
 | Owner password | setup page, or `ASTROCAPTION_PASSWORD` env at first start, or the Config page later | required |
 | Secure cookies | `TRUST_PROXY=1` env when the app is served over HTTPS by a proxy | off |
 | Solve timeout | `ASTROCAPTION_SOLVE_TIMEOUT_SECONDS` env | 900 (bounds 1-86400) |
 | Solve poll interval | `ASTROCAPTION_SOLVE_POLL_SECONDS` env | 5 (bounds 0.1-3600) |
+
+Public gallery: when on, signed-out visitors see the published images at `/`, each with a
+hover-to-reveal annotated preview and a link to the full-resolution annotated export; nothing
+else (the editor, the config page, unpublished images) is reachable without signing in. Turning
+it off (`ASTROCAPTION_PUBLIC_GALLERY=false` or the config page) serves 404 on every gallery route
+and shows only the site title and a sign-in link at `/`.
 
 Solve timeout and poll interval are not exposed on the config page; they are read once at
 process start, so changing one means restarting the app. Unset or blank = the default; a
