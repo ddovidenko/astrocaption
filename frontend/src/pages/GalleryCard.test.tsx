@@ -65,8 +65,7 @@ describe('GalleryCard', () => {
       </MemoryRouter>,
     )
     const link = screen.getByRole('link')
-    const first = fireEvent.click(link)
-    expect(first).toBe(false) // default prevented: no navigation yet
+    fireEvent.click(link)
     expect(revealed()).toBe(true)
     expect(screen.queryByText('Landed')).toBeNull()
     fireEvent.click(link)

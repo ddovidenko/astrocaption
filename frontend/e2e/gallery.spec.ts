@@ -25,6 +25,8 @@ test('publish, gallery hover, full view download, unpublish', async ({ page, bro
       await expect(pub.getByRole('link', { name: 'Log in' })).toBeVisible()
       const galleryCard = pub.locator('.gallery-card', { hasText: 'Orion' })
       await expect(galleryCard).toBeVisible()
+      await expect(galleryCard.locator('figcaption')).toBeInViewport()
+      await expect(galleryCard.locator('figcaption')).toHaveText('Orion')
 
       const overlay = galleryCard.locator('img.overlay')
       await expect(overlay).toHaveCSS('opacity', '0')
@@ -34,7 +36,7 @@ test('publish, gallery hover, full view download, unpublish', async ({ page, bro
       await expect.poll(() => overlay.evaluate((e: HTMLImageElement) => e.naturalWidth)).toBeGreaterThan(0)
 
       await galleryCard.click()
-      await expect(pub).toHaveURL(new RegExp(`/gallery/${image.id}$`))
+      await expect(pub).toHaveURL(new RegExp(`/gallery/${image!.id}$`))
       const download = pub.getByRole('link', { name: /^Download annotated image/ })
       const href = await download.getAttribute('href')
       expect(href).toBeTruthy()
@@ -44,7 +46,7 @@ test('publish, gallery hover, full view download, unpublish', async ({ page, bro
       expect(res.headers()['content-disposition']).toContain('Orion-annotated.jpg')
 
       // The owner-only files stay closed to the visitor.
-      expect((await pub.request.get(`/api/images/${image.id}/files/original`)).status()).toBe(401)
+      expect((await pub.request.get(`/api/images/${image!.id}/files/original`)).status()).toBe(401)
       expect((await pub.request.get('/api/images')).status()).toBe(401)
 
       // Unpublish from the owner's tab; the visitor's next load says so.
@@ -59,6 +61,6 @@ test('publish, gallery hover, full view download, unpublish', async ({ page, bro
     }
   } finally {
     // Leave the shared data dir as it was found, whatever failed above (#116).
-    await page.request.put(`/api/images/${image.id}/published`, { data: { published: false } })
+    await page.request.put(`/api/images/${image!.id}/published`, { data: { published: false } })
   }
 })

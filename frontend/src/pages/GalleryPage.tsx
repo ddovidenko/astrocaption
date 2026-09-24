@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router'
 import { api, describeError, type GalleryItem, type HealthOut } from '../api'
 import GalleryCard from './GalleryCard'
 
@@ -30,11 +29,7 @@ export default function GalleryPage({ health }: { health: HealthOut }) {
   if (!enabled) {
     return (
       <section className="gallery-off">
-        {!health.authenticated && (
-          <p className="meta">
-            <Link to="/login">Log in</Link>
-          </p>
-        )}
+        {!health.authenticated && <p className="meta">Nothing to see here yet.</p>}
         {health.authenticated && <p className="meta">The public gallery is switched off in Config.</p>}
       </section>
     )

@@ -301,11 +301,7 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
               <button onClick={exportNow} disabled={working}>
                 {working ? 'Rendering…' : 'Export'}
               </button>
-              {image.published ? (
-                <button className="secondary" onClick={() => setPublished(false)} disabled={working}>
-                  Unpublish
-                </button>
-              ) : (
+              {!image.published && (
                 <button
                   className="secondary"
                   onClick={() => setPublished(true)}
@@ -357,6 +353,11 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
                 Re-solve
               </button>
             </>
+          )}
+          {image.published && (
+            <button className="secondary" onClick={() => setPublished(false)} disabled={working}>
+              Unpublish
+            </button>
           )}
           {confirming ? (
             <ConfirmInline

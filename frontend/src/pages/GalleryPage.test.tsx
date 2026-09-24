@@ -63,14 +63,14 @@ describe('GalleryPage', () => {
     expect(await screen.findByText('Nothing published yet.')).toBeTruthy()
   })
 
-  it('shows only a sign-in link when the gallery is switched off', () => {
+  it('shows a plain sentence, not the gallery, when switched off', () => {
     render(
       <MemoryRouter>
         <GalleryPage health={health({ public_gallery_enabled: false })} />
       </MemoryRouter>,
     )
     expect(api.gallery).not.toHaveBeenCalled()
-    expect(screen.getByRole('link', { name: 'Log in' }).getAttribute('href')).toBe('/login')
+    expect(screen.getByText('Nothing to see here yet.')).toBeTruthy()
   })
 })
 
