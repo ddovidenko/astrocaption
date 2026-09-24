@@ -6,18 +6,24 @@ import { isCoarsePointer } from './pointer'
 /** The gallery's hover-to-reveal picture (SPEC § 5.5): `plain` underneath, `annotated` on top,
  *  faded in while a mouse hovers. On a touch screen the first tap reveals and, when the card is
  *  a link, the second tap follows it; without a link a tap simply toggles. Both bitmaps keep the
- *  same box, so the swap never reflows the grid. */
+ *  same box, so the swap never reflows the grid. `frame` picks the box's aspect ratio: `'image'`
+ *  (the default, used by the single-image view) uses the item's own width/height so the box
+ *  matches the picture; `'uniform'` (used by the grid) leaves no inline aspect ratio and lets the
+ *  CSS give every card the same box, with a portrait picture letterboxed inside on the black
+ *  background rather than making its card taller than its neighbours. */
 export default function GalleryCard({
   item,
   plain,
   annotated,
   to,
+  frame = 'image',
   children,
 }: {
   item: GalleryItem
   plain: string
   annotated: string
   to?: string
+  frame?: 'uniform' | 'image'
   children?: ReactNode
 }) {
   const [revealed, setRevealed] = useState(false)
@@ -37,7 +43,7 @@ export default function GalleryCard({
 
   const picture = (
     <figure className="gallery-picture">
-      <div className="gallery-frame" style={{ aspectRatio: `${item.width} / ${item.height}` }}>
+      <div className="gallery-frame" style={frame === 'image' ? { aspectRatio: `${item.width} / ${item.height}` } : undefined}>
         <img src={plain} alt={item.title} loading="lazy" />
         <img
           className={revealed ? 'overlay revealed' : 'overlay'}

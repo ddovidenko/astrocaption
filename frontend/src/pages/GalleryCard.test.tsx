@@ -70,4 +70,18 @@ describe('GalleryCard', () => {
     fireEvent.click(figure)
     expect(revealed()).toBe(false)
   })
+
+  it('frame="uniform" drops the inline aspect ratio; the default keeps the item\'s own', () => {
+    coarse(false)
+    const { container, unmount } = render(
+      <GalleryCard item={item} plain={item.preview_url} annotated={item.annotated_preview_url} frame="uniform" />,
+    )
+    const uniformFrame = container.querySelector('.gallery-frame') as HTMLElement
+    expect(uniformFrame.style.aspectRatio).toBe('')
+    unmount()
+
+    render(<GalleryCard item={item} plain={item.preview_url} annotated={item.annotated_preview_url} />)
+    const imageFrame = screen.getByRole('figure').querySelector('.gallery-frame') as HTMLElement
+    expect(imageFrame.style.aspectRatio).toBe('3000 / 2000')
+  })
 })

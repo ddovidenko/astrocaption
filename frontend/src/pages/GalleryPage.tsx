@@ -40,7 +40,14 @@ export default function GalleryPage({ health }: { health: HealthOut }) {
   return (
     <section className="gallery" aria-label="Gallery">
       {items.map((item) => (
-        <GalleryCard key={item.id} item={item} plain={item.thumb_url} annotated={item.annotated_preview_url} to={`/gallery/${item.id}`}>
+        <GalleryCard
+          key={item.id}
+          item={item}
+          plain={item.thumb_url}
+          annotated={item.annotated_preview_url}
+          to={`/gallery/${item.id}`}
+          frame="uniform"
+        >
           {item.title}
         </GalleryCard>
       ))}
