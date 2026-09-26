@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { Link, Navigate } from 'react-router'
 import { api, describeError, MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, type HealthOut } from '../api'
 import { NOVA_COPIES_NOTE } from './novaNote'
@@ -17,6 +17,7 @@ export default function SetupPage({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+  const novaNoteId = useId()
 
   // An environment variable wins over anything typed here, so offer it read-only and do
   // not send it: a value parked in config.json would never take effect.
@@ -98,10 +99,19 @@ export default function SetupPage({
         </label>
         <label>
           nova.astrometry.net API key (optional)
-          <input type="text" value={novaKey} autoComplete="off" disabled={novaLocked} onChange={(e) => setNovaKey(e.target.value)} />
+          <input
+            type="text"
+            value={novaKey}
+            autoComplete="off"
+            disabled={novaLocked}
+            aria-describedby={novaNoteId}
+            onChange={(e) => setNovaKey(e.target.value)}
+          />
           {novaLocked && <span className="meta">set by the environment</span>}
         </label>
-        <p className="field-note">{NOVA_COPIES_NOTE}</p>
+        <p className="field-note" id={novaNoteId}>
+          {NOVA_COPIES_NOTE}
+        </p>
         <label>
           Site title (optional)
           <input type="text" value={siteTitle} placeholder={health.site_title} disabled={titleLocked} onChange={(e) => setSiteTitle(e.target.value)} />

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { api, pageError, type ConfigOut, type FontOut, type HealthOut } from '../api'
 import StyleForm from '../style/StyleForm'
 import { styleFormFromOverrides, type StyleForm as StyleFormValues } from '../style/styleForm'
@@ -18,6 +18,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
+  const novaNoteId = useId()
 
   useEffect(() => {
     let cancelled = false
@@ -162,6 +163,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
                 value={novaKey}
                 autoComplete="off"
                 placeholder="Paste the key from your nova profile"
+                aria-describedby={novaNoteId}
                 onChange={(e) => edit(setNovaKey, e.target.value)}
               />
             </label>
@@ -172,7 +174,9 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
             )}
           </div>
         )}
-        <p className="field-note">{NOVA_COPIES_NOTE}</p>
+        <p className="field-note" id={novaNoteId}>
+          {NOVA_COPIES_NOTE}
+        </p>
       </section>
 
       <section className="panel">
