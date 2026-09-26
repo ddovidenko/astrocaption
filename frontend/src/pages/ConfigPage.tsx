@@ -184,7 +184,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
         <StyleForm mode="overrides" values={style} defaults={d} fonts={fonts} onChange={setField}>
           <p className="field-note">
             Applies to newly solved images. Blank fields keep the built-in defaults; the four sizes then scale with each image.
-            The preview draws the text near its real size and every width in proportion to it.
+            The preview draws the text near its real size, smaller when it would not fit, and every width in proportion to it.
           </p>
         </StyleForm>
       </section>

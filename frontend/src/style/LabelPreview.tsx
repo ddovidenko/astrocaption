@@ -3,7 +3,7 @@ import type { StyleDefaults } from '../api'
 import { loadBundledFont } from '../editor/fonts'
 import { fontFamilyFor } from '../editor/metrics'
 import type { StyleForm } from './styleForm'
-import { previewCap, previewGeometry, previewLines } from './labelPreview'
+import { fitToStrip, PREVIEW_TEXT_X, PREVIEW_WIDTH, previewCap, previewGeometry, previewLines } from './labelPreview'
 
 /** Fixed stars so the preview is the same every time. */
 const STARS = [
@@ -12,6 +12,17 @@ const STARS = [
 ] as const
 
 const FALLBACK_FAMILY = 'Inter, system-ui, sans-serif'
+
+let measureCtx: CanvasRenderingContext2D | null | undefined
+
+/** Advance width of `text` in the CSS `family` at `size` px, or null where there is no canvas
+ *  (jsdom). The same family the SVG draws with, so a fallback face is measured as a fallback. */
+function textWidth(text: string, family: string, size: number): number | null {
+  if (measureCtx === undefined) measureCtx = document.createElement('canvas').getContext('2d')
+  if (!measureCtx) return null
+  measureCtx.font = `${size}px ${family}`
+  return measureCtx.measureText(text).width
+}
 
 function useBundledFont(file: string): { family: string; failed: boolean } {
   // Keyed by the file, so switching fonts drops the previous result instead of keeping a stale
@@ -54,24 +65,30 @@ export default function LabelPreview({ style, defaults }: { style: StyleForm; de
   const maxAliases = previewCap(style.max_aliases, defaults.max_aliases)
   const lines = previewLines(style.name_preference, defaults.name_preference, maxAliases)
   const aliasesOn = aliasesOnSetting && lines.aliases !== ''
-  const g = previewGeometry(style, defaults)
+  const sized = previewGeometry(style, defaults)
+  // Re-measured on every render: family only changes once the font has loaded, so the first
+  // measurement of a new font is with the fallback face and the next one with the real one.
+  const primaryWidth = textWidth(lines.primary, family, sized.textSize)
+  const aliasWidth = aliasesOn ? textWidth(lines.aliases, family, sized.aliasSize) : 0
+  const g =
+    primaryWidth === null || aliasWidth === null ? sized : fitToStrip(sized, { primary: primaryWidth, aliases: aliasWidth })
   const description = `Preview: ${lines.primary}${aliasesOn ? `, ${lines.aliases}` : ''} in ${fontFile}`
   const strokeProps = { stroke: haloColor, strokeWidth: g.haloWidth, paintOrder: 'stroke' as const, strokeLinejoin: 'round' as const }
 
   return (
     <>
-      <svg className="preview" viewBox="0 0 560 130" role="img" aria-label={description}>
-      <rect width="560" height="130" fill="#05070d" />
+      <svg className="preview" viewBox={`0 0 ${PREVIEW_WIDTH} 130`} role="img" aria-label={description}>
+      <rect width={PREVIEW_WIDTH} height="130" fill="#05070d" />
       {STARS.map(([x, y, r]) => (
         <circle key={`${x}-${y}`} cx={x} cy={y} r={r} fill="#d8e0ff" opacity="0.85" />
       ))}
       <circle cx="120" cy="72" r="34" fill="none" stroke={marker} strokeWidth={g.markerWidth} />
-      <line x1="154" y1="72" x2="196" y2="62" stroke={leader} strokeWidth={g.markerWidth} />
-      <text x="204" y={aliasesOn ? 62 : 70} fill={text} fontFamily={family} fontSize={g.textSize} {...strokeProps}>
+      <line x1="154" y1="72" x2={PREVIEW_TEXT_X - 8} y2="62" stroke={leader} strokeWidth={g.markerWidth} />
+      <text x={PREVIEW_TEXT_X} y={aliasesOn ? 62 : 70} fill={text} fontFamily={family} fontSize={g.textSize} {...strokeProps}>
         {lines.primary}
       </text>
       {aliasesOn && (
-        <text x="204" y={62 + g.aliasOffset} fill={text} fontFamily={family} fontSize={g.aliasSize} opacity="0.9" {...strokeProps}>
+        <text x={PREVIEW_TEXT_X} y={62 + g.aliasOffset} fill={text} fontFamily={family} fontSize={g.aliasSize} opacity="0.9" {...strokeProps}>
           {lines.aliases}
         </text>
       )}

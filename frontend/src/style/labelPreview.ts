@@ -68,3 +68,27 @@ export function previewGeometry(style: StyleForm, defaults: StyleDefaults): Prev
     aliasOffset: textSize * LINE_HEIGHT,
   }
 }
+
+/** The strip's viewBox width and where the label text starts in it (LabelPreview draws both). */
+export const PREVIEW_WIDTH = 560
+export const PREVIEW_TEXT_X = 204
+/** Kept clear at the strip's right edge. */
+const RIGHT_MARGIN = 12
+
+/** Shrink the label until its widest line, halo included, ends inside the strip (#112). `widths`
+ *  are the two lines' advance widths at `g`'s sizes. Every length scales together, so the text keeps
+ *  its proportions to the strokes; a label that already fits is returned unchanged. */
+export function fitToStrip(g: PreviewGeometry, widths: { primary: number; aliases: number }): PreviewGeometry {
+  const room = PREVIEW_WIDTH - PREVIEW_TEXT_X - RIGHT_MARGIN
+  // haloWidth is the centred SVG stroke, so half of it paints past the last glyph.
+  const needed = Math.max(widths.primary, widths.aliases) + g.haloWidth / 2
+  if (needed <= room) return g
+  const k = room / needed
+  return {
+    textSize: g.textSize * k,
+    haloWidth: g.haloWidth * k,
+    markerWidth: g.markerWidth * k,
+    aliasSize: g.aliasSize * k,
+    aliasOffset: g.aliasOffset * k,
+  }
+}

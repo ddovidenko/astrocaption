@@ -82,3 +82,29 @@ test('the Style tab changes the font size live, autosaves it, and Ctrl+Z takes i
     await expect(page.locator('.save-status')).toHaveText('Saved')
   }
 })
+
+// #112: a large font size with every alias shown shrinks the preview label to fit its strip rather
+// than running off the right edge. The config page's style form is unsaved until "Save changes",
+// so nothing here reaches the shared data dir.
+test('the style preview keeps a large label inside its strip', async ({ page }) => {
+  await ensureSetUpAndSignedIn(page)
+  await page.goto('/config')
+  await page.getByLabel('Alias line').selectOption('on')
+  await page.getByLabel('Aliases shown (max)').fill('5')
+  await page.getByLabel('Font size (px)').fill('200')
+  const preview = page.locator('svg.preview')
+  await expect(preview).toHaveAttribute('aria-label', /Great Orion Nebula/)
+  // Wait for the bundled face: fitting is measured in the family the SVG draws with.
+  await page.evaluate(() => document.fonts.ready)
+  await expect
+    .poll(() =>
+      preview.evaluate((svg: SVGSVGElement) => {
+        const width = svg.viewBox.baseVal.width
+        return [...svg.querySelectorAll('text')].map((t) => {
+          const box = t.getBBox()
+          return box.x + box.width <= width
+        })
+      }),
+    )
+    .toEqual([true, true])
+})
