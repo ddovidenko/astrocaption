@@ -94,8 +94,10 @@ test('the style preview keeps a large label inside its strip', async ({ page }) 
   await page.getByLabel('Font size (px)').fill('200')
   const preview = page.locator('svg.preview')
   await expect(preview).toHaveAttribute('aria-label', /Great Orion Nebula/)
-  // Wait for the bundled face: fitting is measured in the family the SVG draws with.
-  await page.evaluate(() => document.fonts.ready)
+  // Wait for the bundled face: fitting is measured in the family the SVG draws with, and until the
+  // face has loaded that is the fallback (document.fonts.ready does not track a FontFace loaded
+  // before it was added to the set, as fonts.ts does).
+  await expect(preview.locator('text').first()).toHaveAttribute('font-family', /^"/) // a bundled face, quoted
   await expect
     .poll(() =>
       preview.evaluate((svg: SVGSVGElement) => {

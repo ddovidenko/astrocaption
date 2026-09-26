@@ -13,6 +13,9 @@ const STARS = [
 
 const FALLBACK_FAMILY = 'Inter, system-ui, sans-serif'
 
+// Not the editor's shared measurer (editing.ts `getMeasurer`): that one takes a bundled file name,
+// and the preview must also measure the CSS fallback family it draws with while a face loads or
+// after one failed.
 let measureCtx: CanvasRenderingContext2D | null | undefined
 
 /** Advance width of `text` in the CSS `family` at `size` px, or null where there is no canvas
@@ -20,6 +23,9 @@ let measureCtx: CanvasRenderingContext2D | null | undefined
 function textWidth(text: string, family: string, size: number): number | null {
   if (measureCtx === undefined) measureCtx = document.createElement('canvas').getContext('2d')
   if (!measureCtx) return null
+  // Unhinted, like SVG text: hinted canvas advances round per glyph and can drift past the margin
+  // over a long alias line (see canvasMeasurer). Firefox has no textRendering; it measures as is.
+  if ('textRendering' in measureCtx) measureCtx.textRendering = 'geometricPrecision'
   measureCtx.font = `${size}px ${family}`
   return measureCtx.measureText(text).width
 }
