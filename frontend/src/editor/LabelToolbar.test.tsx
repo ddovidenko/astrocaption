@@ -153,6 +153,43 @@ describe('LabelToolbar', () => {
     expect(size().value).toBe('31')
   })
 
+  // After arrow steps the focus is still in the field, where the editor's shortcuts leave keys to
+  // the input; the field hands undo/redo to the editor's history unless a number is being typed.
+  it('Ctrl+Z / Ctrl+Y in the field undo and redo the editor history when nothing is typed', () => {
+    render(<LabelToolbar box={box} />)
+    fireEvent.keyDown(size(), { key: 'ArrowUp' })
+    fireEvent.keyUp(size(), { key: 'ArrowUp' })
+    expect(label(1).font_size).toBe(25)
+    expect(fireEvent.keyDown(size(), { key: 'z', ctrlKey: true })).toBe(false)
+    expect(label(1).font_size).toBeNull()
+    expect(size().value).toBe('')
+    expect(fireEvent.keyDown(size(), { key: 'y', ctrlKey: true })).toBe(false)
+    expect(label(1).font_size).toBe(25)
+    fireEvent.keyDown(size(), { key: 'z', metaKey: true })
+    fireEvent.keyDown(size(), { key: 'Z', metaKey: true, shiftKey: true })
+    expect(label(1).font_size).toBe(25)
+  })
+
+  it('Ctrl+Z while a number is being typed is left to the field', () => {
+    render(<LabelToolbar box={box} />)
+    const entries = state().undo.length
+    fireEvent.change(size(), { target: { value: '30' } })
+    expect(fireEvent.keyDown(size(), { key: 'z', ctrlKey: true })).toBe(true) // native undo
+    expect(state().undo).toHaveLength(entries)
+    expect(label(1).font_size).toBeNull()
+  })
+
+  it('Ctrl+Z during a held arrow commits the run first, then undoes it', () => {
+    render(<LabelToolbar box={box} />)
+    const entries = state().undo.length
+    fireEvent.keyDown(size(), { key: 'ArrowUp' })
+    fireEvent.keyDown(size(), { key: 'ArrowUp', repeat: true })
+    fireEvent.keyDown(size(), { key: 'z', ctrlKey: true })
+    expect(label(1).font_size).toBeNull()
+    expect(state().redo).toHaveLength(1)
+    expect(state().undo).toHaveLength(entries)
+  })
+
   it('an arrow at the bound records nothing', () => {
     state().updateLabels([1], { font_size: MAX_FONT_SIZE })
     render(<LabelToolbar box={box} />)

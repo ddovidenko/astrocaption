@@ -223,6 +223,21 @@ export default function LabelToolbar({
           commitSize()
         }}
         onKeyDown={(e) => {
+          // Undo/redo: the editor's shortcuts leave keys to a focused toolbar field, and after arrow
+          // steps the focus is still here, so the field hands them to the editor's history itself —
+          // unless a number is being typed, whose own undo is the input's. A held arrow's run is
+          // committed first: the history does not move under a live preview.
+          const key = e.key.toLowerCase()
+          const undo = key === 'z' && !e.shiftKey
+          const redo = key === 'y' || (key === 'z' && e.shiftKey)
+          if ((e.ctrlKey || e.metaKey) && !e.altKey && (undo || redo) && draft === shownSize) {
+            e.preventDefault()
+            commitPreview()
+            const s = useEditor.getState()
+            if (undo) s.undoLast()
+            else s.redoLast()
+            return
+          }
           if (e.key === 'Enter') {
             e.preventDefault()
             commitSize()
