@@ -153,7 +153,9 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
 - Gallery shows published images only, newest first. Hover (or tap on touch) swaps the preview
   to the annotated preview. Click opens a full-size view (the 2048 px preview) with the same
   hover behaviour and a link to download the full-resolution annotated export. The unannotated
-  original is never public.
+  original is never public. Every grid card shares one 3:2 box (a portrait image is letterboxed
+  on black) and long titles wrap inside their card; only the full-size view uses the image's own
+  proportions.
 - `public_gallery_enabled` (config, default true; env `ASTROCAPTION_PUBLIC_GALLERY`) switches
   the whole public surface off: every `/api/gallery` route answers 404 and the logged-out `/`
   shows only the site title and a sign-in link.
@@ -472,7 +474,7 @@ Build in this order; each is shippable.
 2. **Setup & auth** — first-run setup, login, config page, lockout CLI, INSTALL.md, browser smoke test in CI. *Design approved 2026-09-08.*
 3. **Editor v1** — canvas with zoom/pan, object list with checkboxes, hover/click to enable, drag labels, autosave, export button. Parity test between Konva and Pillow.
 4. **Styling** — fonts, colours, halo, per-label overrides, wheel-to-resize while dragging, undo/redo. **Done 2026-09-22.**
-5. **Gallery** — publish toggle, public gallery with hover overlay, responsive. **Done 2026-09-23.**
+5. **Gallery** — publish toggle, public gallery with hover overlay, responsive. **Done 2026-09-26.**
 6. **Release** — GHCR multi-arch, release workflow, Codespaces, issue templates, README with screenshots.
 
 Later (not v1): local ASTAP solver option, custom object entries (user-added labels at arbitrary RA/Dec or pixels), constellation lines, SVG/PNG-with-alpha export, multiple owners.
