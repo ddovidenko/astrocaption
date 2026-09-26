@@ -149,7 +149,7 @@ export default function LabelToolbar({
       return
     }
     // The same bounds the Style tab's size field enforces, but applied the way − / + apply them:
-    // a typed 500 commits 200 and 12.5 commits 13, and the field shows the committed value at
+    // a typed 900 commits 500 and 12.5 commits 13, and the field shows the committed value at
     // once. The toolbar has no room for a validation line, so a dropped edit would say nothing
     // (#103). Only text the number input let through that is still not a number is dropped.
     const n = Number(text)
