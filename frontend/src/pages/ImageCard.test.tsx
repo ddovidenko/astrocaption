@@ -90,6 +90,12 @@ describe('ImageCard publish button', () => {
     await waitFor(() => expect(api.setPublished).toHaveBeenCalledWith('img-1', false))
   })
 
+  it('still offers Unpublish, and no Publish, on a published image that is now failed', () => {
+    renderCard(image({ ...exported, published: true, solve_status: 'failed', solve_error: 'nova timed out' }))
+    expect(screen.getByRole('button', { name: 'Unpublish' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Publish' })).toBeNull()
+  })
+
   it('shows the server refusal on the card', async () => {
     vi.mocked(api.setPublished).mockRejectedValue(new ApiError(409, 'Export the image before publishing it.'))
     renderCard(image(exported))

@@ -13,6 +13,7 @@ data/renders/<id>/annotated_preview.jpg  ≤ 2048 px copy of the export
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,7 @@ from pathlib import Path
 from PIL import Image, JpegImagePlugin, UnidentifiedImageError
 
 from .config import Settings
+from .models import ImageRecord, SolveStatus
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +70,19 @@ def image_dir(settings: Settings, image_id: str) -> Path:
 
 def render_dir(settings: Settings, image_id: str) -> Path:
     return settings.renders_dir / image_id
+
+
+def slug_of(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-.") or "image"
+
+
+def export_exists(settings: Settings, rec: ImageRecord) -> bool:
+    """Whether the gallery has both bitmaps for ``rec``: a solved row, an export stamp, and the
+    files it points at (the owner may have emptied data/renders by hand)."""
+    if rec.solve_status is not SolveStatus.SOLVED or not rec.exported_at:
+        return False
+    out = render_dir(settings, rec.id)
+    return (out / "annotated.jpg").is_file() and (out / "annotated_preview.jpg").is_file()
 
 
 def normalised_extension(filename: str) -> str | None:

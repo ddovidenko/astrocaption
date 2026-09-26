@@ -3,18 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import GalleryCard from './GalleryCard'
-
-const item = {
-  id: 'img-1',
-  title: 'Orion',
-  width: 3000,
-  height: 2000,
-  exported_at: '2026-09-22T10:05:00Z',
-  thumb_url: '/api/gallery/img-1/files/thumb',
-  preview_url: '/api/gallery/img-1/files/preview',
-  annotated_preview_url: '/api/gallery/img-1/files/annotated-preview?v=x',
-  export_url: '/api/gallery/img-1/files/export?v=x',
-}
+import { galleryItem as item } from './galleryTestItem'
 
 function coarse(is: boolean) {
   window.matchMedia = vi.fn().mockImplementation((q: string) => ({
@@ -65,8 +54,7 @@ describe('GalleryCard', () => {
       </MemoryRouter>,
     )
     const link = screen.getByRole('link')
-    const first = fireEvent.click(link)
-    expect(first).toBe(false) // default prevented: no navigation yet
+    fireEvent.click(link)
     expect(revealed()).toBe(true)
     expect(screen.queryByText('Landed')).toBeNull()
     fireEvent.click(link)
@@ -81,5 +69,19 @@ describe('GalleryCard', () => {
     expect(revealed()).toBe(true)
     fireEvent.click(figure)
     expect(revealed()).toBe(false)
+  })
+
+  it('frame="uniform" drops the inline aspect ratio; the default keeps the item\'s own', () => {
+    coarse(false)
+    const { container, unmount } = render(
+      <GalleryCard item={item} plain={item.preview_url} annotated={item.annotated_preview_url} frame="uniform" />,
+    )
+    const uniformFrame = container.querySelector('.gallery-frame') as HTMLElement
+    expect(uniformFrame.style.aspectRatio).toBe('')
+    unmount()
+
+    render(<GalleryCard item={item} plain={item.preview_url} annotated={item.annotated_preview_url} />)
+    const imageFrame = screen.getByRole('figure').querySelector('.gallery-frame') as HTMLElement
+    expect(imageFrame.style.aspectRatio).toBe('3000 / 2000')
   })
 })

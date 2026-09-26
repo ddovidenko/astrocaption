@@ -123,22 +123,30 @@ export default function App() {
             <Route
               path="/"
               element={
-                health.setup_required ? (
-                  <Navigate to="/setup" replace />
-                ) : health.authenticated ? (
-                  <ImagesPage health={health} refreshHealth={refreshHealth} />
-                ) : (
-                  <GalleryPage health={health} />
-                )
+                <Guard health={health} requireAuth={false}>
+                  {health.authenticated ? (
+                    <ImagesPage health={health} refreshHealth={refreshHealth} />
+                  ) : (
+                    <GalleryPage health={health} />
+                  )}
+                </Guard>
               }
             />
             <Route
               path="/gallery"
-              element={health.setup_required ? <Navigate to="/setup" replace /> : <GalleryPage health={health} />}
+              element={
+                <Guard health={health} requireAuth={false}>
+                  <GalleryPage health={health} />
+                </Guard>
+              }
             />
             <Route
               path="/gallery/:id"
-              element={health.setup_required ? <Navigate to="/setup" replace /> : <GalleryImagePage />}
+              element={
+                <Guard health={health} requireAuth={false}>
+                  <GalleryImagePage />
+                </Guard>
+              }
             />
             <Route
               path="/config"
@@ -167,9 +175,18 @@ export default function App() {
   )
 }
 
-/** Owner-only routes: setup first, then sign-in, then the page. */
-function Guard({ health, children }: { health: HealthOut; children: React.ReactNode }) {
+/** Setup first, always; then sign-in, unless `requireAuth` is false (the public routes, which
+ *  render for both a visitor and the signed-in owner). */
+function Guard({
+  health,
+  requireAuth = true,
+  children,
+}: {
+  health: HealthOut
+  requireAuth?: boolean
+  children: React.ReactNode
+}) {
   if (health.setup_required) return <Navigate to="/setup" replace />
-  if (!health.authenticated) return <Navigate to="/login" replace />
+  if (requireAuth && !health.authenticated) return <Navigate to="/login" replace />
   return children
 }

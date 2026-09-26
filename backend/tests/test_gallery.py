@@ -148,8 +148,10 @@ def test_gallery_item_and_files_for_a_published_image(
         assert file_resp.content[:2] == b"\xff\xd8", key  # a JPEG, not an error page
     export = anon_client.get(item["export_url"])
     assert 'filename="Orion-Field-annotated.jpg"' in export.headers["content-disposition"]
-    # The unannotated original is owner-only: no public kind serves it.
-    assert anon_client.get(f"/api/gallery/{image['id']}/files/original").status_code == 422
+    # The unannotated original is owner-only: no public kind serves it, and an unknown kind is
+    # the same 404 as every other miss.
+    resp = anon_client.get(f"/api/gallery/{image['id']}/files/original")
+    assert resp.status_code == 404 and resp.json() == {"detail": NOT_FOUND}
     assert anon_client.get(f"/api/images/{image['id']}/files/original").status_code == 401
 
 
@@ -201,6 +203,7 @@ def test_gallery_is_404_everywhere_when_switched_off(
             f"/api/gallery/{image['id']}",
             f"/api/gallery/{image['id']}/files/thumb",
             f"/api/gallery/{image['id']}/files/export",
+            f"/api/gallery/{image['id']}/files/original",
         ):
             resp = client.get(url)
             assert resp.status_code == 404 and resp.json() == {"detail": NOT_FOUND}, url
