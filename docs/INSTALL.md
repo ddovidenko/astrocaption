@@ -7,6 +7,8 @@
 
 - Docker with the compose plugin (Docker Desktop on Windows/macOS, or Docker Engine on Linux/NAS).
 - A free nova.astrometry.net account and its API key (profile page → *API key*).
+  Each solve uploads a copy of the image (at most 3000 px on its long side) to that account. It is
+  not publicly listed, but nova has no way to delete uploads, so every copy stays there.
 
 ## Three commands
 

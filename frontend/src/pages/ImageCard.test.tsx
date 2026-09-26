@@ -103,3 +103,11 @@ describe('ImageCard publish button', () => {
     expect(await screen.findByText('Export the image before publishing it.')).toBeTruthy()
   })
 })
+
+describe('ImageCard nova links', () => {
+  it('links the latest solve without repeating the nova copies note (it lives on the config page, #113)', () => {
+    renderCard(image({ nova_status_url: 'https://nova.astrometry.net/status/1' }))
+    expect(screen.getByRole('link', { name: 'nova status' })).toBeTruthy()
+    expect(screen.queryByText(/uploads a copy/)).toBeNull()
+  })
+})

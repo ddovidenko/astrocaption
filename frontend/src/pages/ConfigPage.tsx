@@ -3,6 +3,7 @@ import { api, pageError, type ConfigOut, type FontOut, type HealthOut } from '..
 import StyleForm from '../style/StyleForm'
 import { styleFormFromOverrides, type StyleForm as StyleFormValues } from '../style/styleForm'
 import { buildUpdate } from './configForm'
+import { NOVA_COPIES_NOTE } from './novaNote'
 
 const HEADER_NOT_REFRESHED = 'Saved, but the page header could not be refreshed; reload to see the new title.'
 
@@ -171,6 +172,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
             )}
           </div>
         )}
+        <p className="field-note">{NOVA_COPIES_NOTE}</p>
       </section>
 
       <section className="panel">

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, Navigate } from 'react-router'
 import { api, describeError, MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, type HealthOut } from '../api'
+import { NOVA_COPIES_NOTE } from './novaNote'
 
 export default function SetupPage({
   health,
@@ -100,6 +101,7 @@ export default function SetupPage({
           <input type="text" value={novaKey} autoComplete="off" disabled={novaLocked} onChange={(e) => setNovaKey(e.target.value)} />
           {novaLocked && <span className="meta">set by the environment</span>}
         </label>
+        <p className="field-note">{NOVA_COPIES_NOTE}</p>
         <label>
           Site title (optional)
           <input type="text" value={siteTitle} placeholder={health.site_title} disabled={titleLocked} onChange={(e) => setSiteTitle(e.target.value)} />
