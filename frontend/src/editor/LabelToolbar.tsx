@@ -173,6 +173,23 @@ export default function LabelToolbar({
     s.applyLabels(updated)
   }
 
+  // ArrowUp / ArrowDown in the field (#144): preview frames, committed as one entry when the key
+  // comes up or the field loses focus, the way a wheel resize commits on its mouseup, so holding
+  // the key is one change rather than one per repeat (which would flush the 100-entry history). A
+  // number typed but not yet committed is the base to step from, as in a native number field.
+  const stepPreview = (delta: number) => {
+    const typedSize = typed === null || typed.trim() === '' ? NaN : Number(typed)
+    dropTyped()
+    const s = useEditor.getState()
+    for (const id of ids) {
+      const label = s.labels.get(id)
+      if (!label) continue
+      const from = Number.isFinite(typedSize) ? typedSize : (label.font_size ?? style.font_size)
+      s.updateLabels([id], { font_size: clampFontSize(from + delta) }, false)
+    }
+  }
+  const commitPreview = () => useEditor.getState().commitPreview()
+
   // Above the union box, inside the canvas; below it when there is no room above.
   const topLeft = toScreen(view, box.left, box.top)
   const bottomRight = toScreen(view, box.right, box.bottom)
@@ -201,18 +218,24 @@ export default function LabelToolbar({
           if (e.target.validity.badInput) return
           setTyped(e.target.value)
         }}
-        onBlur={commitSize}
+        onBlur={() => {
+          commitPreview()
+          commitSize()
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault()
             commitSize()
             e.currentTarget.blur()
           } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-            // The native step would only move the draft, which waits for Enter or blur (#144):
-            // step the stored sizes the way − / + do instead. The spinner is hidden in CSS.
+            // The native step would only move the draft, which waits for Enter or blur (#144).
+            // The spinner is hidden in CSS.
             e.preventDefault()
-            step(e.key === 'ArrowUp' ? 1 : -1)
+            stepPreview(e.key === 'ArrowUp' ? 1 : -1)
           }
+        }}
+        onKeyUp={(e) => {
+          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') commitPreview()
         }}
       />
       <button type="button" className="secondary" aria-label="Larger" onMouseDown={noFocus} onClick={() => step(1)}>

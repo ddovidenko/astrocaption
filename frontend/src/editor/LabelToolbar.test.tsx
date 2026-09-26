@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import LabelToolbar from './LabelToolbar'
+import { MAX_FONT_SIZE } from './metrics'
 import { useEditor } from './store'
 import { makeDoc } from './testDoc'
 import { toScreen } from './view'
@@ -101,20 +102,65 @@ describe('LabelToolbar', () => {
   })
 
   // #144: the native spinner only moved the draft, which waits for Enter or blur, so the arrows
-  // seemed dead. The spinner is hidden (− / + sit beside the field) and the arrow keys step instead.
-  it('ArrowUp / ArrowDown in the field step like + / −, one entry each, instead of the native step', () => {
+  // seemed dead. The spinner is hidden (− / + sit beside the field) and the arrow keys step instead,
+  // as preview frames committed on the key's release, the way a wheel resize is.
+  it('ArrowUp / ArrowDown step every selected label, one entry per press, instead of the native step', () => {
+    state().updateLabels([1], { font_size: 40 })
     state().toggleSelect(2)
     render(<LabelToolbar box={box} />)
     const entries = state().undo.length
     expect(fireEvent.keyDown(size(), { key: 'ArrowUp' })).toBe(false) // default prevented
-    expect(label(1).font_size).toBe(25)
+    fireEvent.keyUp(size(), { key: 'ArrowUp' })
+    expect(label(1).font_size).toBe(41) // each from its own size, as − / + do
     expect(label(2).font_size).toBe(25)
-    expect(size().value).toBe('25')
     expect(state().undo).toHaveLength(entries + 1)
-    expect(fireEvent.keyDown(size(), { key: 'ArrowDown' })).toBe(false)
     fireEvent.keyDown(size(), { key: 'ArrowDown' })
-    expect(label(1).font_size).toBe(23)
-    expect(state().undo).toHaveLength(entries + 3)
+    fireEvent.keyUp(size(), { key: 'ArrowDown' })
+    expect(label(1).font_size).toBe(40)
+    expect(state().undo).toHaveLength(entries + 2)
+  })
+
+  it('holding an arrow key is one change, committed when the key comes up', () => {
+    render(<LabelToolbar box={box} />)
+    const entries = state().undo.length
+    fireEvent.keyDown(size(), { key: 'ArrowUp' })
+    for (let i = 0; i < 9; i++) fireEvent.keyDown(size(), { key: 'ArrowUp', repeat: true })
+    expect(label(1).font_size).toBe(34) // shown live
+    expect(size().value).toBe('34')
+    expect(state().undo).toHaveLength(entries) // nothing recorded while the key is down
+    fireEvent.keyUp(size(), { key: 'ArrowUp' })
+    expect(state().undo).toHaveLength(entries + 1)
+    act(() => state().undoLast())
+    expect(label(1).font_size).toBeNull()
+  })
+
+  it('a key held when the field loses focus is committed by the blur', () => {
+    render(<LabelToolbar box={box} />)
+    const entries = state().undo.length
+    fireEvent.keyDown(size(), { key: 'ArrowUp' })
+    fireEvent.keyDown(size(), { key: 'ArrowUp', repeat: true })
+    fireEvent.blur(size())
+    expect(label(1).font_size).toBe(26)
+    expect(state().undo).toHaveLength(entries + 1)
+  })
+
+  it('an arrow steps from a typed but uncommitted size', () => {
+    render(<LabelToolbar box={box} />)
+    fireEvent.change(size(), { target: { value: '30' } })
+    fireEvent.keyDown(size(), { key: 'ArrowUp' })
+    fireEvent.keyUp(size(), { key: 'ArrowUp' })
+    expect(label(1).font_size).toBe(31)
+    expect(size().value).toBe('31')
+  })
+
+  it('an arrow at the bound records nothing', () => {
+    state().updateLabels([1], { font_size: MAX_FONT_SIZE })
+    render(<LabelToolbar box={box} />)
+    const entries = state().undo.length
+    fireEvent.keyDown(size(), { key: 'ArrowUp' })
+    fireEvent.keyUp(size(), { key: 'ArrowUp' })
+    expect(label(1).font_size).toBe(MAX_FONT_SIZE)
+    expect(state().undo).toHaveLength(entries)
   })
 
   it('a blur with nothing typed leaves a mixed selection alone', () => {
