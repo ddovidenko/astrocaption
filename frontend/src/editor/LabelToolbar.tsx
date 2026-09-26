@@ -207,6 +207,11 @@ export default function LabelToolbar({
             e.preventDefault()
             commitSize()
             e.currentTarget.blur()
+          } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            // The native step would only move the draft, which waits for Enter or blur (#144):
+            // step the stored sizes the way − / + do instead. The spinner is hidden in CSS.
+            e.preventDefault()
+            step(e.key === 'ArrowUp' ? 1 : -1)
           }
         }}
       />

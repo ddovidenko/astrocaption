@@ -100,6 +100,23 @@ describe('LabelToolbar', () => {
     expect(label(1).font_size).toBe(23)
   })
 
+  // #144: the native spinner only moved the draft, which waits for Enter or blur, so the arrows
+  // seemed dead. The spinner is hidden (− / + sit beside the field) and the arrow keys step instead.
+  it('ArrowUp / ArrowDown in the field step like + / −, one entry each, instead of the native step', () => {
+    state().toggleSelect(2)
+    render(<LabelToolbar box={box} />)
+    const entries = state().undo.length
+    expect(fireEvent.keyDown(size(), { key: 'ArrowUp' })).toBe(false) // default prevented
+    expect(label(1).font_size).toBe(25)
+    expect(label(2).font_size).toBe(25)
+    expect(size().value).toBe('25')
+    expect(state().undo).toHaveLength(entries + 1)
+    expect(fireEvent.keyDown(size(), { key: 'ArrowDown' })).toBe(false)
+    fireEvent.keyDown(size(), { key: 'ArrowDown' })
+    expect(label(1).font_size).toBe(23)
+    expect(state().undo).toHaveLength(entries + 3)
+  })
+
   it('a blur with nothing typed leaves a mixed selection alone', () => {
     // The field is blank because the sizes differ, not because anyone cleared it: committing that
     // blank would wipe label 1's override on a stray focus.
