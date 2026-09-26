@@ -281,7 +281,7 @@ def test_default_style_is_normalised_field_by_field(
             {
                 "default_style": {
                     "text_color": "white",  # not #RRGGBB
-                    "font_size": 300,  # above the model bound
+                    "font_size": 600,  # above the model bound
                     "halo": "false",  # a JSON string pydantic can read as a bool
                     "bogus": 1,  # not a style field at all
                     "marker_color": "#ff8800",

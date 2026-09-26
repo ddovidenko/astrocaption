@@ -299,7 +299,7 @@ def test_default_style_from_the_file_survives_a_round_trip(
             {
                 "default_style": {
                     "text_color": "white",
-                    "font_size": 300,
+                    "font_size": 600,
                     "halo": "false",
                     "bogus": 1,
                     "marker_color": "#ff8800",

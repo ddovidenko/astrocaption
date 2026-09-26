@@ -64,10 +64,10 @@ describe('LabelToolbar', () => {
   // and the committed value shows in the field at once.
   it('a typed size out of range is clamped, and a fraction is rounded (#103)', () => {
     render(<LabelToolbar box={box} />)
-    fireEvent.change(size(), { target: { value: '500' } })
+    fireEvent.change(size(), { target: { value: '900' } })
     fireEvent.keyDown(size(), { key: 'Enter' })
-    expect(label(1).font_size).toBe(200)
-    expect(size().value).toBe('200')
+    expect(label(1).font_size).toBe(500)
+    expect(size().value).toBe('500')
     fireEvent.change(size(), { target: { value: '3' } })
     fireEvent.blur(size())
     expect(label(1).font_size).toBe(6)
@@ -79,12 +79,12 @@ describe('LabelToolbar', () => {
   })
 
   it('a clamped size equal to the stored one records nothing', () => {
-    state().updateLabels([1], { font_size: 200 })
+    state().updateLabels([1], { font_size: 500 })
     render(<LabelToolbar box={box} />)
     const entries = state().undo.length
     fireEvent.change(size(), { target: { value: '999' } })
     fireEvent.blur(size())
-    expect(label(1).font_size).toBe(200)
+    expect(label(1).font_size).toBe(500)
     expect(state().undo).toHaveLength(entries)
   })
 
@@ -234,11 +234,11 @@ describe('LabelToolbar', () => {
   })
 
   it('+ at the maximum records nothing', () => {
-    state().updateLabels([1], { font_size: 200 })
+    state().updateLabels([1], { font_size: 500 })
     render(<LabelToolbar box={box} />)
     const entries = state().undo.length
     fireEvent.click(screen.getByLabelText('Larger'))
-    expect(label(1).font_size).toBe(200)
+    expect(label(1).font_size).toBe(500)
     expect(state().undo).toHaveLength(entries)
   })
 

@@ -69,8 +69,8 @@ def load_font(fonts_dir: Path, file: str, size: int) -> ImageFont.FreeTypeFont:
 
 
 def ascent_table(path: Path) -> list[int]:
-    """``getmetrics()[0]`` at every allowed size (0.13 s for the whole bundle; cached by
-    ``list_fonts``). Loads the face directly rather than through ``load_font`` so 4680 sizes
+    """``getmetrics()[0]`` at every allowed size (0.12 s for the whole bundle; cached by
+    ``list_fonts``). Loads the face directly rather than through ``load_font`` so 11880 sizes
     do not churn the renderer's cache. The bytes are read once and reused for every size."""
     data = path.read_bytes()
     return [ImageFont.truetype(io.BytesIO(data), size).getmetrics()[0] for size in FONT_SIZES]

@@ -209,10 +209,10 @@ Every enabled object has:
 Interactions:
 
 - **Left-drag** a label: moves it — and every other selected label by the same amount, as one change. Snaps nothing; free placement. A dragged label is **pinned** (§ 6.3 Layout).
-- **Mouse wheel while holding left button on a label**: changes that label's font size (± 1 px per notch, clamped 6–200 px in original-pixel units), shown live and committed as one change when the button is released. Wheel does *not* zoom during this.
+- **Mouse wheel while holding left button on a label**: changes that label's font size (± 1 px per notch, clamped 6–500 px in original-pixel units), shown live and committed as one change when the button is released. Wheel does *not* zoom during this.
 - **Double-click** a label: edit its text inline (override name), in the label's font at its on-screen size. Enter or leaving the field commits the trimmed text; blank resets to the catalogue name; `Esc` cancels.
 - **Click** selects one label; **shift-click** toggles a label in or out of the selection; clicking empty canvas or `Esc` clears it.
-- The selection shows a floating toolbar above its bounding box, kept inside the canvas. Every control applies to every selected label and is one change (one undo entry): font size (stepper and field, 6–200; a typed value is rounded and clamped into the range, blank = the global size and blank when the selection is mixed), text colour (picker; "Use default" clears the override), aliases (inherit / on / off), leader (auto / on / off), Pin, Reset position (places the label again with the browser placer around every other enabled label and marker, and unpins it), Clear overrides (size, colour, aliases, leader and text). Selects read "mixed" when the selected labels differ.
+- The selection shows a floating toolbar above its bounding box, kept inside the canvas. Every control applies to every selected label and is one change (one undo entry): font size (stepper and field, 6–500; a typed value is rounded and clamped into the range, blank = the global size and blank when the selection is mixed), text colour (picker; "Use default" clears the override), aliases (inherit / on / off), leader (auto / on / off), Pin, Reset position (places the label again with the browser placer around every other enabled label and marker, and unpins it), Clear overrides (size, colour, aliases, leader and text). Selects read "mixed" when the selected labels differ.
 
 ### 6.3 Side panel
 
@@ -363,7 +363,7 @@ Owner (cookie session):
   `quality: null` (the default) reuses the source JPEG's quantisation tables (§ 5.4). `GET /images/{id}/export` → file
 - `GET /images/{id}/files/{original|preview|thumb|annotated-preview}` → the file itself
 - `GET /fonts` → list of bundled fonts {file, family, weight, sample, ascents}; `ascents` is Pillow's ascent at
-  every allowed size (index `size − 6`, sizes 6–200), which the editor adds to a label's `y` to draw on the
+  every allowed size (index `size − 6`, sizes 6–500), which the editor adds to a label's `y` to draw on the
   canvas baseline where the export draws (§ 9). The files are served at `/fonts/<file>`
 - `GET /health` (public, used by the Docker healthcheck) → {status, version, site_title, setup_required,
   authenticated, config_error, locked, public_gallery_enabled}; `config_error` is a fixed plain sentence about an unreadable
