@@ -46,6 +46,16 @@ test('toolbar, wheel, double-click and pins edit the selected labels', async ({ 
   await size.fill('31')
   await size.press('Enter')
   await pollField(first.id, 'font_size', 31)
+  // ArrowUp / ArrowDown in the field step and autosave like + / − (#144), with no Enter.
+  await size.press('ArrowUp')
+  await pollField(first.id, 'font_size', 32)
+  await size.press('ArrowDown')
+  await pollField(first.id, 'font_size', 31)
+  // The focus is still in the field; Ctrl+Z there reaches the editor's history.
+  await size.press('Control+z')
+  await pollField(first.id, 'font_size', 32)
+  await size.press('Control+y')
+  await pollField(first.id, 'font_size', 31)
 
   // Wheel with the button held: one notch up = +1, committed on the mouseup (EditorCanvas.tsx),
   // then autosaved — so poll the stored document rather than assert straight away.
