@@ -54,12 +54,20 @@ export function previewTextSize(fontSizeRaw: string, fallback: number): number {
 /** Stroke widths for the strip. Pillow's stroke_width dilates outward by N; an SVG stroke is centred,
  *  so 2N painted under the fill (paint-order: stroke) gives the same outward N. */
 export function previewGeometry(style: StyleForm, defaults: StyleDefaults): PreviewGeometry {
-  const fontSize = fontSizeOf(style.font_size, ASSUMED_FONT_SIZE)
-  const textSize = previewTextSize(style.font_size, ASSUMED_FONT_SIZE)
+  const haloOn = style.halo === '' ? defaults.halo : style.halo === 'on'
+  // A blank font size is "auto": each image derives 12·s beside a 2·s halo and a 1.5·s marker line
+  // (layout.py), so explicit widths imply the font an image would pair them with. Assuming 24 px
+  // there would draw a 100 px halo over the whole strip (#146).
+  const auto = Math.max(
+    ASSUMED_FONT_SIZE,
+    haloOn ? 6 * numberOrFallback(style.halo_width, 0) : 0,
+    8 * numberOrFallback(style.marker_width, 0),
+  )
+  const fontSize = fontSizeOf(style.font_size, auto)
+  const textSize = previewTextSize(style.font_size, auto)
   const scale = textSize / fontSize
   // An explicit 0 stays 0 (a halo width of 0 draws no halo); only blank or unparseable falls back.
   const px = (v: string, fallback: number) => Math.max(0, numberOrFallback(v, fallback) * scale)
-  const haloOn = style.halo === '' ? defaults.halo : style.halo === 'on'
   return {
     textSize,
     haloWidth: haloOn ? px(style.halo_width, 2) * 2 : 0,
@@ -67,6 +75,16 @@ export function previewGeometry(style: StyleForm, defaults: StyleDefaults): Prev
     aliasSize: textSize * ALIAS_SCALE,
     aliasOffset: textSize * LINE_HEIGHT,
   }
+}
+
+/** The sample ring's radius in the strip. */
+export const PREVIEW_RING_R = 34
+
+/** The sample ring as a centred SVG stroke painting radii max(0, R − w)…R, as Pillow's inward
+ *  outline does (editor/metrics.ts `markerStroke`): a disc once the width reaches the radius. */
+export function previewRing(markerWidth: number): { r: number; width: number } {
+  const width = Math.min(markerWidth, PREVIEW_RING_R)
+  return { r: PREVIEW_RING_R - width / 2, width }
 }
 
 /** The strip's viewBox width and where the label text starts in it (LabelPreview draws both). */

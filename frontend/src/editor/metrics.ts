@@ -61,13 +61,16 @@ export function markerRing(obj: ObjectOut, style: StyleConfig): Circle {
   return { x: obj.x, y: obj.y, r: markerRadius(obj, style) }
 }
 
-/** The radius to give a centred canvas stroke so the ring lands where Pillow puts it: Pillow's
+/** The centred canvas stroke that lands the ring where Pillow puts it: Pillow's
  *  `ImageDraw.ellipse(..., width=w)` grows the outline INWARD from the bounding box (the ring
- *  occupies radii r−w…r) while Konva centres the stroke on the radius, so the stroke has to sit
- *  half a width inside the geometric radius. The geometric radius (`markerRadius`) still drives
- *  leader starts, the hover ring and hit-testing. */
-export function markerStrokeRadius(obj: ObjectOut, style: StyleConfig): number {
-  return Math.max(0, markerRadius(obj, style) - style.marker_width / 2)
+ *  occupies radii max(0, r−w)…r, a filled disc once w ≥ r) while Konva centres the stroke on the
+ *  radius, so the stroke sits half a width inside the geometric radius. The width is capped at r:
+ *  a wider stroke would need a radius below 0, and a canvas draws nothing for a zero-radius arc.
+ *  The geometric radius (`markerRadius`) still drives leader starts, the hover ring and hit-testing. */
+export function markerStroke(obj: ObjectOut, style: StyleConfig): { radius: number; width: number } {
+  const r = markerRadius(obj, style)
+  const width = Math.min(style.marker_width, r)
+  return { radius: r - width / 2, width }
 }
 
 /** Pillow's ascent at `size`: the baseline sits that far below the label's top edge (`y`). */

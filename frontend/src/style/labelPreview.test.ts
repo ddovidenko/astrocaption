@@ -9,6 +9,7 @@ import {
   previewCap,
   previewGeometry,
   previewLines,
+  previewRing,
   previewTextSize,
 } from './labelPreview'
 
@@ -106,5 +107,25 @@ describe('label preview', () => {
     const g = previewGeometry(styleFormFromOverrides({ font_size: 48 }), defaults)
     const wide = 2 * (PREVIEW_WIDTH - PREVIEW_TEXT_X)
     expect(fitToStrip(g, { primary: wide, aliases: 0 }).textSize).toBeCloseTo(fitToStrip(g, { primary: 0, aliases: wide }).textSize)
+  })
+
+  // #146 review: with the font size on auto the preview assumed 24 px, so a 100 px halo drew a
+  // 180-unit stroke across a 130-high strip. Auto pairs a font with the widths an image derives
+  // beside it (12·s font, 2·s halo, 1.5·s marker), so explicit widths imply the font.
+  it('with the font size on auto, assumes the font an image would derive beside explicit widths', () => {
+    const g = previewGeometry(styleFormFromOverrides({ halo_width: 100 }), defaults)
+    expect(g.textSize).toBeCloseTo(40)
+    expect(g.haloWidth).toBeCloseTo(2 * 100 * (40 / 600)) // as if the font were 6 · 100
+    const m = previewGeometry(styleFormFromOverrides({ marker_width: 100 }), defaults)
+    expect(m.markerWidth).toBeCloseTo(100 * (40 / 800)) // as if the font were 8 · 100
+    // Small explicit widths keep the 24 px assumption.
+    expect(previewGeometry(styleFormFromOverrides({ halo_width: 3 }), defaults).haloWidth).toBeCloseTo(2 * 3 * (22 / 24))
+    // An explicit font size is taken as given, however wide the halo.
+    expect(previewGeometry(styleFormFromOverrides({ font_size: 24, halo_width: 100 }), defaults).haloWidth).toBeCloseTo(2 * 100 * (22 / 24))
+  })
+
+  it('draws the sample ring inward from its radius, a disc once the width reaches it, as Pillow does', () => {
+    expect(previewRing(4)).toEqual({ r: 32, width: 4 })
+    expect(previewRing(90)).toEqual({ r: 17, width: 34 })
   })
 })

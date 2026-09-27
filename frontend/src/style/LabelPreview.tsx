@@ -3,7 +3,16 @@ import type { StyleDefaults } from '../api'
 import { loadBundledFont } from '../editor/fonts'
 import { fontFamilyFor } from '../editor/metrics'
 import type { StyleForm } from './styleForm'
-import { fitToStrip, PREVIEW_TEXT_X, PREVIEW_WIDTH, previewCap, previewGeometry, previewLines } from './labelPreview'
+import {
+  fitToStrip,
+  PREVIEW_RING_R,
+  PREVIEW_TEXT_X,
+  PREVIEW_WIDTH,
+  previewCap,
+  previewGeometry,
+  previewLines,
+  previewRing,
+} from './labelPreview'
 
 /** Fixed stars so the preview is the same every time. */
 const STARS = [
@@ -79,6 +88,7 @@ export default function LabelPreview({ style, defaults }: { style: StyleForm; de
   const g =
     primaryWidth === null || aliasWidth === null ? sized : fitToStrip(sized, { primary: primaryWidth, aliases: aliasWidth })
   const description = `Preview: ${lines.primary}${aliasesOn ? `, ${lines.aliases}` : ''} in ${fontFile}`
+  const ring = previewRing(g.markerWidth)
   const strokeProps = { stroke: haloColor, strokeWidth: g.haloWidth, paintOrder: 'stroke' as const, strokeLinejoin: 'round' as const }
 
   return (
@@ -88,8 +98,8 @@ export default function LabelPreview({ style, defaults }: { style: StyleForm; de
       {STARS.map(([x, y, r]) => (
         <circle key={`${x}-${y}`} cx={x} cy={y} r={r} fill="#d8e0ff" opacity="0.85" />
       ))}
-      <circle cx="120" cy="72" r="34" fill="none" stroke={marker} strokeWidth={g.markerWidth} />
-      <line x1="154" y1="72" x2={PREVIEW_TEXT_X - 8} y2="62" stroke={leader} strokeWidth={g.markerWidth} />
+      <circle cx="120" cy="72" r={ring.r} fill="none" stroke={marker} strokeWidth={ring.width} />
+      <line x1={120 + PREVIEW_RING_R} y1="72" x2={PREVIEW_TEXT_X - 8} y2="62" stroke={leader} strokeWidth={g.markerWidth} />
       <text x={PREVIEW_TEXT_X} y={aliasesOn ? 62 : 70} fill={text} fontFamily={family} fontSize={g.textSize} {...strokeProps}>
         {lines.primary}
       </text>

@@ -16,7 +16,7 @@ import {
   segmentCrossesRing,
   leaderVisible,
   markerRadius,
-  markerStrokeRadius,
+  markerStroke,
   measureLabel,
   roundHalfEven,
   scaleUnit,
@@ -175,20 +175,27 @@ describe('render vectors', () => {
       })
       expect(markerRadius(c.object, c.style)).toBe(c.marker_radius)
       // The canvas stroke sits half a marker width inside that radius (Pillow draws the ring inward).
-      expect(markerStrokeRadius(c.object, c.style)).toBe(
-        Math.max(0, c.marker_radius - c.style.marker_width / 2),
-      )
+      expect(markerStroke(c.object, c.style)).toEqual({
+        radius: c.marker_radius - c.style.marker_width / 2,
+        width: c.style.marker_width,
+      })
       expect(ascentFor(font!, c.box.primary_size)).toBe(c.ascents.primary)
       if (c.ascents.alias !== null) expect(ascentFor(font!, c.box.alias_size)).toBe(c.ascents.alias)
     }
   })
 
-  it('clamps the marker stroke radius at 0 when the width swallows the radius', () => {
+  // Pillow paints radii max(0, r − w)…r, so a width past the radius fills the disc. A centred
+  // stroke at radius 0 draws nothing on a canvas, so the width is capped at r instead (#146 review).
+  it('strokes a full disc when the marker width swallows the radius, as Pillow does', () => {
     const c = vectors.labels[0]!
-    const style: StyleConfig = { ...c.style, marker_min_radius: 3, marker_width: 10 }
     const obj: ObjectOut = { ...c.object, radius: 2 }
+    const style: StyleConfig = { ...c.style, marker_min_radius: 3, marker_width: 10 }
     expect(markerRadius(obj, style)).toBe(3)
-    expect(markerStrokeRadius(obj, style)).toBe(0)
+    expect(markerStroke(obj, style)).toEqual({ radius: 1.5, width: 3 }) // paints 0…3
+    const wide: StyleConfig = { ...c.style, marker_min_radius: 36, marker_width: 100 }
+    expect(markerStroke(obj, wide)).toEqual({ radius: 18, width: 36 }) // was radius 0: nothing drawn
+    const exact: StyleConfig = { ...c.style, marker_min_radius: 40, marker_width: 40 }
+    expect(markerStroke(obj, exact)).toEqual({ radius: 20, width: 40 })
   })
 
   it('reproduces every leader segment, its routed segment and its visibility per mode', () => {
