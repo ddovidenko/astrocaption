@@ -247,11 +247,10 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
       Publish
     </button>
   ) : null
+  const exported =
+    image.export_url && image.annotated_preview_url ? { url: image.export_url, preview: image.annotated_preview_url } : null
   return (
     <article className="card">
-      <a href={image.preview_url} target="_blank" rel="noreferrer">
-        <img className="thumb" src={image.thumb_url} alt="" />
-      </a>
       <div>
         <h3>{image.title}</h3>
         <div className="meta">
@@ -367,27 +366,36 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
             </button>
           )}
         </div>
-        {image.annotated_preview_url && image.export_url && (
-          <div className="export">
-            <p className="meta">
-              <a href={image.export_url}>Download full-resolution export</a>
-              <span>exported {relativeTime(image.exported_at!)}</span>
-              {exportState(exportOf(image), image.annotations_hash) === 'stale' && (
-                <span className="badge stale" title="The annotations changed after this export; export again to refresh it">
-                  Export out of date
-                </span>
-              )}
-              {lastExport && (
-                <span>
-                  {formatBytes(lastExport.bytes)}, {lastExport.encoding}
-                </span>
-              )}
-            </p>
-            <a href={image.export_url}>
-              <img src={image.annotated_preview_url} alt={`${image.title} annotated`} />
+        {/* No thumbnail of the original (#141): the annotated preview is the card's only picture,
+            and the original is a download, there from upload on. */}
+        <div className="downloads">
+          <p className="meta">
+            <a href={image.original_url} download={image.original_name}>
+              Download original
             </a>
-          </div>
-        )}
+            {exported && (
+              <>
+                <a href={exported.url}>Download full-resolution export</a>
+                <span>exported {relativeTime(image.exported_at!)}</span>
+                {exportState(exportOf(image), image.annotations_hash) === 'stale' && (
+                  <span className="badge stale" title="The annotations changed after this export; export again to refresh it">
+                    Export out of date
+                  </span>
+                )}
+                {lastExport && (
+                  <span>
+                    {formatBytes(lastExport.bytes)}, {lastExport.encoding}
+                  </span>
+                )}
+              </>
+            )}
+          </p>
+          {exported && (
+            <a href={exported.url}>
+              <img src={exported.preview} alt={`${image.title} annotated`} />
+            </a>
+          )}
+        </div>
       </div>
     </article>
   )
