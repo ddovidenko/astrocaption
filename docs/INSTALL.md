@@ -118,7 +118,9 @@ name, prefers common names ("Great Orion Nebula" before "NGC 1976"), leaves out
 star-catalogue ids when a better name exists, and shows at most `max_aliases` names (default
 2; 0 hides the line). Images solved before this version keep their saved layout, but their
 alias lines follow the new rule, so exports made after the upgrade can differ from earlier
-ones.
+ones. The names themselves are attached when an image is solved: a catalogue update (for
+example "Running Man Nebula", which used to read "the Running Man Nebula") reaches an image
+already solved only after you re-solve it.
 
 The config page edits the same object: blank fields keep the built-in defaults, and saving
 stores exactly the fields shown filled in, so clearing one there removes it from the file.
