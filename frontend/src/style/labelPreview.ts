@@ -55,16 +55,11 @@ export function previewTextSize(fontSizeRaw: string, fallback: number): number {
  *  so 2N painted under the fill (paint-order: stroke) gives the same outward N. */
 export function previewGeometry(style: StyleForm, defaults: StyleDefaults): PreviewGeometry {
   const haloOn = style.halo === '' ? defaults.halo : style.halo === 'on'
-  // A blank font size is "auto": each image derives 12·s beside a 2·s halo and a 1.5·s marker line
-  // (layout.py), so explicit widths imply the font an image would pair them with. Assuming 24 px
-  // there would draw a 100 px halo over the whole strip (#146).
-  const auto = Math.max(
-    ASSUMED_FONT_SIZE,
-    haloOn ? 6 * numberOrFallback(style.halo_width, 0) : 0,
-    8 * numberOrFallback(style.marker_width, 0),
-  )
-  const fontSize = fontSizeOf(style.font_size, auto)
-  const textSize = previewTextSize(style.font_size, auto)
+  // A blank ("auto") font size is drawn at 24 px, what auto gives a ~2000 px image, and each width
+  // true to scale against it: a 100 px halo floods the sample as it would flood that image's labels.
+  // LabelPreview says so under the strip.
+  const fontSize = fontSizeOf(style.font_size, ASSUMED_FONT_SIZE)
+  const textSize = previewTextSize(style.font_size, ASSUMED_FONT_SIZE)
   const scale = textSize / fontSize
   // An explicit 0 stays 0 (a halo width of 0 draws no halo); only blank or unparseable falls back.
   const px = (v: string, fallback: number) => Math.max(0, numberOrFallback(v, fallback) * scale)

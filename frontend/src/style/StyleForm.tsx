@@ -133,7 +133,7 @@ export default function StyleForm({
   const fontMissing = values.font_file !== '' && !fontList.some((f) => f.file === values.font_file)
   return (
     <>
-      <LabelPreview style={values} defaults={d} />
+      <LabelPreview style={values} defaults={d} autoSize={overrides} />
       {children}
       <div className="grid3">
         <div className="field span2">

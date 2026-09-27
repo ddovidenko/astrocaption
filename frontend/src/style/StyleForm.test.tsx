@@ -28,6 +28,19 @@ describe('StyleForm overrides mode (config page)', () => {
   })
 })
 
+describe('StyleForm preview note on an auto font size', () => {
+  it('says the preview draws an auto font size at 24 px, on the config page only', () => {
+    render(<StyleForm mode="overrides" values={styleFormFromOverrides({})} defaults={defaults} fonts={fonts} onChange={vi.fn()} />)
+    expect(screen.getByText(/Font size is auto/)).toBeTruthy()
+    cleanup()
+    render(<StyleForm mode="overrides" values={styleFormFromOverrides({ font_size: 60 })} defaults={defaults} fonts={fonts} onChange={vi.fn()} />)
+    expect(screen.queryByText(/Font size is auto/)).toBeNull()
+    cleanup()
+    render(<StyleForm mode="values" values={styleFormFromConfig(makeDoc().annotations.style)} defaults={defaults} fonts={fonts} onChange={vi.fn()} />)
+    expect(screen.queryByText(/Font size is auto/)).toBeNull()
+  })
+})
+
 describe('StyleForm values mode (Style tab)', () => {
   const values = styleFormFromConfig(makeDoc().annotations.style)
   it('offers no Default entries, both preferences by name, required numbers', () => {
