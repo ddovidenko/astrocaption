@@ -67,7 +67,7 @@ describe('StyleTab numbers', () => {
     await tick(400)
     expect(state().style?.font_size).toBe(24)
     expect(fontSize().getAttribute('aria-invalid')).toBe('true')
-    expect(screen.getByText('Whole number between 6 and 200.')).toBeTruthy()
+    expect(screen.getByText('Whole number between 6 and 500.')).toBeTruthy()
   })
   it('undo while a value is pending cancels it', async () => {
     state().load(doc())

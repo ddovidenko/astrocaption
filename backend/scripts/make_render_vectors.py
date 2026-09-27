@@ -102,6 +102,9 @@ SIZES_DEFAULT_FONT = (
     120,
     160,
     200,
+    300,
+    400,
+    500,
 )
 # Per-label sizes for the label cases. 15 and 35 make ``size × 0.7`` land on .5, where Python's
 # round() (half to even) and JavaScript's Math.round() (half up) disagree.

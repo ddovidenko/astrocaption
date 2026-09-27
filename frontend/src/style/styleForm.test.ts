@@ -69,7 +69,8 @@ describe('style form helpers', () => {
     it('parseNumberField accepts integers inside the bounds only', () => {
       expect(parseNumberField('font_size', '24')).toBe(24)
       expect(parseNumberField('font_size', '5')).toBeNull()
-      expect(parseNumberField('font_size', '201')).toBeNull()
+      expect(parseNumberField('font_size', '500')).toBe(500)
+      expect(parseNumberField('font_size', '501')).toBeNull()
       expect(parseNumberField('font_size', '2.5')).toBeNull()
       expect(parseNumberField('font_size', '')).toBeNull()
       expect(parseNumberField('halo_width', '0')).toBe(0)

@@ -172,7 +172,7 @@ export interface FontOut {
   family: string
   weight: string
   sample: string
-  /** Pillow's ascent at every allowed size, index `size - MIN_FONT_SIZE` (6..200); see editor/metrics.ts. */
+  /** Pillow's ascent at every allowed size, index `size - MIN_FONT_SIZE` (6..500); see editor/metrics.ts. */
   ascents: number[]
 }
 

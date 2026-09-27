@@ -1,5 +1,6 @@
 import type { Annotations, FontOut, ImageOut, Label, ObjectOut, StyleConfig } from '../api'
 import type { LoadedDocument } from './store'
+import { MAX_FONT_SIZE, MIN_FONT_SIZE } from './metrics'
 
 /** A small solved document for editor tests: a 3000x2000 image, two objects (one radius-0
  *  "bright" object with no marker circle), and a label per object — one enabled away from its
@@ -94,7 +95,7 @@ export function makeDoc(): LoadedDocument {
   }
 
   const fonts: FontOut[] = [
-    { file: 'Inter-Regular.ttf', family: 'Inter', weight: '400', sample: 'Aa', ascents: new Array(195).fill(20) },
+    { file: 'Inter-Regular.ttf', family: 'Inter', weight: '400', sample: 'Aa', ascents: new Array(MAX_FONT_SIZE - MIN_FONT_SIZE + 1).fill(20) },
   ]
 
   return { image, objects, annotations, fonts, fontFallback: null }

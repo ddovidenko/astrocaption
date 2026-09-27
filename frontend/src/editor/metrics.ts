@@ -11,10 +11,10 @@ import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
 import { aliasNames, primaryName } from './names'
 
 export const MIN_FONT_SIZE = 6
-export const MAX_FONT_SIZE = 200
+export const MAX_FONT_SIZE = 500
 
 /** A size the document accepts: whole pixels inside the bounds. The toolbar's field and stepper
- *  both land here, so a typed 500 and a + at 200 agree. */
+ *  both land here, so a typed 900 and a + at 500 agree. */
 export function clampFontSize(size: number): number {
   return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(size)))
 }
