@@ -111,3 +111,35 @@ describe('ImageCard nova links', () => {
     expect(screen.queryByText(/uploads a copy/)).toBeNull()
   })
 })
+
+// #141: the card has no thumbnail of the original; a download link for it is always there, and on an
+// exported image it comes first in the downloads line, before the export.
+describe('ImageCard downloads', () => {
+  it('offers the original, under its uploaded name, without showing a thumbnail', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <ImageCard image={image({ solve_status: 'pending' })} onChange={vi.fn(async () => {})} />
+      </MemoryRouter>,
+    )
+    const link = screen.getByRole('link', { name: 'Download original' })
+    expect(link.getAttribute('href')).toBe('/api/images/img-1/files/original')
+    expect(link.getAttribute('download')).toBe('orion.jpg')
+    expect(container.querySelector('img')).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Download full-resolution export' })).toBeNull()
+  })
+
+  it('puts the original before the export once the image is exported', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <ImageCard image={image(exported)} onChange={vi.fn(async () => {})} />
+      </MemoryRouter>,
+    )
+    const links = screen.getAllByRole('link').map((a) => a.textContent)
+    expect(links.indexOf('Download original')).toBeGreaterThanOrEqual(0)
+    expect(links.indexOf('Download original')).toBeLessThan(links.indexOf('Download full-resolution export'))
+    // Every <img>, decorative ones included (the old thumbnail had alt="", which no role query sees).
+    const imgs = container.querySelectorAll('img')
+    expect(imgs).toHaveLength(1)
+    expect(imgs[0]!.getAttribute('src')).toBe(exported.annotated_preview_url)
+  })
+})
