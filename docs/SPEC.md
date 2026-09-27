@@ -86,7 +86,8 @@ No multi-user, no roles, no invites in v1.
    uploads hit the same cap while streaming). Uploads are capped at 300 megapixels regardless of file size, 16-bit greyscale
    PNG/TIFF is rescaled rather than clipped, and JPEGs with a multi-picture (MPO) segment are accepted.
    Every solve uploads a copy to the owner's own nova account (never publicly listed) and only the latest
-   one is linked from the card; copies can be deleted on nova only, which the card says in one sentence (#1).
+   one is linked from the card. nova has no way to delete an upload, so every copy stays there; the setup
+   page and the config page's Solver section say so where the key is entered (#1, #113).
 4. On success: store WCS header (`wcs.fits` text), the nova job ID, and nova's annotation
    list (`/api/jobs/<id>/annotations/`) as `nova_annotations.json`. Every object gets a stable local ID
    (assigned by descending radius, then name). *M1 note:* nova returns one designation per deep-sky

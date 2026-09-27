@@ -278,12 +278,6 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
             </a>
           )}
         </div>
-        {image.nova_status_url && (
-          <p className="field-note">
-            Each solve uploads a copy to your nova.astrometry.net account (not publicly listed);
-            only the latest is linked here. Delete copies on nova — AstroCaption cannot.
-          </p>
-        )}
         {image.solve_error && <p className="error">{image.solve_error}</p>}
         {shownError && <p className="error">{shownError}</p>}
         <div className="actions">
