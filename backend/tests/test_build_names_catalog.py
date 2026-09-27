@@ -67,9 +67,11 @@ def test_build_drops_a_lowercase_leading_article_from_common_names() -> None:
         row("NGC1977", "Neb", **{"Common names": "the Running Man Nebula"}),
         row("NGC6357", "Cl+N", **{"Common names": "the War and Peace Nebula,Lobster Nebula"}),
         row("NGC7000", "HII", **{"Common names": "North America Nebula,Theta Nebula"}),
+        row("NGC1999", "RfN", **{"Common names": "the Keyhole,Keyhole"}),  # both forms: one name
     ]
     groups, _ = build(rows)
     assert ["NGC 1977", "Running Man Nebula"] in groups
     assert ["NGC 6357", "War and Peace Nebula", "Lobster Nebula"] in groups
     # "The…" at the start of a word stays.
     assert ["NGC 7000", "North America Nebula", "Theta Nebula"] in groups
+    assert ["NGC 1999", "Keyhole"] in groups
