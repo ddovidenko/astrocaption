@@ -143,7 +143,9 @@ def build(rows: list[dict[str, str]]) -> tuple[list[list[str]], dict[str, str]]:
                 continue
             names.append(pretty(ident))
         for common in canonical.get("Common names", "").split(","):
-            common = common.strip()
+            # A few are written "the Running Man Nebula": the lowercase article reads oddly as a
+            # label's first word (#147).
+            common = common.strip().removeprefix("the ")
             if common:
                 names.append(common)
         deduped: list[str] = []

@@ -75,7 +75,7 @@ GLYPH_STRINGS = (
     "Great Orion Nebula · NGC 1976 · LBN 974",
     "NGC 1976",
     "HD 198639",
-    "the Running Man Nebula",
+    "Running Man Nebula",
     "Trapezium",
     "56 Cyg",
 )

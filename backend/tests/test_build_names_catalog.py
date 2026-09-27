@@ -59,3 +59,17 @@ def test_kind_table_covers_the_spec_buckets() -> None:
     assert {t for t, k in KIND_BY_TYPE.items() if k == "cluster"} == {"OCl", "GCl"}
     for other in ("*", "**", "*Ass", "Nova", "NonEx", "Dup", "Other"):
         assert other not in KIND_BY_TYPE
+
+
+def test_build_drops_a_lowercase_leading_article_from_common_names() -> None:
+    # OpenNGC writes a few common names with a lowercase "the", which read oddly on a label (#147).
+    rows = [
+        row("NGC1977", "Neb", **{"Common names": "the Running Man Nebula"}),
+        row("NGC6357", "Cl+N", **{"Common names": "the War and Peace Nebula,Lobster Nebula"}),
+        row("NGC7000", "HII", **{"Common names": "North America Nebula,Theta Nebula"}),
+    ]
+    groups, _ = build(rows)
+    assert ["NGC 1977", "Running Man Nebula"] in groups
+    assert ["NGC 6357", "War and Peace Nebula", "Lobster Nebula"] in groups
+    # "The…" at the start of a word stays.
+    assert ["NGC 7000", "North America Nebula", "Theta Nebula"] in groups
