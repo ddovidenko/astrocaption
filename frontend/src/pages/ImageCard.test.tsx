@@ -129,10 +129,17 @@ describe('ImageCard downloads', () => {
   })
 
   it('puts the original before the export once the image is exported', () => {
-    renderCard(image(exported))
+    const { container } = render(
+      <MemoryRouter>
+        <ImageCard image={image(exported)} onChange={vi.fn(async () => {})} />
+      </MemoryRouter>,
+    )
     const links = screen.getAllByRole('link').map((a) => a.textContent)
     expect(links.indexOf('Download original')).toBeGreaterThanOrEqual(0)
     expect(links.indexOf('Download original')).toBeLessThan(links.indexOf('Download full-resolution export'))
-    expect(screen.getAllByRole('img')).toHaveLength(1) // the annotated preview only
+    // Every <img>, decorative ones included (the old thumbnail had alt="", which no role query sees).
+    const imgs = container.querySelectorAll('img')
+    expect(imgs).toHaveLength(1)
+    expect(imgs[0]!.getAttribute('src')).toBe(exported.annotated_preview_url)
   })
 })

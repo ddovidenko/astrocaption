@@ -248,7 +248,9 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
     </button>
   ) : null
   const exported =
-    image.export_url && image.annotated_preview_url ? { url: image.export_url, preview: image.annotated_preview_url } : null
+    image.export_url && image.annotated_preview_url && image.exported_at
+      ? { url: image.export_url, preview: image.annotated_preview_url, at: image.exported_at }
+      : null
   return (
     <article className="card">
       <div>
@@ -376,7 +378,7 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
             {exported && (
               <>
                 <a href={exported.url}>Download full-resolution export</a>
-                <span>exported {relativeTime(image.exported_at!)}</span>
+                <span>exported {relativeTime(exported.at)}</span>
                 {exportState(exportOf(image), image.annotations_hash) === 'stale' && (
                   <span className="badge stale" title="The annotations changed after this export; export again to refresh it">
                     Export out of date
