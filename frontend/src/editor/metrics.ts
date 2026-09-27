@@ -12,6 +12,8 @@ import { aliasNames, primaryName } from './names'
 
 export const MIN_FONT_SIZE = 6
 export const MAX_FONT_SIZE = 500
+/** Halo and marker line width bound (models.MAX_STROKE_WIDTH), pinned by the render vectors. */
+export const MAX_STROKE_WIDTH = 100
 
 /** A size the document accepts: whole pixels inside the bounds. The toolbar's field and stepper
  *  both land here, so a typed 900 and a + at 500 agree. */

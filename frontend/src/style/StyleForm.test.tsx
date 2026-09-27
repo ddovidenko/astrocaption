@@ -40,10 +40,10 @@ describe('StyleForm values mode (Style tab)', () => {
     expect(size.placeholder).toBe('')
   })
   it('flags an out-of-range number with a note and aria-invalid', () => {
-    render(<StyleForm mode="values" values={{ ...values, halo_width: '99' }} defaults={defaults} fonts={fonts} onChange={vi.fn()} />)
+    render(<StyleForm mode="values" values={{ ...values, halo_width: '101' }} defaults={defaults} fonts={fonts} onChange={vi.fn()} />)
     const halo = screen.getByLabelText('Halo width (px)') as HTMLInputElement
     expect(halo.getAttribute('aria-invalid')).toBe('true')
-    expect(screen.getByText('Whole number between 0 and 40.')).toBeTruthy()
+    expect(screen.getByText('Whole number between 0 and 100.')).toBeTruthy()
   })
   it('keeps the current font selectable when it is not in the list', () => {
     render(<StyleForm mode="values" values={{ ...values, font_file: 'Gone.ttf' }} defaults={defaults} fonts={fonts} onChange={vi.fn()} />)

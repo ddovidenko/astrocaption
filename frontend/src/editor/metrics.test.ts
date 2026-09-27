@@ -5,6 +5,7 @@ import type { Circle } from './metrics'
 import {
   ANCHORS,
   MAX_FONT_SIZE,
+  MAX_STROKE_WIDTH,
   MIN_FONT_SIZE,
   anchorBox,
   ascentFor,
@@ -72,6 +73,7 @@ interface AnchorCase {
 interface Vectors {
   min_font_size: number
   max_font_size: number
+  max_stroke_width: number
   fonts: FontOut[]
   texts: [string, number, string, number][]
   labels: LabelCase[]
@@ -124,6 +126,7 @@ describe('render vectors', () => {
   it('loaded the contract the Python side generated', () => {
     expect(vectors.min_font_size).toBe(MIN_FONT_SIZE)
     expect(vectors.max_font_size).toBe(MAX_FONT_SIZE)
+    expect(vectors.max_stroke_width).toBe(MAX_STROKE_WIDTH)
     expect(vectors.fonts.length).toBeGreaterThan(0)
     expect(vectors.labels.length).toBeGreaterThan(0)
   })

@@ -9,13 +9,17 @@ from tests.conftest import FONTS_DIR, NOVA_NARROW_FIXTURES, load_fixture
 
 
 def test_default_style_clamps_to_model_bounds() -> None:
-    style = default_style(20300, 8000, FONTS_DIR)  # s = 20.3: halo width exceeds its bound
+    style = default_style(20300, 8000, FONTS_DIR)  # s = 20.3: every derived value in bounds
     assert style.font_size == 244
-    assert style.halo_width == 40
+    assert style.halo_width == 41
     assert style.marker_width == 30
     assert style.marker_min_radius == 122
-    # s = 45 (a 300 MP strip): 12 * s = 540 exceeds the 500 px font bound (#122).
-    assert default_style(45000, 6000, FONTS_DIR).font_size == 500
+    # s = 45 (a 270 MP strip): 12 * s = 540 exceeds the 500 px font bound (#122), the strokes fit.
+    wide = default_style(45000, 6000, FONTS_DIR)
+    assert (wide.font_size, wide.halo_width, wide.marker_width) == (500, 90, 68)
+    # s = 60 (a 300 MP strip): 2 * s = 120 exceeds the 100 px stroke bound (#146).
+    widest = default_style(60000, 5000, FONTS_DIR)
+    assert (widest.halo_width, widest.marker_width) == (100, 90)
 
 
 def test_default_style_drops_unknown_font_but_keeps_other_overrides(
