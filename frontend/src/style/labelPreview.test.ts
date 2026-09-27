@@ -2,7 +2,15 @@ import { describe, expect, it } from 'vitest'
 import type { StyleDefaults } from '../api'
 import { fontFamilyFor } from '../editor/metrics'
 import { styleFormFromOverrides } from './styleForm'
-import { previewCap, previewGeometry, previewLines, previewTextSize } from './labelPreview'
+import {
+  fitToStrip,
+  PREVIEW_WIDTH,
+  PREVIEW_TEXT_X,
+  previewCap,
+  previewGeometry,
+  previewLines,
+  previewTextSize,
+} from './labelPreview'
 
 const defaults: StyleDefaults = {
   font_file: 'Inter-Regular.ttf',
@@ -72,5 +80,31 @@ describe('label preview', () => {
     expect(previewCap('-1', 2)).toBe(0)
     expect(previewCap('9', 2)).toBe(5)
     expect(previewCap('abc', 2)).toBe(2)
+  })
+
+  it('leaves a label that fits the strip alone', () => {
+    const g = previewGeometry(styleFormFromOverrides({}), defaults)
+    expect(fitToStrip(g, { primary: 40, aliases: 200 })).toEqual(g)
+  })
+
+  it('shrinks a label that would run off the strip, keeping every length in proportion (#112)', () => {
+    const g = previewGeometry(styleFormFromOverrides({ font_size: 48 }), defaults)
+    const room = PREVIEW_WIDTH - PREVIEW_TEXT_X
+    const fitted = fitToStrip(g, { primary: 60, aliases: 2 * room })
+    const k = fitted.textSize / g.textSize
+    expect(k).toBeLessThan(0.5)
+    // The widest line plus its outward halo ends inside the strip, with a margin.
+    expect(2 * room * k + fitted.haloWidth / 2).toBeLessThan(room)
+    expect(2 * room * k + fitted.haloWidth / 2).toBeGreaterThan(room - 20)
+    expect(fitted.aliasSize).toBeCloseTo(g.aliasSize * k)
+    expect(fitted.aliasOffset).toBeCloseTo(g.aliasOffset * k)
+    expect(fitted.haloWidth).toBeCloseTo(g.haloWidth * k)
+    expect(fitted.markerWidth).toBeCloseTo(g.markerWidth * k)
+  })
+
+  it('fits on the widest line, whichever it is', () => {
+    const g = previewGeometry(styleFormFromOverrides({ font_size: 48 }), defaults)
+    const wide = 2 * (PREVIEW_WIDTH - PREVIEW_TEXT_X)
+    expect(fitToStrip(g, { primary: wide, aliases: 0 }).textSize).toBeCloseTo(fitToStrip(g, { primary: 0, aliases: wide }).textSize)
   })
 })
