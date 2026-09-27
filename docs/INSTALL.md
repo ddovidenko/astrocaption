@@ -103,7 +103,7 @@ applies to newly solved images. Only the fields you list are overridden; anythin
 out keeps its built-in default, and for `font_size`, `halo_width`, `marker_width` and
 `marker_min_radius` that default is derived from each image's size. Colours are `#RRGGBB`
 (`"#ffd54a"`, not `"yellow"`), sizes are whole numbers within the bounds the API accepts
-(font size 6-500, halo and marker width 0-40 and 1-40, marker minimum radius 1-400, max
+(font size 6-500, halo and marker width 0-100 and 1-100, marker minimum radius 1-400, max
 aliases 0-5) and the font is a bundled file name. The bundled families are listed in
 `fonts/README.md`; a `font_file` that is not bundled is ignored with a server-log warning and the default
 `Inter-Regular.ttf` is used. A value the page cannot represent — a colour by name, a size out

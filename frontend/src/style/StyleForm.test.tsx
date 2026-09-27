@@ -28,6 +28,19 @@ describe('StyleForm overrides mode (config page)', () => {
   })
 })
 
+describe('StyleForm preview note on an auto font size', () => {
+  it('says the preview draws an auto font size at 24 px, on the config page only', () => {
+    render(<StyleForm mode="overrides" values={styleFormFromOverrides({})} defaults={defaults} fonts={fonts} onChange={vi.fn()} />)
+    expect(screen.getByText(/Font size is auto/)).toBeTruthy()
+    cleanup()
+    render(<StyleForm mode="overrides" values={styleFormFromOverrides({ font_size: 60 })} defaults={defaults} fonts={fonts} onChange={vi.fn()} />)
+    expect(screen.queryByText(/Font size is auto/)).toBeNull()
+    cleanup()
+    render(<StyleForm mode="values" values={styleFormFromConfig(makeDoc().annotations.style)} defaults={defaults} fonts={fonts} onChange={vi.fn()} />)
+    expect(screen.queryByText(/Font size is auto/)).toBeNull()
+  })
+})
+
 describe('StyleForm values mode (Style tab)', () => {
   const values = styleFormFromConfig(makeDoc().annotations.style)
   it('offers no Default entries, both preferences by name, required numbers', () => {
@@ -40,10 +53,10 @@ describe('StyleForm values mode (Style tab)', () => {
     expect(size.placeholder).toBe('')
   })
   it('flags an out-of-range number with a note and aria-invalid', () => {
-    render(<StyleForm mode="values" values={{ ...values, halo_width: '99' }} defaults={defaults} fonts={fonts} onChange={vi.fn()} />)
+    render(<StyleForm mode="values" values={{ ...values, halo_width: '101' }} defaults={defaults} fonts={fonts} onChange={vi.fn()} />)
     const halo = screen.getByLabelText('Halo width (px)') as HTMLInputElement
     expect(halo.getAttribute('aria-invalid')).toBe('true')
-    expect(screen.getByText('Whole number between 0 and 40.')).toBeTruthy()
+    expect(screen.getByText('Whole number between 0 and 100.')).toBeTruthy()
   })
   it('keeps the current font selectable when it is not in the list', () => {
     render(<StyleForm mode="values" values={{ ...values, font_file: 'Gone.ttf' }} defaults={defaults} fonts={fonts} onChange={vi.fn()} />)

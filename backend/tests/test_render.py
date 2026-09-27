@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 import pytest
-from PIL import Image, JpegImagePlugin
+from PIL import Image, ImageDraw, JpegImagePlugin
 
 from app.fonts import resolve_font_file
 from app.layout import build_default_annotations, default_style
@@ -298,3 +298,15 @@ def test_render_falls_back_when_the_stored_font_is_gone(
     assert out_gone.read_bytes() == out_inter.read_bytes()
     assert "Gone-Regular.ttf" in caplog.text
     assert "Inter-Regular.ttf" in caplog.text
+
+
+@pytest.mark.parametrize(("r", "w"), [(10, 100), (36, 100), (60, 100), (150, 100), (30, 4)])
+def test_pillow_ring_paints_inward_to_a_disc(r: int, w: int) -> None:
+    """The ring ``render`` draws with ``ellipse(width=w)`` covers radii max(0, r − w)…r: a filled
+    disc once w ≥ r. The editor's ``markerStroke`` (metrics.ts) reproduces exactly that band."""
+    im = Image.new("L", (400, 400))
+    c = 200
+    ImageDraw.Draw(im).ellipse([c - r, c - r, c + r, c + r], outline=255, width=w)
+    lit = [dx for dx in range(r + 2) if im.getpixel((c + dx, c))]
+    assert lit[-1] in (r - 1, r)  # the outer edge
+    assert abs(lit[0] - max(0, r - w)) <= 1  # the inner edge, or the centre when w ≥ r

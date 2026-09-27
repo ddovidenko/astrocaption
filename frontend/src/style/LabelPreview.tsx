@@ -3,7 +3,17 @@ import type { StyleDefaults } from '../api'
 import { loadBundledFont } from '../editor/fonts'
 import { fontFamilyFor } from '../editor/metrics'
 import type { StyleForm } from './styleForm'
-import { fitToStrip, PREVIEW_TEXT_X, PREVIEW_WIDTH, previewCap, previewGeometry, previewLines } from './labelPreview'
+import {
+  ASSUMED_FONT_SIZE,
+  fitToStrip,
+  PREVIEW_RING_R,
+  PREVIEW_TEXT_X,
+  PREVIEW_WIDTH,
+  previewCap,
+  previewGeometry,
+  previewLines,
+  previewRing,
+} from './labelPreview'
 
 /** Fixed stars so the preview is the same every time. */
 const STARS = [
@@ -60,7 +70,16 @@ function useBundledFont(file: string): { family: string; failed: boolean } {
 }
 
 /** The label as the export would draw it, at a size that follows the font size, updating with every edit. */
-export default function LabelPreview({ style, defaults }: { style: StyleForm; defaults: StyleDefaults }) {
+export default function LabelPreview({
+  style,
+  defaults,
+  autoSize = false,
+}: {
+  style: StyleForm
+  defaults: StyleDefaults
+  /** A blank font size means "auto" (the config page); in the Style tab it is only a field mid-edit. */
+  autoSize?: boolean
+}) {
   const fontFile = style.font_file || defaults.font_file
   const { family, failed } = useBundledFont(fontFile)
   const text = style.text_color || defaults.text_color
@@ -79,6 +98,7 @@ export default function LabelPreview({ style, defaults }: { style: StyleForm; de
   const g =
     primaryWidth === null || aliasWidth === null ? sized : fitToStrip(sized, { primary: primaryWidth, aliases: aliasWidth })
   const description = `Preview: ${lines.primary}${aliasesOn ? `, ${lines.aliases}` : ''} in ${fontFile}`
+  const ring = previewRing(g.markerWidth)
   const strokeProps = { stroke: haloColor, strokeWidth: g.haloWidth, paintOrder: 'stroke' as const, strokeLinejoin: 'round' as const }
 
   return (
@@ -88,8 +108,8 @@ export default function LabelPreview({ style, defaults }: { style: StyleForm; de
       {STARS.map(([x, y, r]) => (
         <circle key={`${x}-${y}`} cx={x} cy={y} r={r} fill="#d8e0ff" opacity="0.85" />
       ))}
-      <circle cx="120" cy="72" r="34" fill="none" stroke={marker} strokeWidth={g.markerWidth} />
-      <line x1="154" y1="72" x2={PREVIEW_TEXT_X - 8} y2="62" stroke={leader} strokeWidth={g.markerWidth} />
+      <circle cx="120" cy="72" r={ring.r} fill="none" stroke={marker} strokeWidth={ring.width} />
+      <line x1={120 + PREVIEW_RING_R} y1="72" x2={PREVIEW_TEXT_X - 8} y2="62" stroke={leader} strokeWidth={g.markerWidth} />
       <text x={PREVIEW_TEXT_X} y={aliasesOn ? 62 : 70} fill={text} fontFamily={family} fontSize={g.textSize} {...strokeProps}>
         {lines.primary}
       </text>
@@ -100,6 +120,12 @@ export default function LabelPreview({ style, defaults }: { style: StyleForm; de
       )}
       </svg>
       {failed && <p className="field-note">Preview shown in a fallback font: {fontFile} could not be loaded.</p>}
+      {autoSize && style.font_size.trim() === '' && (
+        <p className="field-note">
+          Font size is auto, so the preview draws it at {ASSUMED_FONT_SIZE} px, what a 2000 px image gets; widths
+          you set are drawn to scale against it.
+        </p>
+      )}
     </>
   )
 }

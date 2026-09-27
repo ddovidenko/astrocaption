@@ -18,7 +18,7 @@ import {
   routeLeader,
   markerRadius,
   markerRing,
-  markerStrokeRadius,
+  markerStroke,
   measureLabel,
   scaleUnit,
   type Box,
@@ -180,16 +180,17 @@ const LabelEntry = memo(function LabelEntry({
   spacePan,
   onDrawError,
 }: EntryProps) {
+  const ring = markerStroke(obj, style)
   return (
     <Group>
       {/* Not the stored radius: the stroke sits half a marker width inside it so Konva's
-          centred stroke lands where Pillow's inward outline does (see markerStrokeRadius). */}
+          centred stroke lands where Pillow's inward outline does (see markerStroke). */}
       <Circle
         x={obj.x}
         y={obj.y}
-        radius={markerStrokeRadius(obj, style)}
+        radius={ring.radius}
         stroke={style.marker_color}
-        strokeWidth={style.marker_width}
+        strokeWidth={ring.width}
         listening={false}
       />
       {leader && (

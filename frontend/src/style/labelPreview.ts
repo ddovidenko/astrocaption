@@ -54,12 +54,15 @@ export function previewTextSize(fontSizeRaw: string, fallback: number): number {
 /** Stroke widths for the strip. Pillow's stroke_width dilates outward by N; an SVG stroke is centred,
  *  so 2N painted under the fill (paint-order: stroke) gives the same outward N. */
 export function previewGeometry(style: StyleForm, defaults: StyleDefaults): PreviewGeometry {
+  const haloOn = style.halo === '' ? defaults.halo : style.halo === 'on'
+  // A blank ("auto") font size is drawn at 24 px, what auto gives a ~2000 px image, and each width
+  // true to scale against it: a 100 px halo floods the sample as it would flood that image's labels.
+  // LabelPreview says so under the strip.
   const fontSize = fontSizeOf(style.font_size, ASSUMED_FONT_SIZE)
   const textSize = previewTextSize(style.font_size, ASSUMED_FONT_SIZE)
   const scale = textSize / fontSize
   // An explicit 0 stays 0 (a halo width of 0 draws no halo); only blank or unparseable falls back.
   const px = (v: string, fallback: number) => Math.max(0, numberOrFallback(v, fallback) * scale)
-  const haloOn = style.halo === '' ? defaults.halo : style.halo === 'on'
   return {
     textSize,
     haloWidth: haloOn ? px(style.halo_width, 2) * 2 : 0,
@@ -67,6 +70,16 @@ export function previewGeometry(style: StyleForm, defaults: StyleDefaults): Prev
     aliasSize: textSize * ALIAS_SCALE,
     aliasOffset: textSize * LINE_HEIGHT,
   }
+}
+
+/** The sample ring's radius in the strip. */
+export const PREVIEW_RING_R = 34
+
+/** The sample ring as a centred SVG stroke painting radii max(0, R − w)…R, as Pillow's inward
+ *  outline does (editor/metrics.ts `markerStroke`): a disc once the width reaches the radius. */
+export function previewRing(markerWidth: number): { r: number; width: number } {
+  const width = Math.min(markerWidth, PREVIEW_RING_R)
+  return { r: PREVIEW_RING_R - width / 2, width }
 }
 
 /** The strip's viewBox width and where the label text starts in it (LabelPreview draws both). */

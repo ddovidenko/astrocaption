@@ -1,5 +1,5 @@
 import type { NamePreference, StyleConfig, StyleOverrides } from '../api'
-import { MAX_FONT_SIZE, MIN_FONT_SIZE } from '../editor/metrics'
+import { MAX_FONT_SIZE, MAX_STROKE_WIDTH, MIN_FONT_SIZE } from '../editor/metrics'
 import { MAX_ALIASES } from '../editor/names'
 
 export type Tri = '' | 'on' | 'off'
@@ -29,8 +29,8 @@ export type TriKey = 'halo' | 'show_aliases'
 /** The API's bounds (models.py), so the form never offers a value the server refuses. */
 export const NUMBER_BOUNDS: Record<NumberKey, [number, number]> = {
   font_size: [MIN_FONT_SIZE, MAX_FONT_SIZE],
-  halo_width: [0, 40],
-  marker_width: [1, 40],
+  halo_width: [0, MAX_STROKE_WIDTH],
+  marker_width: [1, MAX_STROKE_WIDTH],
   marker_min_radius: [1, 400],
   max_aliases: [0, MAX_ALIASES],
 }

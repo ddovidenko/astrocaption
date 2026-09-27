@@ -9,6 +9,7 @@ import {
   previewCap,
   previewGeometry,
   previewLines,
+  previewRing,
   previewTextSize,
 } from './labelPreview'
 
@@ -106,5 +107,24 @@ describe('label preview', () => {
     const g = previewGeometry(styleFormFromOverrides({ font_size: 48 }), defaults)
     const wide = 2 * (PREVIEW_WIDTH - PREVIEW_TEXT_X)
     expect(fitToStrip(g, { primary: wide, aliases: 0 }).textSize).toBeCloseTo(fitToStrip(g, { primary: 0, aliases: wide }).textSize)
+  })
+
+  // #146: with the font size on auto the preview draws at 24 px (what auto gives a ~2000 px image),
+  // true to scale, and each width changes only itself. An earlier take implied the font from the
+  // widths, so raising the halo thinned the marker line and the other way round.
+  it('with the font size on auto, scales each width on its own against a 24 px font', () => {
+    const base = previewGeometry(styleFormFromOverrides({}), defaults)
+    const halo = previewGeometry(styleFormFromOverrides({ halo_width: 100 }), defaults)
+    expect(halo.haloWidth).toBeCloseTo(2 * 100 * (22 / 24))
+    expect(halo.markerWidth).toBeCloseTo(base.markerWidth)
+    expect(halo.textSize).toBeCloseTo(base.textSize)
+    const marker = previewGeometry(styleFormFromOverrides({ halo_width: 100, marker_width: 100 }), defaults)
+    expect(marker.markerWidth).toBeCloseTo(100 * (22 / 24))
+    expect(marker.haloWidth).toBeCloseTo(halo.haloWidth)
+  })
+
+  it('draws the sample ring inward from its radius, a disc once the width reaches it, as Pillow does', () => {
+    expect(previewRing(4)).toEqual({ r: 32, width: 4 })
+    expect(previewRing(90)).toEqual({ r: 17, width: 34 })
   })
 })
