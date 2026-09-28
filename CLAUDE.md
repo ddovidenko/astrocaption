@@ -32,6 +32,7 @@ make placement-vectors   # regenerate tests/fixtures/placement/*.json from the P
 make render-vectors      # regenerate tests/fixtures/render/vectors.json from render.py (text boxes, ascents, leaders, anchors)
 make names-vectors       # regenerate tests/fixtures/names/vectors.json from models.py (name ranking + alias line)
 make names-catalog       # rebuild backend/app/catalog/names.json from OpenNGC (network)
+make check-version TAG=v0.1.0   # the release workflow's tag guard: TAG must equal the version in pyproject, app/__init__.py and package.json
 make fonts               # refresh fonts/*.ttf + LICENSES from Google Fonts (network); family list in backend/scripts/fetch_fonts.py
 make favicons            # regenerate frontend/public/ icons from frontend/icon/icon-source.png
 make record-fixtures IMAGE=path.jpg [OUT=dir]   # record nova fixtures from a real solve into backend/tests/fixtures/nova/ or OUT (network, needs the key)
@@ -95,6 +96,11 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
 - Flow: branch → `gh pr create` → `gh pr checks --watch` → `gh pr merge --squash` (the repo deletes
   the remote branch on merge; `--delete-branch` errors on the already-gone ref). Then `git checkout main && git pull`.
   `main` allows squash merges only (branch protection arrives with milestone 6). Never push to `main`.
+  Cutting a release: in a `chore: release vX.Y.Z` PR bump `backend/pyproject.toml` and `backend/app/__init__.py`
+  by hand and `frontend/package.json` (plus its lockfile) with `npm --prefix frontend version X.Y.Z --no-git-tag-version`;
+  merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`; `release.yml` does the rest. Dry-run with a `-rcN` tag first:
+  the files must carry `X.Y.Z-rcN` for that tag, then a second chore PR bumps them to `X.Y.Z`. Never re-run an old tag's
+  workflow after a newer stable release has shipped: every stable tag re-points `latest`.
   `gh pr edit` fails silently on this repo (GitHub's retired classic-projects API); change a PR body with
   `gh api -X PATCH repos/:owner/:repo/pulls/<n> -F body=@file` instead.
 - Review ritual before a milestone PR: `/code-review high`, then a silent-failure pass

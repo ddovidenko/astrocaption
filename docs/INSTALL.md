@@ -147,6 +147,30 @@ data/
 The container runs as uid 1000. If `./data` is owned by another user you will see
 `cannot write to /data` on start; fix it with `chown -R 1000:1000 data`.
 
+## Releases, tags and upgrades
+
+Images are published to `ghcr.io/ddovidenko/astrocaption` by the release workflow when a
+`vX.Y.Z` tag is pushed:
+
+| Tag | Meaning |
+|---|---|
+| `X.Y.Z` | that release, never changes |
+| `X.Y` | the newest patch of that minor |
+| `latest` | the newest stable release (never `main`, never a pre-release) |
+
+Pre-releases (`0.2.0-rc1`) get only their own tag and are marked as such on the GitHub
+Releases page, which also carries the release notes and the `compose.yml` of that version.
+
+To upgrade an instance that uses `compose.yml` as shipped (`image: …:latest`):
+
+```sh
+docker compose pull && docker compose up -d
+```
+
+Back up `./data` first: the database schema is migrated forward on start, and an older image
+refuses to start on a database written by a newer one. Pin `image:` to `X.Y` if you would rather
+take patches only.
+
 ## Behind a reverse proxy
 
 The app listens on port 8000 inside the container (8080 on the host in `compose.yml`).

@@ -1,0 +1,122 @@
+# Push a tag vX.Y.Z (or vX.Y.Z-rc1 for a dry run) and this publishes the image and a Release.
+# Cutting a release: bump backend/pyproject.toml and backend/app/__init__.py by hand and
+# frontend/package.json (+ its lockfile) with `npm --prefix frontend version X.Y.Z --no-git-tag-version`
+# in a `chore: release vX.Y.Z` PR, merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # the GitHub Release
+  packages: write   # GHCR
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60   # the arm64 half runs under QEMU; a hung run would otherwise block re-runs of this tag for 6 h
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: the tag must match the three version files
+        run: cd backend && python scripts/check_release_version.py "$GITHUB_REF_NAME"
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: image tags and labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          # type=semver also emits `latest` (flavor latest=auto) and, for a pre-release tag
+          # such as v0.1.0-rc1, falls back from the partial X.Y pattern to {{version}} and never emits `latest`.
+          # The explicit enable= makes the X.Y rule visible rather than relying on that.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
+          labels: |
+            org.opencontainers.image.title=AstroCaption
+            org.opencontainers.image.licenses=MIT
+
+      # Build the amd64 half alone first and smoke it. Nothing has been pushed if this fails.
+      # The pushed image below is a second build; it is byte-identical only while every layer
+      # hits the GHA cache written here, which is the normal case within one job.
+      - name: build amd64 for the smoke test
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: astrocaption:release-smoke
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: image size must stay under 400 MB
+        run: |
+          size=$(docker image inspect astrocaption:release-smoke --format '{{.Size}}')
+          echo "image size: $((size / 1024 / 1024)) MB"
+          test "$size" -lt $((400 * 1024 * 1024))
+      - name: the image boots and answers /api/health
+        timeout-minutes: 3
+        run: |
+          docker run -d --name ac -p 8000:8000 -e NOVA_API_KEY=smoke astrocaption:release-smoke
+          for i in $(seq 1 30); do curl -fsS --max-time 5 http://127.0.0.1:8000/api/health && break; sleep 1; done
+          echo
+          curl -fsS --max-time 5 http://127.0.0.1:8000/api/health | grep -F "\"version\":\"${GITHUB_REF_NAME#v}\""
+      - name: container log
+        if: failure()
+        continue-on-error: true
+        run: docker logs ac
+      - name: remove the container
+        if: always()
+        continue-on-error: true
+        run: docker rm -f ac
+
+      - name: build both platforms and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: GitHub Release with compose.yml and generated notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Re-run after a transient failure: keep the existing Release, refresh the asset.
+          # Only "release not found" means create; any other error (API hiccup) fails here
+          # rather than falling through to a create that would fail on the duplicate.
+          if gh release view "$TAG" >/dev/null 2>view.err; then
+            echo "release $TAG already exists; uploading compose.yml"
+            gh release upload "$TAG" compose.yml --clobber
+            exit 0
+          fi
+          grep -q "release not found" view.err || { cat view.err; exit 1; }
+          prerelease=""
+          case "$TAG" in *-*) prerelease="--prerelease";; esac
+          gh release create "$TAG" compose.yml --verify-tag --generate-notes $prerelease
