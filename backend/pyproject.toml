@@ -1,6 +1,6 @@
 [project]
 name = "astrocaption"
-version = "0.1.0-rc1"
+version = "0.1.0"
 description = "Plate-solve a finished astrophoto and build legible annotations on top of it."
 requires-python = ">=3.13"
 license = "MIT"
