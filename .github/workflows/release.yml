@@ -56,6 +56,8 @@ jobs:
             org.opencontainers.image.licenses=MIT
 
       # Build the amd64 half alone first and smoke it. Nothing has been pushed if this fails.
+      # The pushed image below is a second build; it is byte-identical only while every layer
+      # hits the GHA cache written here, which is the normal case within one job.
       - name: build amd64 for the smoke test
         uses: docker/build-push-action@v7
         with:
@@ -106,11 +108,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          # Re-run after a transient failure: keep the existing Release, refresh the asset.
+          # Only "release not found" means create; any other error (API hiccup) fails here
+          # rather than falling through to a create that would fail on the duplicate.
+          if gh release view "$TAG" >/dev/null 2>view.err; then
             echo "release $TAG already exists; uploading compose.yml"
             gh release upload "$TAG" compose.yml --clobber
             exit 0
           fi
+          grep -q "release not found" view.err || { cat view.err; exit 1; }
           prerelease=""
           case "$TAG" in *-*) prerelease="--prerelease";; esac
           gh release create "$TAG" compose.yml --verify-tag --generate-notes $prerelease
