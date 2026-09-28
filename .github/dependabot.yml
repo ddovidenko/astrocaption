@@ -33,6 +33,10 @@ updates:
       # Remove when #27 (TypeScript 7 upgrade) lands.
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
+      # @types/node follows the Node the project runs (24, the Docker build stage and CI);
+      # a newer major's types would accept APIs that runtime lacks. Bump with #25 (Node 26).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: docker
     directory: /docker
