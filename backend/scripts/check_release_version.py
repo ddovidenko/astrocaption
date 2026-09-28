@@ -18,8 +18,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# v + semver: MAJOR.MINOR.PATCH with an optional pre-release suffix (-rc1, -beta.2).
-TAG_RE = re.compile(r"^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)$")
+# v + strict semver: MAJOR.MINOR.PATCH without leading zeros, plus an optional pre-release of
+# non-empty dot-separated identifiers (-rc1, -beta.2). Strict on purpose: docker/metadata-action
+# parses loosely, so v01.1.0 would ship as image tag 1.1.0 while /api/health said 01.1.0.
+_NUM = r"(?:0|[1-9]\d*)"
+_IDENT = r"[0-9A-Za-z-]+"
+TAG_RE = re.compile(rf"v({_NUM}\.{_NUM}\.{_NUM}(?:-{_IDENT}(?:\.{_IDENT})*)?)")
 INIT_RE = re.compile(r'^__version__\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
 
 PYPROJECT = "backend/pyproject.toml"
@@ -60,9 +64,9 @@ def versions(root: Path = REPO_ROOT) -> dict[str, str]:
 
 def check(tag: str, root: Path = REPO_ROOT) -> list[str]:
     """Problems that make `tag` unreleasable; an empty list means go ahead."""
-    match = TAG_RE.match(tag)
+    match = TAG_RE.fullmatch(tag)
     if match is None:
-        return [f"tag {tag.strip()!r} is not v<major>.<minor>.<patch>[-<prerelease>]"]
+        return [f"tag {tag!r} is not v<major>.<minor>.<patch>[-<prerelease>]"]
     wanted = match.group(1)
     found = versions(root)
     problems = [

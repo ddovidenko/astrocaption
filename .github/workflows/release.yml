@@ -1,5 +1,6 @@
 # Push a tag vX.Y.Z (or vX.Y.Z-rc1 for a dry run) and this publishes the image and a Release.
-# Cutting a release: bump backend/pyproject.toml, backend/app/__init__.py and frontend/package.json
+# Cutting a release: bump backend/pyproject.toml and backend/app/__init__.py by hand and
+# frontend/package.json (+ its lockfile) with `npm --prefix frontend version X.Y.Z --no-git-tag-version`
 # in a `chore: release vX.Y.Z` PR, merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
 name: release
 
@@ -21,6 +22,7 @@ env:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 60   # the arm64 half runs under QEMU; a hung run would otherwise block re-runs of this tag for 6 h
     steps:
       - uses: actions/checkout@v7
 
@@ -44,7 +46,7 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           # type=semver also emits `latest` (flavor latest=auto) and, for a pre-release tag
-          # such as v0.1.0-rc1, skips the partial X.Y pattern and never emits `latest`.
+          # such as v0.1.0-rc1, falls back from the partial X.Y pattern to {{version}} and never emits `latest`.
           # The explicit enable= makes the X.Y rule visible rather than relying on that.
           tags: |
             type=semver,pattern={{version}}
@@ -72,11 +74,12 @@ jobs:
           echo "image size: $((size / 1024 / 1024)) MB"
           test "$size" -lt $((400 * 1024 * 1024))
       - name: the image boots and answers /api/health
+        timeout-minutes: 3
         run: |
           docker run -d --name ac -p 8000:8000 -e NOVA_API_KEY=smoke astrocaption:release-smoke
-          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/api/health && break; sleep 1; done
+          for i in $(seq 1 30); do curl -fsS --max-time 5 http://127.0.0.1:8000/api/health && break; sleep 1; done
           echo
-          curl -fsS http://127.0.0.1:8000/api/health | grep -F "\"version\":\"${GITHUB_REF_NAME#v}\""
+          curl -fsS --max-time 5 http://127.0.0.1:8000/api/health | grep -F "\"version\":\"${GITHUB_REF_NAME#v}\""
       - name: container log
         if: failure()
         continue-on-error: true
