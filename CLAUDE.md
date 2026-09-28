@@ -96,6 +96,8 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
 - Flow: branch → `gh pr create` → `gh pr checks --watch` → `gh pr merge --squash` (the repo deletes
   the remote branch on merge; `--delete-branch` errors on the already-gone ref). Then `git checkout main && git pull`.
   `main` allows squash merges only (branch protection arrives with milestone 6). Never push to `main`.
+  Cutting a release: bump the three version files in a `chore: release vX.Y.Z` PR, merge, then
+  `git tag vX.Y.Z && git push origin vX.Y.Z`; `release.yml` does the rest. Dry-run with a `-rcN` tag first.
   `gh pr edit` fails silently on this repo (GitHub's retired classic-projects API); change a PR body with
   `gh api -X PATCH repos/:owner/:repo/pulls/<n> -F body=@file` instead.
 - Review ritual before a milestone PR: `/code-review high`, then a silent-failure pass

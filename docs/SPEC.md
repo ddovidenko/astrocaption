@@ -458,8 +458,12 @@ Public repo. Using GitHub Pro where useful:
 - **Actions**:
   - `ci.yml` on PR: lint, backend tests, frontend tests, docker build (no push), and a browser
     smoke test against the built image with a fake nova.
-  - `release.yml` on tag `v*`: build multi-arch image, push to GHCR, attach `compose.yml` and a
-    changelog to the GitHub Release. Uses `docker/build-push-action` with layer cache.
+  - `release.yml` on tag `v*`: refuse the tag unless it equals the version in `backend/pyproject.toml`,
+    `backend/app/__init__.py` and `frontend/package.json` (`make check-version TAG=…`); build and smoke
+    the amd64 image (size cap, `/api/health` reports the tag's version); then build amd64 + arm64,
+    push to GHCR (`X.Y.Z`, `X.Y`, `latest`; a `-rc` tag gets only `X.Y.Z-rcN` and a pre-release)
+    and create the GitHub Release with generated notes and `compose.yml` attached.
+    Uses `docker/build-push-action` with the GHA layer cache.
   - `dependabot.yml`: weekly pip, npm, actions, docker updates.
 - **Codespaces** devcontainer (`.devcontainer/`) so contributors get `make dev` with zero setup. Pro includes monthly hours.
 - **Issues** templates: bug, solve-failure (asks for nova job URL), feature.
