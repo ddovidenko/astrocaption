@@ -405,7 +405,8 @@ with the built-in default and a server-log warning naming the file; `GET /annota
   32-byte salt), stored in `config.json` as `scrypt$n$r$p$salt$digest`; no bcrypt dependency.
 - Session cookie `astrocaption_session`: HttpOnly, SameSite=Lax, Secure when the request scheme is https
   (behind a proxy that is `X-Forwarded-Proto`, honoured only with `TRUST_PROXY=1`, which wraps the app in
-  uvicorn's `ProxyHeadersMiddleware` trusting every upstream; a forged header can only change the forger's own cookie),
+  uvicorn's `ProxyHeadersMiddleware` trusting every upstream; a forged header changes only the forger's own cookie
+  and the client address in the access log, which nothing else reads),
   30 days. The value is a stateless HMAC-SHA256 token (keyed by `session_secret` from `config.json`) over
   the issue time and a fingerprint of the password hash, so a password reset invalidates every session
   without a session table. SameSite=Lax plus JSON request bodies is the CSRF protection; there is no token.
@@ -447,8 +448,9 @@ with the built-in default and a server-log warning naming the file; `GET /annota
   `ASTROCAPTION_MAX_UPLOAD_MB`, `ASTROCAPTION_SITE_TITLE`, `ASTROCAPTION_DATA_DIR` (default `/data`).
 - `NOVA_API_KEY` also accepts the alias `ASTROMETRY_API_KEY`. `compose.yml` lives in the repo root and carries a
   `build:` block so a clone can `docker compose up --build`; the release workflow (milestone 6) attaches it as-is.
-- `TRUST_PROXY=1` makes the app honour the proxy's `X-Forwarded-Proto` / `X-Forwarded-For` (§ 10); off, the
-  headers are ignored and the cookie is never `Secure`.
+- `TRUST_PROXY=1` makes the app honour the proxy's `X-Forwarded-Proto` / `X-Forwarded-For` from every upstream
+  (§ 10); off, only uvicorn's default loopback trust applies (`FORWARDED_ALLOW_IPS`, 127.0.0.1), so the cookie
+  is `Secure` only when the request scheme is https as the server sees it.
 - Healthcheck on `/api/health`. Non-root user in container.
 - `docs/INSTALL.md`: three commands to a running instance; reverse-proxy examples for Caddy and nginx.
 

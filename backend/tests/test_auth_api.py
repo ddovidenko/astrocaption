@@ -183,8 +183,9 @@ def test_plain_cookie_when_the_trusted_proxy_says_http(
     and the owner looks signed out right after signing in (#44)."""
     with env_app_client(tmp_path, monkeypatch, TRUST_PROXY="1") as client:
         assert client.post("/api/setup", json={"password": "hunter2hunter2"}).status_code == 204
-        ok = client.post("/api/login", json={"password": "hunter2hunter2"})
-        assert "Secure" not in ok.headers["set-cookie"]
+        for headers in ({}, {"X-Forwarded-Proto": "http"}):  # direct hit, and via a proxy
+            ok = client.post("/api/login", json={"password": "hunter2hunter2"}, headers=headers)
+            assert "Secure" not in ok.headers["set-cookie"], headers
         assert client.get("/api/health").json()["authenticated"] is True
 
 

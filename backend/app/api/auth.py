@@ -81,8 +81,9 @@ def session_cookie_params(request: Request) -> dict[str, Any]:
     ``set_session_cookie`` and ``logout`` must not be able to drift apart.
 
     ``Secure`` follows the request's scheme. Behind a proxy that scheme comes from
-    ``X-Forwarded-Proto``, which is only honoured with ``TRUST_PROXY=1`` (main.py); a plain
-    http request, LAN or otherwise, gets a plain cookie, so signing in keeps working there."""
+    ``X-Forwarded-Proto``: honoured from every upstream with ``TRUST_PROXY=1`` (main.py), and
+    from loopback peers by uvicorn's own default otherwise. A plain http request, LAN or
+    otherwise, gets a plain cookie, so signing in keeps working there."""
     return {
         "path": "/",
         "httponly": True,

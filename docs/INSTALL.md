@@ -195,18 +195,26 @@ server {
         proxy_pass http://127.0.0.1:8080;
         proxy_read_timeout 300;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $remote_addr;   # replace, never append: the app reads the first entry
     }
 }
 ```
 
 Set `TRUST_PROXY=1` in `compose.yml` once the proxy is in place. The app then trusts the
-proxy's `X-Forwarded-Proto` and `X-Forwarded-For` headers: the session cookie is marked
-`Secure` when the request came in over https, and the real client address reaches the log.
-Caddy sends both headers by default; nginx needs the `proxy_set_header` line above. Signing in
+proxy's `X-Forwarded-Proto` and `X-Forwarded-For` headers from every upstream: the session
+cookie is marked `Secure` when the request came in over https, and the address the proxy
+reports is what the access log shows. Caddy sends both headers by default and replaces any
+a client supplied; nginx needs the two `proxy_set_header` lines above (upgrading from a
+release before 0.1.0: add them, or the cookie stops being `Secure` behind nginx). Signing in
 over plain http (the LAN address, or `http://localhost:8080` straight at the container) keeps
-working with the flag set; that cookie is simply not `Secure`. Leave the flag off when nothing
-sits in front of the container: with it on, any client could set the headers itself, which
-only affects the `Secure` attribute of its own cookie.
+working with the flag set; that cookie is simply not `Secure`.
+
+With the flag on, a client that reaches the container directly can set those headers itself.
+That changes only the `Secure` attribute of its own cookie and the address in the log line,
+so it is harmless, but if the proxy runs on the same host, publish the port on loopback only
+(`"127.0.0.1:8080:8000"` in `compose.yml`) so nothing bypasses it. With the flag off, only
+uvicorn's default applies: forwarded headers are honoured from loopback peers
+(`FORWARDED_ALLOW_IPS`), which is the case for the `make dev` Vite proxy.
 
 ## Running from source (development)
 
