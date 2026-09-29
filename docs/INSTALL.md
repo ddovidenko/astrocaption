@@ -60,7 +60,7 @@ a new one inside the running container and logs every browser out; on a source c
 | Data directory | `ASTROCAPTION_DATA_DIR` env | `/data` in the container |
 | Default label style | `"default_style"` object in `data/config.json`, or the config page | built-in defaults (size-relative for the four size fields) |
 | Owner password | setup page, or `ASTROCAPTION_PASSWORD` env at first start, or the Config page later | required |
-| Secure cookies | `TRUST_PROXY=1` env when the app is served over HTTPS by a proxy | off |
+| Reverse proxy | `TRUST_PROXY=1` env: trust `X-Forwarded-*` from the proxy; session cookie `Secure` over https | off |
 | Solve timeout | `ASTROCAPTION_SOLVE_TIMEOUT_SECONDS` env | 900 (bounds 1-86400) |
 | Solve poll interval | `ASTROCAPTION_SOLVE_POLL_SECONDS` env | 5 (bounds 0.1-3600) |
 
@@ -191,15 +191,22 @@ nginx:
 server {
     server_name sky.example.com;
     client_max_body_size 100m;
-    location / { proxy_pass http://127.0.0.1:8080; proxy_read_timeout 300; }
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_read_timeout 300;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 }
 ```
 
-Set `TRUST_PROXY=1` in `compose.yml` once the proxy terminates HTTPS, so the session cookie is
-marked Secure. A `Secure` cookie is only kept by the browser over https: with `TRUST_PROXY=1`
-set, signing in over plain http (the LAN address, or `http://localhost:8080` straight at the
-container) succeeds and then immediately looks signed out, because the browser discarded the
-cookie. Reach the site over https, or leave the variable unset until the proxy is in place.
+Set `TRUST_PROXY=1` in `compose.yml` once the proxy is in place. The app then trusts the
+proxy's `X-Forwarded-Proto` and `X-Forwarded-For` headers: the session cookie is marked
+`Secure` when the request came in over https, and the real client address reaches the log.
+Caddy sends both headers by default; nginx needs the `proxy_set_header` line above. Signing in
+over plain http (the LAN address, or `http://localhost:8080` straight at the container) keeps
+working with the flag set; that cookie is simply not `Secure`. Leave the flag off when nothing
+sits in front of the container: with it on, any client could set the headers itself, which
+only affects the `Secure` attribute of its own cookie.
 
 ## Running from source (development)
 

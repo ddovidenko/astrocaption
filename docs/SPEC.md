@@ -403,7 +403,9 @@ with the built-in default and a server-log warning naming the file; `GET /annota
 
 - Single owner. Password hashed with the standard library's `hashlib.scrypt` (n=2^15, r=8, p=1, random
   32-byte salt), stored in `config.json` as `scrypt$n$r$p$salt$digest`; no bcrypt dependency.
-- Session cookie `astrocaption_session`: HttpOnly, SameSite=Lax, Secure when behind HTTPS (`TRUST_PROXY=1`),
+- Session cookie `astrocaption_session`: HttpOnly, SameSite=Lax, Secure when the request scheme is https
+  (behind a proxy that is `X-Forwarded-Proto`, honoured only with `TRUST_PROXY=1`, which wraps the app in
+  uvicorn's `ProxyHeadersMiddleware` trusting every upstream; a forged header can only change the forger's own cookie),
   30 days. The value is a stateless HMAC-SHA256 token (keyed by `session_secret` from `config.json`) over
   the issue time and a fingerprint of the password hash, so a password reset invalidates every session
   without a session table. SameSite=Lax plus JSON request bodies is the CSRF protection; there is no token.
@@ -445,6 +447,8 @@ with the built-in default and a server-log warning naming the file; `GET /annota
   `ASTROCAPTION_MAX_UPLOAD_MB`, `ASTROCAPTION_SITE_TITLE`, `ASTROCAPTION_DATA_DIR` (default `/data`).
 - `NOVA_API_KEY` also accepts the alias `ASTROMETRY_API_KEY`. `compose.yml` lives in the repo root and carries a
   `build:` block so a clone can `docker compose up --build`; the release workflow (milestone 6) attaches it as-is.
+- `TRUST_PROXY=1` makes the app honour the proxy's `X-Forwarded-Proto` / `X-Forwarded-For` (§ 10); off, the
+  headers are ignored and the cookie is never `Secure`.
 - Healthcheck on `/api/health`. Non-root user in container.
 - `docs/INSTALL.md`: three commands to a running instance; reverse-proxy examples for Caddy and nginx.
 
