@@ -25,13 +25,14 @@ export default function LoginPage({
     setError(null)
     try {
       await api.login(password)
-      // A 204 only means the server sent the cookie. If the browser dropped it (Secure
-      // cookie over plain http, third-party cookie blocking) health still says logged out,
-      // and silently staying here with no message is the worst outcome.
+      // A 204 only means the server sent the cookie. If the browser dropped it (cookies
+      // blocked, or it already holds a Secure cookie for this host from an https visit that
+      // a plain-http response may not overwrite) health still says logged out, and silently
+      // staying here with no message is the worst outcome.
       const fresh = await refreshHealth()
       if (fresh && !fresh.authenticated)
         setError(
-          'Signed in, but the browser did not keep the session cookie. If TRUST_PROXY is set, open the site over HTTPS.',
+          'Signed in, but the browser did not keep the session cookie. Check that cookies are allowed for this site; if you have opened it over https before, use the https address.',
         )
     } catch (err) {
       setError(describeError(err))

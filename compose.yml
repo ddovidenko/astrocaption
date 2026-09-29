@@ -11,6 +11,7 @@ services:
     volumes:
       - ./data:/data
     environment:
+      # 1 behind a reverse proxy: trust its X-Forwarded-* headers (Secure cookie over https)
       - TRUST_PROXY=0
       - NOVA_API_KEY=${NOVA_API_KEY:-${ASTROMETRY_API_KEY:-}}
       # headless first run (optional); read once, see docs/INSTALL.md
