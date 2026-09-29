@@ -75,27 +75,31 @@ async def _verify_throttled(
     return True
 
 
-def session_cookie_params(settings: Settings) -> dict[str, Any]:
+def session_cookie_params(request: Request) -> dict[str, Any]:
     """The cookie attributes in one place: a browser only drops a cookie when the path,
     ``Secure`` and ``SameSite`` of the deletion match the ones it was set with, so
-    ``set_session_cookie`` and ``logout`` must not be able to drift apart."""
+    ``set_session_cookie`` and ``logout`` must not be able to drift apart.
+
+    ``Secure`` follows the request's scheme. Behind a proxy that scheme comes from
+    ``X-Forwarded-Proto``, which is only honoured with ``TRUST_PROXY=1`` (main.py); a plain
+    http request, LAN or otherwise, gets a plain cookie, so signing in keeps working there."""
     return {
         "path": "/",
         "httponly": True,
         "samesite": "lax",
-        "secure": settings.trust_proxy,
+        "secure": request.url.scheme == "https",
     }
 
 
 def set_session_cookie(
-    response: Response, settings: Settings, *, secret: str, password_hash: str
+    response: Response, request: Request, *, secret: str, password_hash: str
 ) -> None:
     """Mint a session for the given credential pair and put it on ``response``."""
     response.set_cookie(
         COOKIE_NAME,
         issue_session(secret, password_hash),
         max_age=SESSION_TTL_SECONDS,
-        **session_cookie_params(settings),
+        **session_cookie_params(request),
     )
 
 
@@ -144,7 +148,7 @@ async def login(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Wrong password.")
     set_session_cookie(
         response,
-        settings,
+        request,
         secret=settings.session_secret,
         password_hash=settings.password_hash,
     )
@@ -156,7 +160,7 @@ async def logout(request: Request, response: Response, settings: SettingsDep) ->
     # SameSite=Lax keeps a cross-site POST from carrying the cookie, so without this check a
     # third-party page could force-log-out the owner (#39). No session: nothing to clear, 204.
     if is_authenticated(request, settings):
-        response.delete_cookie(COOKIE_NAME, **session_cookie_params(settings))
+        response.delete_cookie(COOKIE_NAME, **session_cookie_params(request))
 
 
 @router.post(
@@ -225,4 +229,4 @@ async def change_password(
                 "this browser will be signed out on its next request"
             )
         log.info("owner password changed")
-    set_session_cookie(response, settings, secret=written_secret, password_hash=written_hash)
+    set_session_cookie(response, request, secret=written_secret, password_hash=written_hash)

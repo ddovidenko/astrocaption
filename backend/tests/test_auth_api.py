@@ -163,11 +163,63 @@ def test_setup_then_login_then_logout(tmp_path: Path, monkeypatch: pytest.Monkey
         assert "hunter2" not in json.dumps(written)
 
 
-def test_secure_cookie_behind_a_proxy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_secure_cookie_when_the_trusted_proxy_says_https(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with env_app_client(tmp_path, monkeypatch, TRUST_PROXY="1") as client:
+        assert client.post("/api/setup", json={"password": "hunter2hunter2"}).status_code == 204
+        ok = client.post(
+            "/api/login",
+            json={"password": "hunter2hunter2"},
+            headers={"X-Forwarded-Proto": "https"},
+        )
+        assert "Secure" in ok.headers["set-cookie"]
+
+
+def test_plain_cookie_when_the_trusted_proxy_says_http(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TRUST_PROXY=1 on a LAN address: the cookie must not be Secure, or the browser drops it
+    and the owner looks signed out right after signing in (#44)."""
     with env_app_client(tmp_path, monkeypatch, TRUST_PROXY="1") as client:
         assert client.post("/api/setup", json={"password": "hunter2hunter2"}).status_code == 204
         ok = client.post("/api/login", json={"password": "hunter2hunter2"})
-        assert "Secure" in ok.headers["set-cookie"]
+        assert "Secure" not in ok.headers["set-cookie"]
+        assert client.get("/api/health").json()["authenticated"] is True
+
+
+def test_forwarded_proto_is_ignored_without_trust_proxy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with env_app_client(tmp_path, monkeypatch) as client:
+        assert client.post("/api/setup", json={"password": "hunter2hunter2"}).status_code == 204
+        ok = client.post(
+            "/api/login",
+            json={"password": "hunter2hunter2"},
+            headers={"X-Forwarded-Proto": "https"},
+        )
+        assert "Secure" not in ok.headers["set-cookie"]
+
+
+def test_logout_clears_with_the_same_secure_attribute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A browser only drops a cookie when the deletion's Secure matches the one it was set with."""
+    https = {"X-Forwarded-Proto": "https"}
+    with env_app_client(tmp_path, monkeypatch, TRUST_PROXY="1") as client:
+        assert client.post("/api/setup", json={"password": "hunter2hunter2"}).status_code == 204
+        ok = client.post("/api/login", json={"password": "hunter2hunter2"}, headers=https)
+        # The jar will not send a Secure cookie to the client's http:// base URL; hand it over.
+        token = ok.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1]
+        gone = client.post(
+            "/api/logout", headers={**https, "Cookie": f"astrocaption_session={token}"}
+        )
+        assert gone.status_code == 204
+        assert "Secure" in gone.headers["set-cookie"]
+        assert (
+            "Max-Age=0" in gone.headers["set-cookie"]
+            or "expires" in gone.headers["set-cookie"].lower()
+        )
 
 
 def test_headless_setup_from_environment(

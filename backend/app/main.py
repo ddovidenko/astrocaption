@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from . import __version__
 from .api import auth, config, docs, fonts, gallery, health, images
@@ -104,6 +105,12 @@ def create_app(
     # § 5.1) and the config page share the file, so they share the lock.
     app.state.config_write_lock = asyncio.Lock()
     app.add_middleware(images.UploadGuard, settings_source=source)
+    if cfg.trust_proxy:
+        # Behind a reverse proxy: X-Forwarded-Proto sets request.url.scheme (the session
+        # cookie's Secure follows it, api/auth.py) and X-Forwarded-For the client address
+        # (logs only; the sign-in cooldown is global). Every upstream is trusted because the
+        # only thing a forged header can change is the Secure flag on the forger's own cookie.
+        app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
     app.add_exception_handler(RequestValidationError, plain_validation_error)  # type: ignore[arg-type]
     app.add_exception_handler(FontNotFoundError, font_not_found_error)  # type: ignore[arg-type]
