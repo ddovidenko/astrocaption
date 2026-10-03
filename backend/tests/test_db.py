@@ -278,6 +278,20 @@ def test_get_annotations_treats_a_non_list_labels_column_as_empty(
     assert "labels" in caplog.text
 
 
+@pytest.mark.parametrize(("style_json", "labels_json"), [("{not json", "[]"), ("{}", "[1,")])
+def test_get_annotations_treats_a_malformed_column_as_defaults(
+    settings: Settings, caplog: pytest.LogCaptureFixture, style_json: str, labels_json: str
+) -> None:
+    """A hand-edited row whose column is not JSON at all loads like a non-object/non-list one."""
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    _seed_annotations_row(db, rec.id, style_json, labels_json)
+    with caplog.at_level("WARNING", logger="app.db"):
+        ann = db.get_annotations(rec.id)
+    assert ann is not None and ann.style == StyleConfig() and ann.labels == []
+    assert "not json" not in caplog.text
+
+
 def test_list_published_images_is_published_solved_newest_first(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.sqlite")
     db.init()

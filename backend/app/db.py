@@ -136,13 +136,22 @@ def _encode(fields: Mapping[str, object]) -> dict[str, object]:
     return values
 
 
+def _parse_column(raw_json: str) -> object:
+    """A stored JSON column, or ``None`` when it is not JSON at all (a hand edit), so the
+    tolerant loaders treat it like any other column of the wrong shape."""
+    try:
+        return json.loads(raw_json)
+    except ValueError:  # JSONDecodeError and the int-digit limit both subclass it
+        return None
+
+
 def _load_style(raw_json: str, image_id: str) -> StyleConfig:
     """Tolerant load of a stored style: a row written before hex validation existed (an early
     ``config.json`` could carry ``"text_color": "white"``) must not 500 every GET/export/
     re-solve for that image. Drop only the fields that fail and let the model's defaults fill
     them back in; a column that is not an object at all is all defaults. Never log the value,
     only the field name."""
-    raw = json.loads(raw_json)
+    raw = _parse_column(raw_json)
     if not isinstance(raw, dict):
         log.warning("image %s: stored style is not a JSON object; using the defaults", image_id)
         return StyleConfig()
@@ -158,7 +167,7 @@ def _load_labels(raw_json: str, image_id: str) -> list[Label]:
     A label whose position could not be read is disabled rather than shown at the top-left
     corner. Only an entry without a readable ``object_id`` is dropped: there is nothing to
     attach it to. Logged by object id and field name, never by value."""
-    raw = json.loads(raw_json)
+    raw = _parse_column(raw_json)
     if not isinstance(raw, list):
         log.warning("image %s: stored labels are not a JSON list; using none", image_id)
         return []
