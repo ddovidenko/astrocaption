@@ -5,7 +5,7 @@ import hashlib
 import json
 import logging
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -18,6 +18,8 @@ from app.api.images import (
     ALREADY_SOLVED_MESSAGE,
     IN_PROGRESS_MESSAGE,
     NOT_RESUMABLE_MESSAGE,
+    NOT_SOLVED_MESSAGE,
+    SOLVING_MESSAGE,
 )
 from app.config import CONFIG_FIX_HINT, Settings
 from app.db import Database
@@ -439,11 +441,88 @@ def test_export_and_resolve_conflict_while_solving(tmp_path: Path, sample_jpeg: 
         login(client)
         body = upload(client, sample_jpeg)
         image_id = body["id"]
-        assert client.post(f"/api/images/{image_id}/export").status_code == 409
+        # A first solve in flight is "still being solved", not "not solved" (#68).
+        doc = {"style": {}, "labels": [], "version": 1}
+        for resp in (
+            client.post(f"/api/images/{image_id}/export"),
+            client.put(f"/api/images/{image_id}/annotations", json=doc),
+            client.post(f"/api/images/{image_id}/autoarrange", json=doc),
+        ):
+            assert resp.status_code == 409 and resp.json()["detail"] == SOLVING_MESSAGE
         assert client.get(f"/api/images/{image_id}/export").status_code == 404
         assert client.get(f"/api/images/{image_id}/annotations").status_code == 404
         assert client.get(f"/api/images/{image_id}/objects").json() == []
         assert client.post(f"/api/images/{image_id}/solve").status_code == 409
+
+
+def _solver_sequence(*solvers: FakeSolver) -> Callable[[], FakeSolver]:
+    """A solver factory that hands out ``solvers`` in order (one per solve) and then the last."""
+    queue = list(solvers)
+
+    def factory() -> FakeSolver:
+        return queue.pop(0) if len(queue) > 1 else queue[0]
+
+    return factory
+
+
+def test_never_solved_idle_image_is_404_for_export_like_get_and_put(
+    tmp_path: Path, sample_jpeg: Path
+) -> None:
+    """#68: one gate. A row that was never solved (no key, so the first solve failed) has no
+    layout: GET, PUT and export all say so with the same 404."""
+    settings = make_settings(tmp_path)
+    with make_client(settings, lambda: None) as client:
+        login(client)
+        image_id = upload(client, sample_jpeg)["id"]
+        assert wait_for_status(client, image_id, {"solved", "failed"})["solve_status"] == "failed"
+        doc = {"style": {}, "labels": [], "version": 1}
+        for resp in (
+            client.get(f"/api/images/{image_id}/annotations"),
+            client.put(f"/api/images/{image_id}/annotations", json=doc),
+            client.post(f"/api/images/{image_id}/autoarrange", json=doc),
+            client.post(f"/api/images/{image_id}/export"),
+        ):
+            assert resp.status_code == 404 and resp.json()["detail"] == NOT_SOLVED_MESSAGE
+
+
+def test_resolve_in_flight_serves_the_old_layout_read_only(
+    tmp_path: Path, sample_jpeg: Path
+) -> None:
+    """#68: during a re-solve the editor shows the previous layout read-only (SPEC § 6):
+    GET serves it, PUT and export are refused with the same 409."""
+    settings = make_settings(tmp_path)
+    stuck = FakeSolver(submission_polls=10**9)
+    with make_client(settings, _solver_sequence(FakeSolver(), stuck)) as client:
+        login(client)
+        image_id = upload(client, sample_jpeg)["id"]
+        assert wait_for_status(client, image_id, {"solved", "failed"})["solve_status"] == "solved"
+        before = client.get(f"/api/images/{image_id}/annotations").json()
+        assert client.post(f"/api/images/{image_id}/solve").status_code == 200
+        assert client.get(f"/api/images/{image_id}/annotations").json() == before
+        for resp in (
+            client.put(f"/api/images/{image_id}/annotations", json=before),
+            client.post(f"/api/images/{image_id}/export"),
+        ):
+            assert resp.status_code == 409 and resp.json()["detail"] == SOLVING_MESSAGE
+
+
+def test_failed_resolve_leaves_the_previous_layout_editable_and_exportable(
+    tmp_path: Path, sample_jpeg: Path
+) -> None:
+    """#68: a failed re-solve keeps the previous objects and layout (SPEC § 5), so export must
+    accept them exactly as PUT does."""
+    settings = make_settings(tmp_path)
+    with make_client(settings, _solver_sequence(FakeSolver(), FakeSolver(fail=True))) as client:
+        login(client)
+        image_id = upload(client, sample_jpeg)["id"]
+        assert wait_for_status(client, image_id, {"solved", "failed"})["solve_status"] == "solved"
+        assert client.post(f"/api/images/{image_id}/solve").status_code == 200
+        assert wait_for_status(client, image_id, {"solved", "failed"})["solve_status"] == "failed"
+        doc = client.get(f"/api/images/{image_id}/annotations").json()
+        assert client.put(f"/api/images/{image_id}/annotations", json=doc).status_code == 200
+        resp = client.post(f"/api/images/{image_id}/export")
+        assert resp.status_code == 200, resp.text
+        assert client.get(f"/api/images/{image_id}/export").status_code == 200
 
 
 def test_failed_solve_then_resolve_with_hints(tmp_path: Path, sample_jpeg: Path) -> None:

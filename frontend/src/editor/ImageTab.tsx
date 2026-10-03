@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, formatBytes, pageError, type ExportOut } from '../api'
 import { exportOf, exportState, relativeTime } from '../exportStatus'
 import { flushSave } from './autosave'
-import { useEditor } from './store'
+import { isEditable, useEditor } from './store'
 import { fallbackSentence } from './styleTab'
 
 /** Read-only solve facts plus the export button (design § 5). Publish, re-solve and delete stay
@@ -10,10 +10,9 @@ import { fallbackSentence } from './styleTab'
 export default function ImageTab() {
   const image = useEditor((s) => s.image)
   const fallback = useEditor((s) => s.fontFallback)
-  // Not `isEditable`: that also allows a failed re-solve, which the editor may still edit and save
-  // but the export endpoint refuses ("Image is not solved yet."). The button says so by being
-  // disabled rather than by failing.
-  const solved = useEditor((s) => s.image?.solve_status === 'solved')
+  // The same rule as editing (#68): a failed re-solve keeps the previous layout, and the server
+  // exports it as readily as it saves it; only a solve in flight disables the button.
+  const editable = useEditor(isEditable)
   // For the export line (#91): the stored document's hash moves with every save that lands,
   // and anything not saved yet is already a change the last export cannot hold.
   const annotationsHash = useEditor((s) => s.contentHash)
@@ -42,7 +41,7 @@ export default function ImageTab() {
   const emphasise = state === 'stale' && saveStatus !== 'conflict' && saveStatus !== 'error'
 
   async function exportNow(id: string): Promise<void> {
-    if (!solved) return
+    if (!editable) return
     setBusy(true)
     setError(null)
     // A failed export must not leave the previous run's download link on screen to be clicked.
@@ -107,7 +106,7 @@ export default function ImageTab() {
       <div className="tab-actions">
         <button
           className={emphasise ? undefined : 'secondary'}
-          disabled={busy || !solved}
+          disabled={busy || !editable}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => void exportNow(image.id)}
         >

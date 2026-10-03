@@ -122,3 +122,23 @@ describe('ImageTab export state', () => {
     expect(exportLine().textContent).toBe('Exported just now')
   })
 })
+
+// #68: a failed re-solve keeps the previous layout editable and the server exports it, so
+// Export follows `isEditable`; only a solve in flight disables it.
+describe('ImageTab export gating', () => {
+  it('stays enabled after a failed re-solve', () => {
+    const doc = makeDoc()
+    doc.image = { ...doc.image, solve_status: 'failed' }
+    useEditor.getState().load(doc)
+    render(<ImageTab />)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Export' }).disabled).toBe(false)
+  })
+
+  it('is disabled while a re-solve is running', () => {
+    const doc = makeDoc()
+    doc.image = { ...doc.image, solve_status: 'solving' }
+    useEditor.getState().load(doc)
+    render(<ImageTab />)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Export' }).disabled).toBe(true)
+  })
+})

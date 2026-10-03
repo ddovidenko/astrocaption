@@ -7,7 +7,9 @@ from app.layout import SIZE_RELATIVE
 from app.models import (
     AnnotationsUpdate,
     ConfigUpdate,
+    ImageRecord,
     Label,
+    SolveStatus,
     StyleConfig,
     StyleDefaults,
     StyleOverrides,
@@ -121,3 +123,21 @@ def test_annotations_update_ignores_server_fields_and_bounds_the_rest() -> None:
     with pytest.raises(ValidationError) as exc:
         Label(object_id=1, text_override="x" * 201)
     assert exc.value.errors()[0]["type"] == "string_too_long"
+
+
+def test_image_record_is_busy_only_while_the_worker_owns_it() -> None:
+    """#68: the one "solve in flight" predicate the routes share."""
+    base = {
+        "id": "i",
+        "created_at": "t",
+        "updated_at": "t",
+        "title": "x",
+        "original_name": "x.jpg",
+        "original_path": "p",
+        "preview_path": "p",
+        "thumb_path": "p",
+        "width": 10,
+        "height": 10,
+    }
+    busy = {s for s in SolveStatus if ImageRecord.model_validate({**base, "solve_status": s}).busy}
+    assert busy == {SolveStatus.PENDING, SolveStatus.SOLVING}

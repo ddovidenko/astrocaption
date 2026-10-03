@@ -123,7 +123,7 @@ const initial = {
  *  autosave all ask this. Only a solve in progress stops editing — a *failed* re-solve leaves the
  *  previous layout editable (SPEC § 5), and the server accepts PUT/autoarrange for it. A conflict
  *  stops further *saves* (the autosave and the toolbar own that), not the owner's work in the
- *  page. Export is gated separately, on `solved` alone: the export endpoint requires it. */
+ *  page. Export follows the same rule (#68): the export endpoint accepts a failed re-solve too. */
 export function isEditable(state: EditorState): boolean {
   const status = state.image?.solve_status
   return status === 'solved' || status === 'failed'

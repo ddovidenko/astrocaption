@@ -213,7 +213,7 @@ def _start_solve(
 
 def _require_idle(rec: ImageRecord) -> None:
     """409 when a solve is already queued or running: neither route may touch the row then."""
-    if rec.solve_status in (SolveStatus.PENDING, SolveStatus.SOLVING):
+    if rec.busy:
         raise HTTPException(status.HTTP_409_CONFLICT, IN_PROGRESS_MESSAGE)
 
 
@@ -378,10 +378,9 @@ def _object_out(o: SolveObject, preference: NamePreference) -> ObjectOut:
 
 @router.get("/{image_id}/annotations")
 async def get_annotations(image_id: str, settings: SettingsDep, db: DbDep) -> Annotations:
-    _get_or_404(db, image_id)
-    ann = db.get_annotations(image_id)
-    if ann is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_SOLVED_MESSAGE)
+    """The stored layout, also during a re-solve: the editor shows it read-only then
+    (SPEC § 6) and the write routes refuse it (``_editable_layout``)."""
+    _, ann = _stored_layout(db, image_id)
     resolved = resolved_style(settings.fonts_dir, ann.style)
     fallback = ann.style.font_file if resolved.font_file != ann.style.font_file else None
     return ann.model_copy(update={"style": resolved, "font_fallback": fallback})
@@ -423,15 +422,31 @@ def _check_version(doc: AnnotationsUpdate, stored: Annotations, image_id: str) -
         raise HTTPException(status.HTTP_409_CONFLICT, CONFLICT_MESSAGE)
 
 
-def _annotations_target(db: Database, image_id: str) -> tuple[ImageRecord, Annotations]:
-    """The image and its stored layout, or the 404/409 the editor shows."""
-    rec = _get_or_404(db, image_id)
-    if rec.solve_status in (SolveStatus.PENDING, SolveStatus.SOLVING):
-        raise HTTPException(status.HTTP_409_CONFLICT, SOLVING_MESSAGE)
+def _layout_or_404(db: Database, image_id: str) -> Annotations:
+    """The stored layout; 404 when there is none (never solved). The one "is this image
+    solved" test (#68): the layout row is written by the first successful solve and survives
+    a failed re-solve (SPEC § 5), so its existence is the test, not the status."""
     ann = db.get_annotations(image_id)
     if ann is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_SOLVED_MESSAGE)
-    return rec, ann
+    return ann
+
+
+def _stored_layout(db: Database, image_id: str) -> tuple[ImageRecord, Annotations]:
+    """The image and its stored layout for GET, also during a re-solve: the editor shows the
+    previous layout read-only then (SPEC § 6)."""
+    rec = _get_or_404(db, image_id)
+    return rec, _layout_or_404(db, image_id)
+
+
+def _editable_layout(db: Database, image_id: str) -> tuple[ImageRecord, Annotations]:
+    """The same for the routes that change or render the layout: 409 while the worker owns the
+    row, checked first so a first solve in flight reads as "still being solved" rather than
+    "not solved"."""
+    rec = _get_or_404(db, image_id)
+    if rec.busy:
+        raise HTTPException(status.HTTP_409_CONFLICT, SOLVING_MESSAGE)
+    return rec, _layout_or_404(db, image_id)
 
 
 def _validate_document(
@@ -467,7 +482,7 @@ async def put_annotations(
 ) -> Annotations:
     """The editor's autosave (design § 4): stored as version + 1 when ``doc.version`` is still
     the stored one, else 409 and nothing written."""
-    _, stored = _annotations_target(db, image_id)
+    _, stored = _editable_layout(db, image_id)
     _check_version(doc, stored, image_id)
     _validate_document(doc, db.get_objects(image_id), settings, image_id)
     ann = Annotations(
@@ -488,7 +503,7 @@ async def autoarrange(
     """Run the placer on every enabled label of the submitted document and return the result
     without storing it; the editor applies it and autosaves (design § 4). Pinned labels stay
     where they are and block the others (spec § A); ``reset`` unpins everything first."""
-    rec, stored = _annotations_target(db, image_id)
+    rec, stored = _editable_layout(db, image_id)
     _check_version(doc, stored, image_id)
     objects = db.get_objects(image_id)
     _validate_document(doc, objects, settings, image_id)
@@ -557,10 +572,7 @@ async def export_image(
     db: DbDep,
     body: ExportRequest | None = None,
 ) -> ExportOut:
-    rec = _get_or_404(db, image_id)
-    ann = db.get_annotations(image_id)
-    if rec.solve_status != SolveStatus.SOLVED or ann is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Image is not solved yet.")
+    rec, ann = _editable_layout(db, image_id)
     req = body or ExportRequest()
     objects = db.get_objects(image_id)
     width, height, size, encoding = await asyncio.to_thread(
