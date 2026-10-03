@@ -13,6 +13,7 @@ from app.models import (
     StyleConfig,
     StyleDefaults,
     StyleOverrides,
+    validate_dropping_bad_fields,
 )
 
 
@@ -141,3 +142,23 @@ def test_image_record_is_busy_only_while_the_worker_owns_it() -> None:
     }
     busy = {s for s in SolveStatus if ImageRecord.model_validate({**base, "solve_status": s}).busy}
     assert busy == {SolveStatus.PENDING, SolveStatus.SOLVING}
+
+
+def test_validate_dropping_bad_fields_keeps_the_good_ones_and_names_the_bad() -> None:
+    """#69: the one tolerant read behind stored styles, stored labels and config.json's
+    ``default_style``. Bad and unknown fields fall back to the model's defaults; the reasons
+    name the field and never the value."""
+    raw = {"text_color": "white", "font_size": 600, "bogus": 1, "marker_color": "#ff8800"}
+    style, dropped = validate_dropping_bad_fields(StyleConfig, raw)
+    assert style.marker_color == "#ff8800" and style.text_color == "#FFFFFF"
+    assert set(dropped) == {"text_color", "font_size", "bogus"}
+    assert all("white" not in reason and "600" not in reason for reason in dropped.values())
+    assert validate_dropping_bad_fields(StyleConfig, {"halo": False}) == (
+        StyleConfig(halo=False),
+        {},
+    )
+
+
+def test_validate_dropping_bad_fields_still_raises_for_a_required_field() -> None:
+    with pytest.raises(ValidationError):
+        validate_dropping_bad_fields(Label, {"object_id": "seven"})

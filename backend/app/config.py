@@ -22,9 +22,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pydantic import ValidationError
-
-from .models import MAX_UPLOAD_MB, MIN_UPLOAD_MB, StyleOverrides, validation_message
+from .models import MAX_UPLOAD_MB, MIN_UPLOAD_MB, StyleOverrides, validate_dropping_bad_fields
 
 log = logging.getLogger(__name__)
 
@@ -251,34 +249,23 @@ def _positive_seconds(raw: object, *, default: float, name: str, lo: float, hi: 
     return value
 
 
-def _first_message(exc: ValidationError) -> str:
-    """Pydantic's reason for a rejected field, without the value it rejected."""
-    return "; ".join(validation_message(e) for e in exc.errors()) or "is not valid"
-
-
 def _normalise_style(raw: object) -> dict[str, object]:
     """config.json's ``default_style``, as the same overrides ``PUT /api/config`` would store.
 
     Best effort: a file the page cannot represent should not cost the owner the fields that
-    are fine, so a whole-object failure is retried field by field and only the bad ones (and
-    fields the model does not know) are dropped, each with a log line naming the field.
+    are fine, so only the bad ones (and fields the model does not know) are dropped, each with
+    a log line naming the field and the reason, never the value (CLAUDE.md).
     """
     if not isinstance(raw, Mapping):
         if raw is not None:
             log.warning("ignoring default_style in config.json: not a JSON object")
         return {}
-    fields = {str(k): v for k, v in raw.items()}
-    try:
-        return StyleOverrides.model_validate(fields).overrides()
-    except ValidationError:
-        pass  # one bad field must not drop the good ones; find out which below
-    kept: dict[str, object] = {}
-    for name, value in fields.items():
-        try:
-            kept.update(StyleOverrides.model_validate({name: value}).overrides())
-        except ValidationError as exc:  # the reason only, never the value (CLAUDE.md)
-            log.warning("ignoring default_style.%s in config.json: %s", name, _first_message(exc))
-    return kept  # every value here already passed the model; there are no cross-field rules
+    overrides, dropped = validate_dropping_bad_fields(
+        StyleOverrides, {str(k): v for k, v in raw.items()}
+    )
+    for name, reason in dropped.items():
+        log.warning("ignoring default_style.%s in config.json: %s", name, reason)
+    return overrides.overrides()
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:

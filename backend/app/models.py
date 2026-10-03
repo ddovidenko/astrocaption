@@ -17,6 +17,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    ValidationError,
     ValidationInfo,
     field_validator,
 )
@@ -741,6 +742,28 @@ def validation_message(error: Mapping[str, Any]) -> str:
     except (KeyError, IndexError, ValueError, TypeError):
         log.warning("VALIDATION_MESSAGES[%r] needs context pydantic did not supply", kind)
         return GENERIC_VALIDATION_MESSAGE
+
+
+def validate_dropping_bad_fields[T: BaseModel](
+    model: type[T], raw: Mapping[str, object]
+) -> tuple[T, dict[str, str]]:
+    """Validate ``raw`` as ``model``, dropping every field that fails (unknown fields included)
+    so the model's defaults fill them in: the one tolerant read behind a stored style, a stored
+    label and config.json's ``default_style`` (#69). Returns the instance and the dropped
+    fields with pydantic's reason for each, never the value (CLAUDE.md). Raises
+    ``ValidationError`` only when the repaired input still fails, i.e. a required field is
+    missing or unreadable."""
+    fields = dict(raw)
+    try:
+        return model.model_validate(fields), {}
+    except ValidationError as exc:
+        dropped: dict[str, str] = {}
+        for error in exc.errors():
+            if error["loc"]:
+                dropped.setdefault(str(error["loc"][0]), validation_message(error))
+    for name in dropped:
+        fields.pop(name, None)
+    return model.model_validate(fields), dropped
 
 
 MIN_PASSWORD_LENGTH = 8

@@ -195,6 +195,89 @@ def test_get_annotations_drops_a_legacy_colour_instead_of_500ing(
     assert "white" not in caplog.text
 
 
+def _seed_annotations_row(db: Database, image_id: str, style_json: str, labels_json: str) -> None:
+    """A row as an older build (or a hand edit) might have left it, bypassing the models."""
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO annotations (image_id, style_json, labels_json, version, updated_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (image_id, style_json, labels_json, 1, "2026-01-01T00:00:00+00:00"),
+        )
+
+
+def test_get_annotations_repairs_labels_field_by_field(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#69: the labels column is read as tolerantly as the style. A field that no longer
+    validates (a renamed field, a legacy colour, an over-long override) falls back to its
+    default; no label loses its row. A label whose position cannot be read is disabled rather
+    than shown at the top-left corner. Field names are logged, values never."""
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    labels = [
+        {"object_id": 1, "x": 10, "y": 20, "colour": "#123456"},  # a since-renamed field
+        {"object_id": 2, "x": 10, "y": 20, "color": "white"},  # a legacy colour
+        {"object_id": 3, "x": 10, "y": 20, "text_override": "z" * 500},  # over the cap
+        {"object_id": 4, "x": "NaN", "y": 20, "enabled": True},  # unreadable position
+        {"object_id": 5, "x": 1, "y": 2, "pinned": True},  # fine as it is
+    ]
+    _seed_annotations_row(db, rec.id, "{}", json.dumps(labels))
+    with caplog.at_level("WARNING", logger="app.db"):
+        ann = db.get_annotations(rec.id)
+    assert ann is not None
+    by_id = {lab.object_id: lab for lab in ann.labels}
+    assert set(by_id) == {1, 2, 3, 4, 5}
+    assert by_id[1].x == 10 and by_id[1].color is None
+    assert by_id[2].color is None and by_id[2].x == 10
+    assert by_id[3].text_override is None
+    assert by_id[4].enabled is False and by_id[4].x == 0.0 and by_id[4].y == 20
+    assert by_id[5] == Label(object_id=5, x=1, y=2, pinned=True)
+    assert "colour" in caplog.text and "text_override" in caplog.text
+    assert "white" not in caplog.text and "zzz" not in caplog.text
+
+
+def test_get_annotations_drops_only_labels_that_name_no_object(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A label without a readable ``object_id`` has nothing to attach to; it is the one case
+    that is dropped, with a warning, and the rest of the row still loads."""
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    labels = [{"x": 1, "y": 2}, {"object_id": "seven"}, "junk", None, {"object_id": 9}]
+    _seed_annotations_row(db, rec.id, "{}", json.dumps(labels))
+    with caplog.at_level("WARNING", logger="app.db"):
+        ann = db.get_annotations(rec.id)
+    assert ann is not None
+    assert [lab.object_id for lab in ann.labels] == [9]
+    assert "dropping" in caplog.text and "seven" not in caplog.text
+
+
+@pytest.mark.parametrize("style_json", ["null", "[1, 2]", '"white"'])
+def test_get_annotations_treats_a_non_object_style_as_all_defaults(
+    settings: Settings, caplog: pytest.LogCaptureFixture, style_json: str
+) -> None:
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    _seed_annotations_row(db, rec.id, style_json, "[]")
+    with caplog.at_level("WARNING", logger="app.db"):
+        ann = db.get_annotations(rec.id)
+    assert ann is not None and ann.style == StyleConfig()
+    assert "style" in caplog.text and "white" not in caplog.text
+
+
+@pytest.mark.parametrize("labels_json", ["null", "{}", '"x"'])
+def test_get_annotations_treats_a_non_list_labels_column_as_empty(
+    settings: Settings, caplog: pytest.LogCaptureFixture, labels_json: str
+) -> None:
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    _seed_annotations_row(db, rec.id, "{}", labels_json)
+    with caplog.at_level("WARNING", logger="app.db"):
+        ann = db.get_annotations(rec.id)
+    assert ann is not None and ann.labels == []
+    assert "labels" in caplog.text
+
+
 def test_list_published_images_is_published_solved_newest_first(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.sqlite")
     db.init()
