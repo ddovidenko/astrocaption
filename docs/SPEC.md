@@ -353,8 +353,9 @@ Owner (cookie session):
   it), `style.font_file` must be bundled, colours are `#RRGGBB`, else a plain 422. Stored as `version + 1` with a
   fresh `updated_at`, and the stored document is the response. If the stored version differs from the submitted one:
   409 `This image was changed elsewhere. Reload to continue editing.` and nothing is written (a compare-and-swap in
-  the database, so two editors cannot both win). 404 before the first solve, 409 while a solve is running. A failed
-  re-solve leaves the previous layout editable. A stored style whose font is no longer bundled is served by GET with
+  the database, so two editors cannot both win). Both verbs are 404 before the first solve. While a solve is running
+  `GET` still serves the previous layout (the editor shows it read-only, § 6) and `PUT` is 409 `The image is still
+  being solved; try again when it is done.` A failed re-solve leaves the previous layout editable. A stored style whose font is no longer bundled is served by GET with
   the built-in default (§ 9), so the editor's next autosave stores the resolved name.
   `font_fallback`: the stored `font_file` when the served style's font was replaced by the default, else null
 - `GET /images/{id}/default-style` → StyleConfig

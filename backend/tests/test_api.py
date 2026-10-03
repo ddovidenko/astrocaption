@@ -441,7 +441,14 @@ def test_export_and_resolve_conflict_while_solving(tmp_path: Path, sample_jpeg: 
         login(client)
         body = upload(client, sample_jpeg)
         image_id = body["id"]
-        assert client.post(f"/api/images/{image_id}/export").status_code == 409
+        # A first solve in flight is "still being solved", not "not solved" (#68).
+        doc = {"style": {}, "labels": [], "version": 1}
+        for resp in (
+            client.post(f"/api/images/{image_id}/export"),
+            client.put(f"/api/images/{image_id}/annotations", json=doc),
+            client.post(f"/api/images/{image_id}/autoarrange", json=doc),
+        ):
+            assert resp.status_code == 409 and resp.json()["detail"] == SOLVING_MESSAGE
         assert client.get(f"/api/images/{image_id}/export").status_code == 404
         assert client.get(f"/api/images/{image_id}/annotations").status_code == 404
         assert client.get(f"/api/images/{image_id}/objects").json() == []
@@ -468,8 +475,11 @@ def test_never_solved_idle_image_is_404_for_export_like_get_and_put(
         login(client)
         image_id = upload(client, sample_jpeg)["id"]
         assert wait_for_status(client, image_id, {"solved", "failed"})["solve_status"] == "failed"
+        doc = {"style": {}, "labels": [], "version": 1}
         for resp in (
             client.get(f"/api/images/{image_id}/annotations"),
+            client.put(f"/api/images/{image_id}/annotations", json=doc),
+            client.post(f"/api/images/{image_id}/autoarrange", json=doc),
             client.post(f"/api/images/{image_id}/export"),
         ):
             assert resp.status_code == 404 and resp.json()["detail"] == NOT_SOLVED_MESSAGE
