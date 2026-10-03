@@ -68,7 +68,7 @@ describe('api helpers', () => {
   })
 
   it('extracts FastAPI error details', () => {
-    expect(errorMessage(409, { detail: 'Image is not solved yet.' })).toBe('Image is not solved yet.')
+    expect(errorMessage(409, { detail: 'A solve is already in progress.' })).toBe('A solve is already in progress.')
     expect(errorMessage(500, null)).toBe('Request failed (HTTP 500)')
     // The backend's 422 handler always answers with a plain string; a list is not a shape
     // the API produces any more, so it falls through to the generic message.

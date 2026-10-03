@@ -454,6 +454,12 @@ class ImageRecord(BaseModel):
     exported_hash: str | None = None
 
     @property
+    def busy(self) -> bool:
+        """A solve is queued or running: the worker owns the row. Every route that would
+        change it, or render it, is refused until the worker is done (``api.images``)."""
+        return self.solve_status in (SolveStatus.PENDING, SolveStatus.SOLVING)
+
+    @property
     def check_available(self) -> bool:
         """Whether POST /check can resume this row, which is the one thing Check again is for.
 

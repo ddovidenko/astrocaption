@@ -360,7 +360,9 @@ Owner (cookie session):
 - `GET /images/{id}/default-style` → StyleConfig
 - `POST /images/{id}/autoarrange` {…document…, reset: bool = false} → the same document with every enabled, unpinned label re-placed by the placer (§ 6.4; pinned labels are fixed obstacles), same version, not stored; `reset: true` unpins every label first. The editor applies it and autosaves. Validated like `PUT`, including the version check (409). `reset` is refused by `PUT`.
 - `POST /images/{id}/export` {quality: int|null, scale} → {export_url, annotated_preview_url, width, height, bytes, exported_at, encoding};
-  `quality: null` (the default) reuses the source JPEG's quantisation tables (§ 5.4). `GET /images/{id}/export` → file
+  `quality: null` (the default) reuses the source JPEG's quantisation tables (§ 5.4). Gated like `PUT /annotations`:
+  404 before the first solve, 409 `The image is still being solved; try again when it is done.` while a solve is
+  running, and accepted after a failed re-solve (it renders the previous layout). `GET /images/{id}/export` → file
 - `GET /images/{id}/files/{original|preview|thumb|annotated-preview}` → the file itself
 - `GET /fonts` → list of bundled fonts {file, family, weight, sample, ascents}; `ascents` is Pillow's ascent at
   every allowed size (index `size − 6`, sizes 6–500), which the editor adds to a label's `y` to draw on the
