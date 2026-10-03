@@ -358,7 +358,7 @@ Owner (cookie session):
   being solved; try again when it is done.` A failed re-solve leaves the previous layout editable. A stored style whose font is no longer bundled is served by GET with
   the built-in default (§ 9), so the editor's next autosave stores the resolved name. A stored row that an older
   build wrote is read tolerantly (#69): a style or label field that no longer validates falls back to its default
-  (a label whose position is unreadable is disabled, never dropped; only a label naming no object is dropped), a
+  (a label whose position is unreadable or absent is disabled and unpinned, never dropped; only an entry naming no object is dropped), a
   style column that is not an object (or not JSON) is all defaults, and a labels column that is not a list is empty; each repair
   is a server-log warning naming the field, never the value. The next autosave stores the repaired document.
   `font_fallback`: the stored `font_file` when the served style's font was replaced by the default, else null

@@ -218,20 +218,23 @@ def test_get_annotations_repairs_labels_field_by_field(
         {"object_id": 1, "x": 10, "y": 20, "colour": "#123456"},  # a since-renamed field
         {"object_id": 2, "x": 10, "y": 20, "color": "white"},  # a legacy colour
         {"object_id": 3, "x": 10, "y": 20, "text_override": "z" * 500},  # over the cap
-        {"object_id": 4, "x": "NaN", "y": 20, "enabled": True},  # unreadable position
+        {"object_id": 4, "x": "NaN", "y": 20, "enabled": True, "pinned": True},  # bad position
         {"object_id": 5, "x": 1, "y": 2, "pinned": True},  # fine as it is
+        {"object_id": 6, "left": 10, "top": 20},  # a position under since-renamed names
     ]
     _seed_annotations_row(db, rec.id, "{}", json.dumps(labels))
     with caplog.at_level("WARNING", logger="app.db"):
         ann = db.get_annotations(rec.id)
     assert ann is not None
     by_id = {lab.object_id: lab for lab in ann.labels}
-    assert set(by_id) == {1, 2, 3, 4, 5}
+    assert set(by_id) == {1, 2, 3, 4, 5, 6}
     assert by_id[1].x == 10 and by_id[1].color is None
     assert by_id[2].color is None and by_id[2].x == 10
     assert by_id[3].text_override is None
     assert by_id[4].enabled is False and by_id[4].x == 0.0 and by_id[4].y == 20
+    assert by_id[4].pinned is False  # else Reset positions would keep it in the corner
     assert by_id[5] == Label(object_id=5, x=1, y=2, pinned=True)
+    assert by_id[6].enabled is False and by_id[6].pinned is False  # absent, not just bad
     assert "colour" in caplog.text and "text_override" in caplog.text
     assert "white" not in caplog.text and "zzz" not in caplog.text
 
@@ -249,7 +252,7 @@ def test_get_annotations_drops_only_labels_that_name_no_object(
         ann = db.get_annotations(rec.id)
     assert ann is not None
     assert [lab.object_id for lab in ann.labels] == [9]
-    assert "dropping" in caplog.text and "seven" not in caplog.text
+    assert "unreadable label entries" in caplog.text and "seven" not in caplog.text
 
 
 @pytest.mark.parametrize("style_json", ["null", "[1, 2]", '"white"'])
@@ -278,7 +281,11 @@ def test_get_annotations_treats_a_non_list_labels_column_as_empty(
     assert "labels" in caplog.text
 
 
-@pytest.mark.parametrize(("style_json", "labels_json"), [("{not json", "[]"), ("{}", "[1,")])
+@pytest.mark.parametrize(
+    ("style_json", "labels_json"),
+    [("{not json", "[]"), ("{}", "[1,"), ("{}", "[" * 100_000 + "]" * 100_000)],
+    ids=["style", "labels", "labels-nested-past-the-recursion-limit"],
+)
 def test_get_annotations_treats_a_malformed_column_as_defaults(
     settings: Settings, caplog: pytest.LogCaptureFixture, style_json: str, labels_json: str
 ) -> None:

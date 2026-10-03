@@ -753,16 +753,14 @@ def validate_dropping_bad_fields[T: BaseModel](
     fields with pydantic's reason for each, never the value (CLAUDE.md). Raises
     ``ValidationError`` only when the repaired input still fails, i.e. a required field is
     missing or unreadable."""
-    fields = dict(raw)
     try:
-        return model.model_validate(fields), {}
+        return model.model_validate(raw), {}
     except ValidationError as exc:
         dropped: dict[str, str] = {}
         for error in exc.errors():
             if error["loc"]:
                 dropped.setdefault(str(error["loc"][0]), validation_message(error))
-    for name in dropped:
-        fields.pop(name, None)
+    fields = {name: value for name, value in raw.items() if name not in dropped}
     return model.model_validate(fields), dropped
 
 
