@@ -1,0 +1,26 @@
+name: Feature request
+description: Something AstroCaption should do, or do differently.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Not sure yet, or want to talk it over first? [Discussions Ideas](https://github.com/ddovidenko/astrocaption/discussions/categories/ideas) is the place.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do with your image and where the app gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including how you work around it today, if you do.

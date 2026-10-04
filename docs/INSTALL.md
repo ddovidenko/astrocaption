@@ -216,6 +216,17 @@ so it is harmless, but if the proxy runs on the same host, publish the port on l
 uvicorn's default applies: forwarded headers are honoured from loopback peers
 (`FORWARDED_ALLOW_IPS`), which is the case for the `make dev` Vite proxy.
 
+## Getting help
+
+- Questions about installing or running it (Docker, a reverse proxy, the nova key, a lockout) go to
+  [Discussions Q&A](https://github.com/ddovidenko/astrocaption/discussions/categories/q-a).
+- A solve that failed or came back wrong: the **Solve failure** issue form. Have the failure sentence
+  from the image card, the card's nova status link, and the image size to hand; most solve failures are
+  about the image (too few stars, an extreme field), so try *Re-solve* with scale hints first.
+- Anything else that does not work as this file says: the **Bug report** form. It asks for the version
+  (`/api/health`) and the last log lines, `docker compose logs --since 10m app`. The server never logs
+  the key, the password or your image, but look the lines over before pasting them.
+
 ## Running from source (development)
 
 ```sh
