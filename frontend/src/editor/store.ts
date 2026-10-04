@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { shallow } from 'zustand/shallow'
-import type { Annotations, AnnotationsUpdate, FontOut, ImageOut, Label, ObjectOut, StyleConfig } from '../api'
+import { isBusy, type Annotations, type AnnotationsUpdate, type FontOut, type ImageOut, type Label, type ObjectOut, type StyleConfig } from '../api'
 import { actualSize, fitView, type View } from './view'
 
 /** Everything the editor needs before its first draw, as fetched by `load.loadEditor`. */
@@ -126,7 +126,7 @@ const initial = {
  *  page. Export follows the same rule (#68): the export endpoint accepts a failed re-solve too. */
 export function isEditable(state: EditorState): boolean {
   const status = state.image?.solve_status
-  return status === 'solved' || status === 'failed'
+  return status !== undefined && !isBusy(status)
 }
 
 /** What a document change replaces: the labels map, the style, or both. */

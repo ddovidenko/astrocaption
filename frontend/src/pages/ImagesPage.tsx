@@ -4,6 +4,7 @@ import {
   ApiError,
   api,
   formatBytes,
+  hasLayout,
   isBusy,
   pageError,
   statusLabel,
@@ -261,7 +262,7 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
           <span>
             {image.width} × {image.height} px
           </span>
-          {image.solve_status === 'solved' && <span>{image.object_count} objects</span>}
+          {hasLayout(image) && <span>{image.object_count} objects</span>}
           {image.calibration && (
             <span>
               RA {image.calibration.ra.toFixed(3)}°, Dec {image.calibration.dec.toFixed(3)}°,{' '}
@@ -282,7 +283,7 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
         {image.solve_error && <p className="error">{image.solve_error}</p>}
         {shownError && <p className="error">{shownError}</p>}
         <div className="actions">
-          {image.solve_status === 'solved' && (
+          {hasLayout(image) && (
             <>
               <label className="hints">
                 JPEG

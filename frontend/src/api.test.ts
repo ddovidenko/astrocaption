@@ -4,6 +4,7 @@ import {
   arcsecPerPixel,
   errorMessage,
   formatBytes,
+  hasLayout,
   isBusy,
   isSessionLossError,
   pageError,
@@ -59,6 +60,14 @@ describe('api helpers', () => {
     expect(isBusy('solving')).toBe(true)
     expect(isBusy('solved')).toBe(false)
     expect(isBusy('failed')).toBe(false)
+  })
+
+  it('has a layout once a solve stored one and no solve is running (#173)', () => {
+    expect(hasLayout({ solve_status: 'solved', annotations_hash: 'h' })).toBe(true)
+    expect(hasLayout({ solve_status: 'failed', annotations_hash: 'h' })).toBe(true) // kept by a failed re-solve
+    expect(hasLayout({ solve_status: 'failed', annotations_hash: null })).toBe(false) // never solved
+    expect(hasLayout({ solve_status: 'pending', annotations_hash: 'h' })).toBe(false)
+    expect(hasLayout({ solve_status: 'solving', annotations_hash: 'h' })).toBe(false)
   })
 
   it('formats byte counts', () => {
