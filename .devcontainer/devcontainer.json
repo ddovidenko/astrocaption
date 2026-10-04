@@ -1,0 +1,31 @@
+{
+  "name": "AstroCaption",
+  "image": "mcr.microsoft.com/devcontainers/python:3.14",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "24" }
+  },
+  // Pillow's wheel bundles raqm but loads libfribidi at runtime (same as docker/Dockerfile);
+  // without it the render tests fail.
+  "onCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends libfribidi0 && sudo rm -rf /var/lib/apt/lists/*",
+  "postCreateCommand": "make install",
+  "forwardPorts": [5173, 8000],
+  "portsAttributes": {
+    "5173": { "label": "AstroCaption (Vite, proxies /api to 8000)", "onAutoForward": "openBrowser" },
+    "8000": { "label": "Backend (uvicorn)", "onAutoForward": "silent" }
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "${containerWorkspaceFolder}/backend/.venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["backend/tests"],
+        "eslint.workingDirectories": ["frontend"]
+      },
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  }
+}
