@@ -26,6 +26,7 @@ from .models import (
     SolveStatus,
     StyleConfig,
     utcnow_iso,
+    validate_dropping_bad_fields,
 )
 
 log = logging.getLogger(__name__)
@@ -135,20 +136,69 @@ def _encode(fields: Mapping[str, object]) -> dict[str, object]:
     return values
 
 
+def _parse_column(raw_json: str) -> object:
+    """A stored JSON column, or ``None`` when it is not JSON at all (a hand edit), so the
+    tolerant loaders treat it like any other column of the wrong shape."""
+    try:
+        return json.loads(raw_json)
+    except (ValueError, RecursionError):  # not JSON, over the int-digit limit, nested too deep
+        return None
+
+
 def _load_style(raw_json: str, image_id: str) -> StyleConfig:
     """Tolerant load of a stored style: a row written before hex validation existed (an early
     ``config.json`` could carry ``"text_color": "white"``) must not 500 every GET/export/
     re-solve for that image. Drop only the fields that fail and let the model's defaults fill
-    them back in; never log the value, only the field name."""
-    raw = json.loads(raw_json)
+    them back in; a column that is not an object at all is all defaults. Never log the value,
+    only the field name."""
+    raw = _parse_column(raw_json)
+    if not isinstance(raw, dict):
+        log.warning("image %s: stored style is not a JSON object; using the defaults", image_id)
+        return StyleConfig()
     try:
-        return StyleConfig.model_validate(raw)
-    except ValidationError as exc:
-        bad = sorted({str(error["loc"][0]) for error in exc.errors() if error["loc"]})
-        log.warning("image %s: dropping unreadable style fields %s", image_id, bad)
-        for field in bad:
-            raw.pop(field, None)
-        return StyleConfig.model_validate(raw)
+        style, dropped = validate_dropping_bad_fields(StyleConfig, raw)
+    except ValidationError:  # nothing left to drop (a model-level error): all defaults
+        log.warning("image %s: stored style is unreadable; using the defaults", image_id)
+        return StyleConfig()
+    if dropped:
+        log.warning("image %s: dropping unreadable style fields %s", image_id, sorted(dropped))
+    return style
+
+
+def _load_labels(raw_json: str, image_id: str) -> list[Label]:
+    """Tolerant load of the stored labels, with the policy of ``_load_style`` per label (#69):
+    a field that no longer validates falls back to its default, so no object loses its label.
+    A label whose position is unreadable or absent (this build always writes ``x`` and ``y``)
+    is disabled and unpinned rather than shown at the top-left corner, so Reset positions can
+    place it when the owner turns it back on. Only an entry that is not an object or has no
+    readable ``object_id`` is dropped: there is nothing to attach it to. Logged by object id
+    and field name, never by value."""
+    raw = _parse_column(raw_json)
+    if not isinstance(raw, list):
+        log.warning("image %s: stored labels are not a JSON list; using none", image_id)
+        return []
+    labels: list[Label] = []
+    repaired: list[tuple[int, list[str]]] = []
+    unreadable = 0
+    for entry in raw:
+        if not isinstance(entry, dict):
+            unreadable += 1
+            continue
+        try:
+            label, dropped = validate_dropping_bad_fields(Label, entry)
+        except ValidationError:
+            unreadable += 1
+            continue
+        if dropped:
+            repaired.append((label.object_id, sorted(dropped)))
+        if not {"x", "y"} <= entry.keys() - dropped.keys():
+            label = label.model_copy(update={"enabled": False, "pinned": False})
+        labels.append(label)
+    if repaired:
+        log.warning("image %s: dropping unreadable label fields %s", image_id, repaired)
+    if unreadable:
+        log.warning("image %s: dropping %d unreadable label entries", image_id, unreadable)
+    return labels
 
 
 def _annotation_row(ann: Annotations) -> tuple[str, str]:
@@ -378,7 +428,7 @@ class Database:
         return Annotations(
             image_id=row["image_id"],
             style=_load_style(row["style_json"], image_id),
-            labels=[Label.model_validate(lab) for lab in json.loads(row["labels_json"])],
+            labels=_load_labels(row["labels_json"], image_id),
             version=row["version"],
             updated_at=row["updated_at"],
             content_hash=content_hash(row["style_json"], row["labels_json"]),

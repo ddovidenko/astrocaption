@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from app.config import Settings
 from app.db import Database
 from app.models import AnnotationsUpdate
 from tests.conftest import FakeSolver, login, make_client, make_settings, upload, wait_for_status
@@ -435,3 +436,27 @@ def test_annotations_hash_is_null_before_a_solve_stores_a_document(
         assert client.get(f"/api/images/{image_id}").json()["annotations_hash"] is None
         listed = client.get("/api/images").json()
         assert listed[0]["annotations_hash"] is None
+
+
+def test_a_row_from_an_older_build_still_loads_saves_and_exports(
+    client: TestClient, sample_jpeg: Path, settings: Settings
+) -> None:
+    """#69: a labels row with a since-renamed field, a legacy colour and an over-long override
+    is repaired on read, so the editor loads it, saves it back and exports it; the repaired
+    document is what the next save stores."""
+    image_id, ann, objects = solved_image(client, sample_jpeg)
+    first, rest = ann["labels"][0], ann["labels"][1:]
+    stale = [{**first, "colour": "#123456", "color": "white", "text_override": "z" * 500}, *rest]
+    db = Database(settings.db_path)
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE annotations SET labels_json = ? WHERE image_id = ?",
+            (json.dumps(stale), image_id),
+        )
+    loaded = client.get(f"/api/images/{image_id}/annotations")
+    assert loaded.status_code == 200, loaded.text
+    doc = loaded.json()
+    assert len(doc["labels"]) == len(objects)
+    assert doc["labels"][0]["color"] is None and doc["labels"][0]["text_override"] is None
+    assert client.put(f"/api/images/{image_id}/annotations", json=doc).status_code == 200
+    assert client.post(f"/api/images/{image_id}/export").status_code == 200
