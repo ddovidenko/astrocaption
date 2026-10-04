@@ -1,0 +1,72 @@
+name: Solve failure
+description: nova.astrometry.net could not solve an image, or the solve came back with the wrong objects or positions.
+labels: [bug, solve]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most solve failures are about the image, not the app: too few stars, a very narrow or very wide field, or
+        heavy processing. Before filing, try **Re-solve** with scale hints (focal length and pixel size) on the
+        image card, and try uploading the same JPG on [nova.astrometry.net](https://nova.astrometry.net/upload)
+        directly. If nova solves it there but not through AstroCaption, that is a bug here.
+  - type: textarea
+    id: message
+    attributes:
+      label: What the image card said
+      description: The failure sentence shown on the card, word for word.
+    validations:
+      required: true
+  - type: input
+    id: nova-url
+    attributes:
+      label: nova status URL
+      description: The "nova" link on the failed card (`https://nova.astrometry.net/status/…`). Nova keeps the job log there.
+      placeholder: https://nova.astrometry.net/status/12345678
+  - type: input
+    id: image
+    attributes:
+      label: Image size and field
+      description: Pixel size of the uploaded image and, if you know it, the field width in degrees or the focal length and pixel size.
+      placeholder: 6000 × 4000 px, about 4° wide (400 mm, 3.76 µm)
+    validations:
+      required: true
+  - type: dropdown
+    id: hints
+    attributes:
+      label: Did you try Re-solve with scale hints?
+      options:
+        - Yes, it still failed
+        - Yes, that solved it (so this is about the first attempt)
+        - No
+    validations:
+      required: true
+  - type: dropdown
+    id: nova-direct
+    attributes:
+      label: Does nova solve the same JPG when uploaded on its own site?
+      options:
+        - Yes
+        - No
+        - Did not try
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The `version` field of `http://your-host/api/health`, or the image tag in your compose file.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server log lines
+      description: |
+        `docker compose logs --since 30m app` around the solve. The key is never logged, but look the lines over before pasting.
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Wrong objects or positions rather than a failure? Say which, and attach a crop if you can.

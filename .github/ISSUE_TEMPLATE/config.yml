@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Self-hosting or setup question
+    url: https://github.com/ddovidenko/astrocaption/discussions/categories/q-a
+    about: Install, Docker, reverse proxy, the nova key, lockout — ask in Discussions Q&A.
+  - name: Loose idea
+    url: https://github.com/ddovidenko/astrocaption/discussions/categories/ideas
+    about: Not yet a concrete feature request? Float it in Discussions Ideas first.

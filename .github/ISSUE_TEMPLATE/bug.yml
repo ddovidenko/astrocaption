@@ -1,0 +1,63 @@
+name: Bug report
+description: Something in the app does not work as INSTALL.md or the page says it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. If a solve failed or came back wrong, please use the **Solve failure** form instead;
+        for questions about installing or running AstroCaption, use [Discussions Q&A](https://github.com/ddovidenko/astrocaption/discussions/categories/q-a).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what the page showed, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Upload …
+        2. Open the editor and …
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The `version` field of `http://your-host/api/health`, or the image tag in your compose file.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it runs
+      options:
+        - docker compose with the published image (ghcr.io/ddovidenko/astrocaption)
+        - docker compose, built from source
+        - make dev (running from source)
+        - Something else (say what below)
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      placeholder: Firefox 143 on Windows 11
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server log lines
+      description: |
+        `docker compose logs --since 10m app` (or `journalctl -u astrocaption-dev` for `make dev`).
+        The server never logs the nova key, the password or your image, but do look over the lines before pasting.
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Screenshots, the image size, a reverse proxy in front, a NAS or unusual host…
