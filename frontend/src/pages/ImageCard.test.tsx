@@ -152,6 +152,8 @@ describe('ImageCard edit and export availability', () => {
     expect(screen.getByRole('link', { name: 'Edit' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Export' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Re-solve' })).toBeTruthy()
+    expect(screen.getByText('12 objects')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Publish' })).toBeNull() // needs a solved row
   })
 
   it('hides them on a failed row that was never solved', () => {
@@ -160,8 +162,8 @@ describe('ImageCard edit and export availability', () => {
     expect(screen.queryByRole('button', { name: 'Export' })).toBeNull()
   })
 
-  it('hides them while a solve is running', () => {
-    renderCard(image({ solve_status: 'solving' }))
+  it.each(['pending', 'solving'] as const)('hides them while a solve is %s', (solve_status) => {
+    renderCard(image({ solve_status }))
     expect(screen.queryByRole('link', { name: 'Edit' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Export' })).toBeNull()
   })

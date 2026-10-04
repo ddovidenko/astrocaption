@@ -262,7 +262,7 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
           <span>
             {image.width} × {image.height} px
           </span>
-          {image.solve_status === 'solved' && <span>{image.object_count} objects</span>}
+          {hasLayout(image) && <span>{image.object_count} objects</span>}
           {image.calibration && (
             <span>
               RA {image.calibration.ra.toFixed(3)}°, Dec {image.calibration.dec.toFixed(3)}°,{' '}
