@@ -1,4 +1,4 @@
-# Self-hosters:  docker compose up -d        (pulls ghcr.io/ddovidenko/astrocaption:latest once released)
+# Self-hosters:  docker compose up -d        (pulls ghcr.io/ddovidenko/astrocaption:latest)
 # From a clone:  docker compose up -d --build   (or `make up`)
 services:
   app:
