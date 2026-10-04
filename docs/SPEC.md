@@ -112,7 +112,8 @@ No multi-user, no roles, no invites in v1.
    the verdict as `check_available`. The worker's restart-resume path serves Check again too.
 
 Optional resolve later: "Re-solve" button re-runs step 3 without deleting the annotation layout;
-objects are re-matched by catalogue name.
+objects are re-matched by catalogue name. If the re-solve fails, the previous layout stays: the card keeps
+offering Edit and Export beside the recovery controls (#173), while Publish needs a currently solved row (§ 5.5).
 
 Delete asks for confirmation in the page, not in a browser dialog; so does the editor's
 "Reset positions" (§ 6).

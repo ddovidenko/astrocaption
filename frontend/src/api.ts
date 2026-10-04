@@ -441,6 +441,17 @@ export function isBusy(status: SolveStatus): boolean {
   return status === 'pending' || status === 'solving'
 }
 
+/** Whether the row has a stored layout to edit and export (#173): a solved row, or a failed
+ *  re-solve that kept the previous one. `annotations_hash` is null until the first successful
+ *  solve stores a document, so a never-solved failure reads false; so does a solve in flight,
+ *  whose layout the editor shows read-only but the card does not offer. */
+export function hasLayout(image: Pick<ImageOut, 'solve_status' | 'annotations_hash'>): boolean {
+  return (
+    image.solve_status === 'solved' ||
+    (image.solve_status === 'failed' && image.annotations_hash !== null)
+  )
+}
+
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`

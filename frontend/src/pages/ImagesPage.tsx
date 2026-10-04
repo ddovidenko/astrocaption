@@ -4,6 +4,7 @@ import {
   ApiError,
   api,
   formatBytes,
+  hasLayout,
   isBusy,
   pageError,
   statusLabel,
@@ -282,7 +283,7 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
         {image.solve_error && <p className="error">{image.solve_error}</p>}
         {shownError && <p className="error">{shownError}</p>}
         <div className="actions">
-          {image.solve_status === 'solved' && (
+          {hasLayout(image) && (
             <>
               <label className="hints">
                 JPEG

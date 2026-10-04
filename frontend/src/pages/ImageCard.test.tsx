@@ -143,3 +143,26 @@ describe('ImageCard downloads', () => {
     expect(imgs[0]!.getAttribute('src')).toBe(exported.annotated_preview_url)
   })
 })
+
+// #173: Edit and Export follow the layout, not the status. A failed re-solve keeps the previous
+// layout (the editor edits and exports it); a never-solved failure and a solve in flight have none.
+describe('ImageCard edit and export availability', () => {
+  it('offers Edit and Export on a failed row that still has a layout', () => {
+    renderCard(image({ solve_status: 'failed', solve_error: 'nope', annotations_hash: 'h1' }))
+    expect(screen.getByRole('link', { name: 'Edit' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Export' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Re-solve' })).toBeTruthy()
+  })
+
+  it('hides them on a failed row that was never solved', () => {
+    renderCard(image({ solve_status: 'failed', solve_error: 'nope', annotations_hash: null, object_count: 0 }))
+    expect(screen.queryByRole('link', { name: 'Edit' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Export' })).toBeNull()
+  })
+
+  it('hides them while a solve is running', () => {
+    renderCard(image({ solve_status: 'solving' }))
+    expect(screen.queryByRole('link', { name: 'Edit' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Export' })).toBeNull()
+  })
+})

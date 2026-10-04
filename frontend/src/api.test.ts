@@ -4,6 +4,7 @@ import {
   arcsecPerPixel,
   errorMessage,
   formatBytes,
+  hasLayout,
   isBusy,
   isSessionLossError,
   pageError,
@@ -57,6 +58,11 @@ describe('api helpers', () => {
   it('treats queued and solving as busy', () => {
     expect(isBusy('pending')).toBe(true)
     expect(isBusy('solving')).toBe(true)
+    // #173: a layout exists once a solve has stored one, and survives a failed re-solve.
+    expect(hasLayout({ solve_status: 'solved', annotations_hash: 'h' })).toBe(true)
+    expect(hasLayout({ solve_status: 'failed', annotations_hash: 'h' })).toBe(true)
+    expect(hasLayout({ solve_status: 'failed', annotations_hash: null })).toBe(false)
+    expect(hasLayout({ solve_status: 'solving', annotations_hash: 'h' })).toBe(false)
     expect(isBusy('solved')).toBe(false)
     expect(isBusy('failed')).toBe(false)
   })
