@@ -6,7 +6,9 @@ VENV      := backend/.venv
 PY        := $(VENV)/bin/python
 NPM       := npm --prefix frontend
 # True when the `make dev-service` systemd unit is serving (false where systemd is absent).
-DEV_UNIT_ACTIVE := command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet astrocaption-dev
+# /run/systemd/system exists only under a booted systemd; devcontainer images ship a `systemctl`
+# shim that answers success for any unit, which would refuse `make install` in every Codespace.
+DEV_UNIT_ACTIVE := [ -d /run/systemd/system ] && systemctl is-active --quiet astrocaption-dev
 
 .PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors render-vectors names-vectors names-catalog fonts record-fixtures favicons e2e-fixture e2e clean
 

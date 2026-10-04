@@ -237,6 +237,10 @@ make lint           # ruff + mypy + eslint + tsc
 make e2e            # browser smoke test, plus the Vite dev server through its /api proxy
 ```
 
+No local toolchain? The repo carries a devcontainer (`.devcontainer/devcontainer.json`: Python 3.14, Node 24,
+`make install` on create). Open it in a GitHub Codespace (*Code → Codespaces → Create*) or in VS Code's
+Dev Containers extension, then run `make dev` as above; Codespaces forwards port 5173 and opens it.
+
 | Dev-only setting | Where | Default |
 |---|---|---|
 | Dev proxy target | `ASTROCAPTION_DEV_PROXY_TARGET` env, read by `frontend/vite.config.ts` | `http://localhost:8000` (the uvicorn `make dev` starts) |
