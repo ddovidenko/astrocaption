@@ -133,6 +133,11 @@ fonts: $(VENV)/.installed ## Refresh fonts/*.ttf and fonts/LICENSES from Google 
 favicons: $(VENV)/.installed ## Regenerate frontend/public/ icons from frontend/icon/icon-source.png
 	cd backend && .venv/bin/python scripts/make_favicons.py
 
+screenshots: install ## Regenerate docs/screenshots/*.png from the e2e Orion fixture (built frontend + fake nova, no network)
+	$(NPM) run build
+	cd frontend && npx playwright install chromium
+	E2E_START_APP=1 E2E_SCREENSHOTS=1 $(NPM) run e2e -- screenshots.spec.ts
+
 e2e-fixture: $(VENV)/.installed ## Regenerate frontend/e2e/fixtures/field.jpg (3000×2250, matches the nova fixtures)
 	cd backend && .venv/bin/python scripts/make_e2e_fixture.py
 

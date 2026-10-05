@@ -12,7 +12,7 @@ frontend/     React + TypeScript + Vite. Canvas editor (Konva). Built into backe
 fonts/        Bundled open-licence TTFs. Same files are used by browser (CSS @font-face) and Pillow.
 docker/       Dockerfile (multi-stage), entrypoint.
 compose.yml   Self-hoster entry point (repo root, mounts ./data).
-docs/         SPEC.md, INSTALL.md, LOCKOUT.md, ARCHITECTURE.md
+docs/         SPEC.md, INSTALL.md, LOCKOUT.md, ARCHITECTURE.md, RELEASING.md, screenshots/ (make screenshots)
 data/         (runtime, volume-mounted) sqlite db, uploads, renders, config. Never committed.
 ```
 
@@ -38,6 +38,7 @@ make favicons            # regenerate frontend/public/ icons from frontend/icon/
 make record-fixtures IMAGE=path.jpg [OUT=dir]   # record nova fixtures from a real solve into backend/tests/fixtures/nova/ or OUT (network, needs the key)
 make e2e          # Playwright: built frontend + uvicorn on a scratch data dir + a fake nova, and the Vite dev proxy (app env: frontend/e2e/app.env)
 make e2e-fixture  # regenerate frontend/e2e/fixtures/field.jpg
+make screenshots  # regenerate docs/screenshots/*.png (README) from the e2e Orion fixture and the fake nova
 ```
 
 If a Makefile target doesn't exist yet, create it rather than documenting a raw command.

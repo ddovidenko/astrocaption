@@ -1,7 +1,7 @@
 # Installing AstroCaption
 
-> Status: milestone 2. Upload, solve, export, the owner login, the config page and the
-> lockout tools work; the editor arrives in milestone 3.
+> First release (0.1.0). Everything below is what the image ships with; the roadmap is in
+> `SPEC.md` § 13.
 
 ## Requirements
 
@@ -14,14 +14,14 @@
 
 ```sh
 git clone https://github.com/ddovidenko/astrocaption.git && cd astrocaption
-export NOVA_API_KEY=your-key-here          # or put it in data/config.json, see below
-docker compose up -d --build
+export NOVA_API_KEY=your-key-here          # optional here: the setup page and the config page take it too
+docker compose up -d                       # pulls ghcr.io/ddovidenko/astrocaption:latest
 ```
+
+To build the image yourself instead of pulling it: `docker compose up -d --build` (`make up`).
 
 Open <http://localhost:8080>. Uploaded images, previews, the SQLite database and exports
 live in `./data` on the host; back that directory up and nothing else.
-
-`make up` is the same as the last command when you have `make` installed.
 
 ## First run
 
@@ -169,19 +169,58 @@ docker compose pull && docker compose up -d
 
 Back up `./data` first: the database schema is migrated forward on start, and an older image
 refuses to start on a database written by a newer one. Pin `image:` to `X.Y` if you would rather
-take patches only.
+take patches only, or to `X.Y.Z` and upgrade by editing the tag, which is what a server you look
+after once a month wants.
+
+The package is public: pulling needs no GitHub account or `docker login`. If you run a fork,
+its first release pushes a *private* package (GHCR starts every new package that way); make it
+public, or `docker login ghcr.io` on the server, before `docker compose pull` will work.
+Maintainers: the release steps are in `RELEASING.md`.
+
+## On a public server
+
+The container is one process on one port and keeps every file under `./data`, so it fits any
+Docker host: a VPS, a home server, a NAS. Install Docker Engine and the compose plugin from
+[Docker's own instructions](https://docs.docker.com/engine/install/); the rest is the same
+everywhere:
+
+- Put TLS in front. The app speaks plain http; a reverse proxy (next section) terminates https,
+  and with `TRUST_PROXY=1` the session cookie is `Secure`. Finish setup right after the first
+  start: until then anyone who can reach the port can claim the site (or set
+  `ASTROCAPTION_PASSWORD` for the first start).
+- Firewall: allow 22, 80 and 443 and nothing else. Use the provider's firewall (Hetzner, DigitalOcean,
+  …) or `iptables` rules you control: **Docker's published ports bypass `ufw`**, because Docker
+  writes its own `iptables` rules. Publishing the app's port on loopback only (below) is the
+  other half of the same precaution.
+- `./data` must be writable by uid 1000 (`chown -R 1000:1000 data`), see "Data directory layout".
+- Back up `./data`, and nothing else; a nightly `tar -czf astrocaption-data-$(date +%F).tgz data`
+  is enough. Upgrade by changing the tag (or `docker compose pull` on `latest`) after a backup.
+- Uploads are large requests: every proxy below raises its body limit, and the app's own upload
+  limit (default 60 MB, config page) must fit under whatever sits in front of it.
 
 ## Behind a reverse proxy
 
-The app listens on port 8000 inside the container (8080 on the host in `compose.yml`).
-Uploads can be large: raise the proxy's body limit to at least your upload limit.
+The app listens on port 8000 inside the container. Two shapes, both exercised:
 
-Caddy:
+### A proxy installed on the host
+
+The stock `compose.yml`, with the port published on loopback so only the proxy can reach it:
+
+```yaml
+    ports:
+      - "127.0.0.1:8080:8000"
+    environment:
+      - TRUST_PROXY=1
+```
+
+Caddy (`/etc/caddy/Caddyfile`; the `{` after `request_body` has to end its line):
 
 ```
 sky.example.com {
     reverse_proxy localhost:8080
-    request_body { max_size 100MB }
+    request_body {
+        max_size 100MB
+    }
 }
 ```
 
@@ -200,21 +239,73 @@ server {
 }
 ```
 
-Set `TRUST_PROXY=1` in `compose.yml` once the proxy is in place. The app then trusts the
-proxy's `X-Forwarded-Proto` and `X-Forwarded-For` headers from every upstream: the session
-cookie is marked `Secure` when the request came in over https, and the address the proxy
-reports is what the access log shows. Caddy sends both headers by default and replaces any
-a client supplied; nginx needs the two `proxy_set_header` lines above (upgrading from a
-release before 0.1.0: add them, or the cookie stops being `Secure` behind nginx). Signing in
-over plain http (the LAN address, or `http://localhost:8080` straight at the container) keeps
-working with the flag set; that cookie is simply not `Secure`.
+Caddy sends both forwarded headers by default and replaces any a client supplied; nginx needs
+the two `proxy_set_header` lines (upgrading from a release before 0.1.0: add them, or the cookie
+stops being `Secure` behind nginx).
+
+### A proxy that is itself a container
+
+One proxy container owns 80/443 for every site on the host and reaches each app over a Docker
+network. The app's service then publishes no port at all and joins that network; everything else
+in `compose.yml` stays:
+
+```yaml
+services:
+  app:
+    image: ghcr.io/ddovidenko/astrocaption:0.1.0
+    # no ports:
+    networks: [proxy]
+    volumes:
+      - ./data:/data
+    environment:
+      - TRUST_PROXY=1
+      - NOVA_API_KEY=${NOVA_API_KEY:-}
+    restart: unless-stopped
+networks:
+  proxy:
+    external: true          # docker network create proxy, once; the proxy container joins it too
+```
+
+The proxy addresses the app by service name on that network. For Caddy, with the site's stack
+directory named `astrophoto`, the upstream is `astrophoto-app-1:8000` (or set
+`container_name`), and the block is the one above with that upstream. Reload the proxy after
+adding a site; a `docker compose up -d` of the app needs nothing on the proxy side.
+
+### What `TRUST_PROXY=1` does
+
+The app then trusts the proxy's `X-Forwarded-Proto` and `X-Forwarded-For` headers from every
+upstream: the session cookie is marked `Secure` when the request came in over https, and the
+address the proxy reports is what the access log shows. Signing in over plain http (the LAN
+address, or `http://localhost:8080` straight at the container) keeps working with the flag set;
+that cookie is simply not `Secure`.
 
 With the flag on, a client that reaches the container directly can set those headers itself.
-That changes only the `Secure` attribute of its own cookie and the address in the log line,
-so it is harmless, but if the proxy runs on the same host, publish the port on loopback only
-(`"127.0.0.1:8080:8000"` in `compose.yml`) so nothing bypasses it. With the flag off, only
-uvicorn's default applies: forwarded headers are honoured from loopback peers
-(`FORWARDED_ALLOW_IPS`), which is the case for the `make dev` Vite proxy.
+That changes only the `Secure` attribute of its own cookie and the address in the log line, so
+it is harmless, but it is why the host-proxy shape publishes the port on loopback only and the
+container-proxy shape publishes none. With the flag off, only uvicorn's default applies:
+forwarded headers are honoured from loopback peers (`FORWARDED_ALLOW_IPS`), which is the case
+for the `make dev` Vite proxy.
+
+### Behind Cloudflare
+
+A proxied ("orange cloud") record works, with three things to know:
+
+- SSL/TLS mode **Full (strict)**, never Flexible: with Flexible the origin sees plain http and the
+  cookie is never `Secure`. The origin certificate can be a Cloudflare Origin CA certificate (15
+  years, trusted only by Cloudflare) or Let's Encrypt. For Let's Encrypt via the HTTP-01
+  challenge, "Always Use HTTPS" redirects the challenge away: grey-cloud the record until the
+  first certificate is issued, then proxy it again.
+- Cloudflare's own `X-Forwarded-For` lists its edge; the visitor's address is in
+  `CF-Connecting-IP`. Have the proxy forward that one instead, so the access log shows the real
+  visitor. Caddy: `header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}` inside the
+  `reverse_proxy` block; nginx: `proxy_set_header X-Forwarded-For $http_cf_connecting_ip;`.
+- The free plan caps request bodies at **100 MB**. Set the app's upload limit to 100 or below on
+  the config page; a larger upload fails at the edge with no useful message. Resumable uploads
+  that would lift this are issue #166.
+
+Other setups (a Cloudflare Tunnel, Tailscale, a reverse proxy on another machine) follow the same
+two rules: the proxy terminates https and sends the two forwarded headers, and nothing but the
+proxy can reach the app's port.
 
 ## Getting help
 
