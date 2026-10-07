@@ -195,6 +195,12 @@ everywhere:
 - `./data` must be writable by uid 1000 (`chown -R 1000:1000 data`), see "Data directory layout".
 - Back up `./data`, and nothing else; a nightly `tar -czf astrocaption-data-$(date +%F).tgz data`
   is enough. Upgrade by changing the tag (or `docker compose pull` on `latest`) after a backup.
+- Restore with the stack stopped: `docker compose down`, unpack the tarball so `data/` sits next
+  to `compose.yml` again (not `data/data/`), `chown -R 1000:1000 data`, then `docker compose up -d`.
+  A bind mount pins the directory the container was started with, so a `data/` deleted and
+  recreated under a running container is invisible to it: the app behaves like a fresh install
+  and writes into the deleted directory until the stack is restarted. Do not complete setup in
+  that state; restart instead.
 - Uploads are large requests: every proxy below raises its body limit, and the app's own upload
   limit (default 60 MB, config page) must fit under whatever sits in front of it.
 
