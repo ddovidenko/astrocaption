@@ -102,8 +102,10 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
   merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`; `release.yml` does the rest. Dry-run with a `-rcN` tag first:
   the files must carry `X.Y.Z-rcN` for that tag, then a second chore PR bumps them to `X.Y.Z`. Never re-run an old tag's
   workflow after a newer stable release has shipped: every stable tag re-points `latest`.
-  `gh pr edit` fails silently on this repo (GitHub's retired classic-projects API); change a PR body with
-  `gh api -X PATCH repos/:owner/:repo/pulls/<n> -F body=@file` instead.
+  `gh pr edit` and `gh pr update-branch` fail silently on this repo (GitHub's retired classic-projects API); change a
+  PR body with `gh api -X PATCH repos/:owner/:repo/pulls/<n> -F body=@file`, and bring a PR that fell behind `main`
+  (branch protection requires up-to-date branches) back with a local `git rebase origin/main` and
+  `git push --force-with-lease`.
 - Review ritual before a milestone PR: `/code-review high`, then a silent-failure pass
   (pr-review-toolkit agent) on the diff, then `/simplify`; fix, re-run `make lint test`, and let the
   owner smoke-test on `make dev` before committing.
