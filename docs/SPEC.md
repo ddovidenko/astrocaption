@@ -467,8 +467,8 @@ with the built-in default and a server-log warning naming the file; `GET /annota
 Public repo. Using GitHub Pro where useful:
 
 - **Branch protection on `main`**: PR required, CI green required, linear history.
-  *Current state:* the repository allows squash merges only, so history is linear already; the PR-required
-  and CI-green rules are switched on in milestone 6.
+  *Current state:* on since 2026-10-05 (v0.1.0): pull request required, the `backend`, `frontend` and `docker`
+  checks required and up to date, linear history, admins included, no force pushes or deletions.
 - **Actions**:
   - `ci.yml` on PR: lint, backend tests, frontend tests, docker build (no push), and a browser
     smoke test against the built image with a fake nova.
