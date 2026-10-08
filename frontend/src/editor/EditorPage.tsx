@@ -116,7 +116,7 @@ export default function EditorPage() {
     <>
       <div className="editor-toolbar">
         <Link to="/">← Images</Link>
-        <strong>{image.title}</strong>
+        <strong title={image.title}>{image.title}</strong>
         <span className="meta">{Math.round(scale * 100)} %</span>
         {/* These act on click and never need the focus; keeping it off them leaves the canvas
             shortcuts alive and stops Space from re-clicking the button. Keyboard focus (Tab)
