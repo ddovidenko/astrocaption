@@ -32,7 +32,8 @@ No multi-user, no roles, no invites in v1.
 - Linear FITS input, stretching, or any image processing.
 - Email, password reset by email, OAuth.
 - Multiple owners or per-image permissions.
-- Mobile-first editor. Gallery must work on phones; the editor may assume a mouse.
+- Mobile-first editor. Every page must fit a phone's width without a horizontal scroll (pinned by
+  `frontend/e2e/layout.spec.ts` at 390 px); the editor may assume a mouse.
 
 ## 4. Tech stack
 
@@ -166,7 +167,8 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
 
 ## 6. Editor — interactions
 
-The editor is a full-viewport canvas with a collapsible side panel.
+The editor is a full-viewport canvas with a collapsible side panel. The panel starts open beside
+the canvas, and closed on a phone-width window (≤ 640 px), where it would cover most of the image.
 
 ### 6.1 Canvas
 

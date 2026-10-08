@@ -255,7 +255,7 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
   return (
     <article className="card">
       <div>
-        <h3>{image.title}</h3>
+        <h3 title={image.title}>{image.title}</h3>
         <div className="meta">
           <span className={`badge ${image.solve_status}`}>{statusLabel(image.solve_status)}</span>
           {image.published && <span className="badge published">Published</span>}
@@ -269,15 +269,19 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
               {image.calibration.pixscale.toFixed(2)}″/px
             </span>
           )}
-          {image.nova_status_url && (
-            <a href={image.nova_status_url} target="_blank" rel="noreferrer">
-              nova status
-            </a>
-          )}
-          {image.nova_job_log_url && (
-            <a href={image.nova_job_log_url} target="_blank" rel="noreferrer">
-              nova job log
-            </a>
+          {(image.nova_status_url || image.nova_job_log_url) && (
+            <span className="nova-links">
+              {image.nova_status_url && (
+                <a href={image.nova_status_url} target="_blank" rel="noreferrer">
+                  nova status
+                </a>
+              )}
+              {image.nova_job_log_url && (
+                <a href={image.nova_job_log_url} target="_blank" rel="noreferrer">
+                  nova job log
+                </a>
+              )}
+            </span>
           )}
         </div>
         {image.solve_error && <p className="error">{image.solve_error}</p>}
