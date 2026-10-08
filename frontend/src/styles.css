@@ -63,6 +63,10 @@ a.button { text-decoration: none; display: inline-block; font-family: inherit; f
 .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.75rem; }
 .hints { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; color: var(--muted); font-size: 0.9rem; }
 .upload-status { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.75rem; }
+.drop-target { position: relative; }
+.drop-target.dragging { border: 1px dashed var(--accent); background: rgba(255, 213, 74, 0.06); }
+.drop-hint { margin: 0.75rem 0 0; }
+.dragging .drop-hint { color: var(--accent); }
 .upload-progress { display: block; flex: 1; height: 0.5rem; accent-color: var(--accent); }
 .confirm { display: inline-flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; color: var(--danger); min-width: 0; overflow-wrap: anywhere; }
 .downloads { margin-top: 1rem; }
