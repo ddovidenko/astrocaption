@@ -44,9 +44,13 @@ export default function GalleryPage({ health }: { health: HealthOut }) {
       setNext(page.next)
       setMore({ busy: false, error: null })
     } catch (err) {
-      // The cursor image was unpublished meanwhile: the list is stale, start it over.
+      // The cursor image was unpublished meanwhile: the list is stale, start it over from the
+      // page the URL names, or from the top when that cursor is gone as well.
       if (err instanceof ApiError && err.status === 422) {
-        const page = await api.gallery().catch(() => null)
+        const page = await api
+          .gallery({ before: start })
+          .catch(() => (start ? api.gallery() : null))
+          .catch(() => null)
         if (page) {
           setItems(page.items)
           setNext(page.next)
@@ -56,7 +60,7 @@ export default function GalleryPage({ health }: { health: HealthOut }) {
       }
       setMore({ busy: false, error: describeError(err) })
     }
-  }, [next])
+  }, [next, start])
 
   if (!enabled) {
     return (

@@ -74,6 +74,21 @@ describe('GalleryPage', () => {
     expect(api.gallery).toHaveBeenCalledWith({ before: 'img-7' })
   })
 
+  it('restarts from the page the URL names when the cursor image was unpublished meanwhile', async () => {
+    vi.mocked(api.gallery)
+      .mockResolvedValueOnce({ items: [item], next: 'img-1' })
+      .mockRejectedValueOnce(new ApiError(422, 'That page is no longer available; reload the list.'))
+      .mockResolvedValueOnce({ items: [{ ...item, id: 'img-3', title: 'Andromeda' }], next: null })
+    render(
+      <MemoryRouter initialEntries={['/gallery?before=img-7']}>
+        <GalleryPage health={health()} />
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('link', { name: 'Show more' }))
+    expect(await screen.findByRole('link', { name: /Andromeda/ })).toBeTruthy()
+    expect(api.gallery).toHaveBeenLastCalledWith({ before: 'img-7' })
+  })
+
   it('restarts from the top when the cursor image was unpublished meanwhile', async () => {
     vi.mocked(api.gallery)
       .mockResolvedValueOnce({ items: [item], next: 'img-1' })

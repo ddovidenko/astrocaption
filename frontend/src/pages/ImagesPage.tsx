@@ -36,7 +36,7 @@ export default function ImagesPage({
   // Refreshes overlap: the 3-second poll, an action's own refresh and a card's finally block
   // all call it, and a slow answer arriving after a fast one would put the old list back (a
   // deleted card reappearing, a solved row going back to Solving…). Only the newest applies.
-  // Show more bumps it too, so a refresh that started before the append cannot undo it.
+  // Show more takes a number too, so it and a refresh in flight cannot both apply.
   const seq = useRef(0)
   // How many cards are on screen, for a refresh to fetch the same number again rather than
   // fold the list back to the first page.
@@ -87,9 +87,15 @@ export default function ImagesPage({
   const showMore = useCallback(async () => {
     if (next === null) return
     setMore({ busy: true, error: null })
+    const mine = ++seq.current
     try {
       const page = await api.listImages({ before: next })
-      ++seq.current
+      // A refresh that applied meanwhile rebuilt the list from the top; appending to it could
+      // skip or repeat a card, so this page is dropped and the link stays for another tap.
+      if (mine !== seq.current) {
+        setMore({ busy: false, error: null })
+        return
+      }
       setImages((current) => [...current, ...page.items])
       setNext(page.next)
       setMore({ busy: false, error: null })
