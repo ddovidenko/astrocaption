@@ -3,16 +3,18 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError, type ImageOut } from '../api'
-import { ImageCard } from './ImagesPage'
+import { ImageCard, UploadPanel } from './ImagesPage'
 
 vi.mock('../api', async (importOriginal) => {
   const real = await importOriginal<typeof import('../api')>()
-  return { ...real, api: { ...real.api, setPublished: vi.fn() } }
+  return { ...real, api: { ...real.api, setPublished: vi.fn(), resolve: vi.fn(), upload: vi.fn() } }
 })
 
 afterEach(() => {
   cleanup()
   vi.mocked(api.setPublished).mockReset()
+  vi.mocked(api.resolve).mockReset()
+  vi.mocked(api.upload).mockReset()
 })
 
 function image(over: Partial<ImageOut> = {}): ImageOut {
@@ -54,14 +56,42 @@ const exported = {
   export_url: '/api/images/img-1/export?v=x',
 }
 
-function renderCard(img: ImageOut, onChange = vi.fn(async () => {})) {
+function renderCard(img: ImageOut, onChange = vi.fn(async () => {}), staleAfterSeconds: number | null = 900) {
   render(
     <MemoryRouter>
-      <ImageCard image={img} onChange={onChange} />
+      <ImageCard image={img} onChange={onChange} staleAfterSeconds={staleAfterSeconds} now={Date.now()} />
     </MemoryRouter>,
   )
   return onChange
 }
+
+describe('ImageCard while a solve runs (#80)', () => {
+  const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString()
+
+  it('says how long the row has been queued or solving', () => {
+    renderCard(image({ solve_status: 'solving', updated_at: minutesAgo(3) }))
+    expect(screen.getByText('Solving…')).toBeTruthy()
+    expect(screen.getByText('since 3 minutes ago')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Re-solve' })).toBeNull()
+  })
+
+  it('offers Re-solve again once the row has sat in solving for a whole timeout', async () => {
+    vi.mocked(api.resolve).mockResolvedValue(image({ solve_status: 'pending' }))
+    const onChange = renderCard(image({ solve_status: 'solving', updated_at: minutesAgo(16) }))
+    expect(screen.getByText(/no word from the solver for 16 minutes/i)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Re-solve' }))
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    expect(api.resolve).toHaveBeenCalledWith('img-1', undefined)
+  })
+
+  it('never calls a queued row stuck, and never without the timeout', () => {
+    renderCard(image({ solve_status: 'pending', updated_at: minutesAgo(60) }))
+    expect(screen.queryByRole('button', { name: 'Re-solve' })).toBeNull()
+    cleanup()
+    renderCard(image({ solve_status: 'solving', updated_at: minutesAgo(60) }), undefined, null)
+    expect(screen.queryByRole('button', { name: 'Re-solve' })).toBeNull()
+  })
+})
 
 describe('ImageCard publish button', () => {
   it('is disabled with a reason until the image has an export', () => {
@@ -118,7 +148,7 @@ describe('ImageCard downloads', () => {
   it('offers the original, under its uploaded name, without showing a thumbnail', () => {
     const { container } = render(
       <MemoryRouter>
-        <ImageCard image={image({ solve_status: 'pending' })} onChange={vi.fn(async () => {})} />
+        <ImageCard image={image({ solve_status: 'pending' })} onChange={vi.fn(async () => {})} staleAfterSeconds={900} now={Date.now()} />
       </MemoryRouter>,
     )
     const link = screen.getByRole('link', { name: 'Download original' })
@@ -131,7 +161,7 @@ describe('ImageCard downloads', () => {
   it('puts the original before the export once the image is exported', () => {
     const { container } = render(
       <MemoryRouter>
-        <ImageCard image={image(exported)} onChange={vi.fn(async () => {})} />
+        <ImageCard image={image(exported)} onChange={vi.fn(async () => {})} staleAfterSeconds={900} now={Date.now()} />
       </MemoryRouter>,
     )
     const links = screen.getAllByRole('link').map((a) => a.textContent)
@@ -166,5 +196,48 @@ describe('ImageCard edit and export availability', () => {
     renderCard(image({ solve_status }))
     expect(screen.queryByRole('link', { name: 'Edit' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Export' })).toBeNull()
+  })
+})
+
+describe('UploadPanel cancel (#80)', () => {
+  it('shows Cancel while bytes go out, aborts on click and clears the panel without an error', async () => {
+    let signal: AbortSignal | undefined
+    vi.mocked(api.upload).mockImplementation(
+      (_file, _title, onProgress, s) =>
+        new Promise((_resolve, reject) => {
+          signal = s
+          onProgress?.(10, 100)
+          s?.addEventListener('abort', () => reject(new Error('The upload was cancelled.')))
+        }),
+    )
+    const onUploaded = vi.fn(async () => {})
+    render(<UploadPanel onUploaded={onUploaded} maxUploadMb={null} />)
+    const input = document.querySelector('input[type=file]') as HTMLInputElement
+    const file = new File(['x'], 'orion.jpg', { type: 'image/jpeg' })
+    Object.defineProperty(input, 'files', { value: [file] })
+    fireEvent.submit(input.closest('form')!)
+    const cancel = await screen.findByRole('button', { name: 'Cancel' })
+    expect(screen.getByRole('button', { name: /Uploading… 10%/ })).toBeTruthy()
+    fireEvent.click(cancel)
+    await waitFor(() => expect(signal?.aborted).toBe(true))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Upload & solve' })).toBeTruthy())
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+    expect(document.querySelector('.error')).toBeNull()
+    expect(onUploaded).not.toHaveBeenCalled()
+  })
+
+  it('withdraws Cancel once every byte is out and the server is processing', async () => {
+    vi.mocked(api.upload).mockImplementation(
+      (_file, _title, onProgress) =>
+        new Promise(() => {
+          onProgress?.(100, 100)
+        }),
+    )
+    render(<UploadPanel onUploaded={vi.fn(async () => {})} maxUploadMb={null} />)
+    const input = document.querySelector('input[type=file]') as HTMLInputElement
+    Object.defineProperty(input, 'files', { value: [new File(['x'], 'orion.jpg')] })
+    fireEvent.submit(input.closest('form')!)
+    expect(await screen.findByRole('button', { name: 'Processing…' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
   })
 })

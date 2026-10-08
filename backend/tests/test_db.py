@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -77,6 +78,19 @@ def test_migration_from_v4_swaps_the_exported_version_column_for_the_hash(tmp_pa
         assert "exported_version" not in columns
         assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     db.init()  # idempotent
+
+
+def test_update_image_of_a_missing_row_logs_and_changes_nothing(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Several worker paths update a row that a delete may have removed meanwhile; that is
+    allowed, but it is said in the log rather than passing in silence (#80)."""
+    db = Database(settings.db_path)
+    seed_image(settings, db)
+    with caplog.at_level(logging.DEBUG, logger="app.db"):
+        db.update_image("gone", {"solve_failure": "timeout"})
+    assert "update_image: no row with id gone" in caplog.text
+    assert db.get_image("gone") is None
 
 
 def test_solve_failure_round_trip(settings: Settings) -> None:

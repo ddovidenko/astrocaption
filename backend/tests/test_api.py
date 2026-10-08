@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from collections.abc import Callable, Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -26,7 +27,7 @@ from app.db import Database
 from app.fonts import FontNotFoundError, load_font
 from app.layout import SIZE_RELATIVE
 from app.main import create_app, font_not_found_error
-from app.models import MAX_FONT_SIZE, MIN_FONT_SIZE, StyleConfig
+from app.models import MAX_FONT_SIZE, MIN_FONT_SIZE, SolveStatus, StyleConfig
 from tests.conftest import (
     ENV_ISOLATED,
     FONTS_DIR,
@@ -38,6 +39,7 @@ from tests.conftest import (
     make_client,
     make_settings,
     nova_result,
+    seed_image,
     upload,
     wait_for_status,
     write_test_image,
@@ -71,6 +73,7 @@ def test_health_and_fonts(client: TestClient) -> None:
         "locked": [],
         "locked_by": {},
         "style_defaults": style_defaults,
+        "solve_timeout_seconds": 10,
     }
     fonts = client.get("/api/fonts").json()
     assert len(fonts) == 24
@@ -471,6 +474,45 @@ def test_export_and_resolve_conflict_while_solving(tmp_path: Path, sample_jpeg: 
         assert client.get(f"/api/images/{image_id}/annotations").status_code == 404
         assert client.get(f"/api/images/{image_id}/objects").json() == []
         assert client.post(f"/api/images/{image_id}/solve").status_code == 409
+
+
+def _backdate(settings: Settings, image_id: str, seconds: float) -> None:
+    """Pretend the worker last touched the row ``seconds`` ago."""
+    then = datetime.now(UTC).replace(microsecond=0) - timedelta(seconds=seconds)
+    with Database(settings.db_path).connect() as conn:
+        conn.execute("UPDATE images SET updated_at = ? WHERE id = ?", (then.isoformat(), image_id))
+
+
+def test_resolve_escapes_an_abandoned_solving_row(tmp_path: Path, sample_jpeg: Path) -> None:
+    """A row the worker left in `solving` and has not touched for a whole solve timeout (#80):
+    the process restarted without re-queueing it, or the last-resort guard dropped it. Re-solve
+    takes it back. A row the worker is still on, or has queued, stays refused however old."""
+    settings = make_settings(tmp_path)
+    stuck = FakeSolver(submission_polls=10**9)
+    with make_client(settings, lambda: stuck) as client:
+        login(client)
+        current = upload(client, sample_jpeg)["id"]
+        wait_for_status(client, current, {"solving"})
+        db = Database(settings.db_path)
+        orphan = seed_image(settings, db, image_id="orphan")
+        db.update_image(orphan.id, {"solve_status": SolveStatus.SOLVING})
+
+        # Fresh: both refused the usual way.
+        for image_id in (current, orphan.id):
+            resp = client.post(f"/api/images/{image_id}/solve")
+            assert resp.status_code == 409 and resp.json()["detail"] == IN_PROGRESS_MESSAGE
+
+        # Older than the worker's timeout (10 s in make_client).
+        _backdate(settings, current, 11)
+        _backdate(settings, orphan.id, 11)
+        resp = client.post(f"/api/images/{current}/solve")
+        assert resp.status_code == 409 and resp.json()["detail"] == IN_PROGRESS_MESSAGE
+        resp = client.post(f"/api/images/{orphan.id}/solve")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["solve_status"] == "pending"
+        # Queued behind the stuck one now: refused again, old or not.
+        _backdate(settings, orphan.id, 11)
+        assert client.post(f"/api/images/{orphan.id}/solve").status_code == 409
 
 
 def _solver_sequence(*solvers: FakeSolver) -> Callable[[], FakeSolver]:

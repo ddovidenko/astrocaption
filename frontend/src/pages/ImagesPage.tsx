@@ -15,7 +15,7 @@ import {
   type ImageOut,
   type Page,
 } from '../api'
-import { exportOf, exportState, relativeTime } from '../exportStatus'
+import { elapsed, exportOf, exportState, relativeTime } from '../exportStatus'
 import ConfirmInline from '../ConfirmInline'
 import ShowMore from './ShowMore'
 
@@ -33,6 +33,9 @@ export default function ImagesPage({
   const [config, setConfig] = useState<ConfigOut | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [more, setMore] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null })
+  // When the list was last fetched: the clock the cards read the age of a solving row from
+  // (#80), moved on by every refresh (every 3 s while a solve runs), never during a render.
+  const [now, setNow] = useState(0)
   // Refreshes overlap: the 3-second poll, an action's own refresh and a card's finally block
   // all call it, and a slow answer arriving after a fast one would put the old list back (a
   // deleted card reappearing, a solved row going back to Solving…). Only the newest applies.
@@ -63,6 +66,7 @@ export default function ImagesPage({
       if (mine !== seq.current) return
       applyPage(page)
       setConfig(cfg)
+      setNow(Date.now())
       setError(null)
     } catch (err) {
       if (mine === seq.current) setError(pageError(err))
@@ -78,6 +82,7 @@ export default function ImagesPage({
         if (mine !== seq.current) return
         applyPage(page)
         setConfig(cfg)
+        setNow(Date.now())
       })
       .catch((err: unknown) => {
         if (mine === seq.current) setError(pageError(err))
@@ -136,7 +141,13 @@ export default function ImagesPage({
       <section className="images">
         {images.length === 0 && <p className="meta">No images yet. Upload a finished JPG to start.</p>}
         {images.map((img) => (
-          <ImageCard key={img.id} image={img} onChange={refresh} />
+          <ImageCard
+            key={img.id}
+            image={img}
+            onChange={refresh}
+            staleAfterSeconds={config?.solve_timeout_seconds ?? null}
+            now={now}
+          />
         ))}
       </section>
       <ShowMore next={next} busy={more.busy} error={more.error} onMore={() => void showMore()} />
@@ -157,7 +168,7 @@ async function listFirst(count: number): Promise<Page<ImageOut>> {
   return { items, next: before }
 }
 
-function UploadPanel({
+export function UploadPanel({
   onUploaded,
   maxUploadMb,
 }: {
@@ -170,6 +181,7 @@ function UploadPanel({
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -183,14 +195,18 @@ function UploadPanel({
     setUploading(true)
     setProgress(null)
     setError(null)
+    const controller = new AbortController()
+    abortRef.current = controller
     try {
-      await api.upload(file, title, (sent, total) => setProgress({ sent, total }))
+      await api.upload(file, title, (sent, total) => setProgress({ sent, total }), controller.signal)
       setTitle('')
       if (fileRef.current) fileRef.current.value = ''
       await onUploaded()
     } catch (err) {
-      setError(pageError(err))
+      // Cancelled by the owner (#80): their doing, nothing to report.
+      if (!controller.signal.aborted) setError(pageError(err))
     } finally {
+      abortRef.current = null
       setUploading(false)
       setProgress(null)
     }
@@ -224,19 +240,40 @@ function UploadPanel({
         </button>
       </form>
       {uploading && (
-        <progress
-          className="upload-progress"
-          aria-label="Upload progress"
-          value={progress?.sent ?? 0}
-          max={progress?.total ?? 1}
-        />
+        <div className="upload-status">
+          <progress
+            className="upload-progress"
+            aria-label="Upload progress"
+            value={progress?.sent ?? 0}
+            max={progress?.total ?? 1}
+          />
+          {/* Only while bytes are still going out: once they are all sent the server stores the
+              file whatever the browser does, so a Cancel then would only lie. */}
+          {!sent && (
+            <button type="button" className="secondary" onClick={() => abortRef.current?.abort()}>
+              Cancel
+            </button>
+          )}
+        </div>
       )}
       {error && <p className="error">{error}</p>}
     </section>
   )
 }
 
-export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () => Promise<void> }) {
+export function ImageCard({
+  image,
+  onChange,
+  staleAfterSeconds,
+  now,
+}: {
+  image: ImageOut
+  onChange: () => Promise<void>
+  /** The worker's solve timeout from the config, null until it is known (then nothing is called stuck). */
+  staleAfterSeconds: number | null
+  /** The page's clock (when the list was last fetched), so the card never reads one in render. */
+  now: number
+}) {
   const [working, setWorking] = useState(false)
   // The card's own error describes the row as it was when the action ran, so it carries the
   // version it belongs to: once the row changes underneath the card — its own refresh, or the
@@ -295,6 +332,13 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
   }
 
   const busy = isBusy(image.solve_status)
+  // A row in `solving` with no word for a whole timeout is stuck (#80): the worker is not on it
+  // (a solve in progress always reports within the deadline), so Re-solve is offered again. The
+  // server applies the same rule and refuses if the worker does still own the row.
+  const stuck =
+    image.solve_status === 'solving' &&
+    staleAfterSeconds !== null &&
+    now - Date.parse(image.updated_at) > staleAfterSeconds * 1000
   const publishToggle = image.published ? (
     <button className="secondary" onClick={() => setPublished(false)} disabled={working}>
       Unpublish
@@ -319,6 +363,7 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
         <h3 title={image.title}>{image.title}</h3>
         <div className="meta">
           <span className={`badge ${image.solve_status}`}>{statusLabel(image.solve_status)}</span>
+          {busy && <span>since {relativeTime(image.updated_at, now)}</span>}
           {image.published && <span className="badge published">Published</span>}
           <span>
             {image.width} × {image.height} px
@@ -347,7 +392,17 @@ export function ImageCard({ image, onChange }: { image: ImageOut; onChange: () =
         </div>
         {image.solve_error && <p className="error">{image.solve_error}</p>}
         {shownError && <p className="error">{shownError}</p>}
+        {stuck && (
+          <p className="meta">
+            No word from the solver for {elapsed(image.updated_at, now)}; if it is stuck, start it again.
+          </p>
+        )}
         <div className="actions">
+          {stuck && (
+            <button className="secondary" onClick={resolve} disabled={working}>
+              Re-solve
+            </button>
+          )}
           {hasLayout(image) && (
             <>
               <label className="hints">

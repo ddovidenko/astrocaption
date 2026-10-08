@@ -84,6 +84,8 @@ class SolveWorker:
         self.poll_interval = poll_interval
         self.timeout = timeout
         self._queue: asyncio.Queue[str] = asyncio.Queue()
+        #: Ids in the queue, for the API to tell a queued row from an abandoned one (#80).
+        self._queued: set[str] = set()
         self._task: asyncio.Task[None] | None = None
         self.current: str | None = None
 
@@ -95,7 +97,7 @@ class SolveWorker:
 
     async def start(self) -> None:
         for rec in self.db.images_needing_solve():
-            self._queue.put_nowait(rec.id)
+            self.enqueue(rec.id)
         self._task = asyncio.create_task(self._run(), name="solve-worker")
 
     async def stop(self) -> None:
@@ -108,11 +110,17 @@ class SolveWorker:
             self._task = None
 
     def enqueue(self, image_id: str) -> None:
+        self._queued.add(image_id)
         self._queue.put_nowait(image_id)
+
+    def owns(self, image_id: str) -> bool:
+        """True while the worker is on this row or has it queued: a solve will report back."""
+        return image_id == self.current or image_id in self._queued
 
     async def _run(self) -> None:
         while True:
             image_id = await self._queue.get()
+            self._queued.discard(image_id)
             try:
                 await self.process(image_id)
             except asyncio.CancelledError:

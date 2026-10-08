@@ -46,6 +46,9 @@ def test_put_is_partial_and_keeps_the_secrets(
         body = resp.json()
         assert body["max_upload_mb"] == 12 and body["site_title"] == "Sky"
         assert body["nova_api_key_set"] is False and body["locked"] == []
+        # The worker's deadline (the default here: no env override), for the Images page to
+        # tell a stuck row from a slow one (#80).
+        assert body["solve_timeout_seconds"] == 900
         after = read_config(tmp_path)
         assert after["password_hash"] == before["password_hash"]
         assert after["session_secret"] == before["session_secret"]

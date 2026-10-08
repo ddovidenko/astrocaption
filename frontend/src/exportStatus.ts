@@ -33,6 +33,12 @@ const DAY = 24 * HOUR
 
 /** "just now", "3 minutes ago", "2 hours ago", "5 days ago", then "on 2026-07-01"; the raw text
  *  when it does not parse. A stamp ahead of the browser's clock reads as just now. */
+/** The span since `iso` as words ("16 minutes", "2 hours"), for a sentence that is not about
+ *  the past tense of `relativeTime`. */
+export function elapsed(iso: string, now: number = Date.now()): string {
+  return relativeTime(iso, now).replace(/^just now$/, 'under a minute').replace(/ ago$/, '')
+}
+
 export function relativeTime(iso: string, now: number = Date.now()): string {
   const t = Date.parse(iso)
   if (Number.isNaN(t)) return iso

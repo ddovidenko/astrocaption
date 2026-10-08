@@ -11,7 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from ..config import Settings, SettingsSource, update_config, write_and_reload
 from ..fonts import list_fonts
 from ..models import ConfigOut, ConfigUpdate, StyleConfig, StyleDefaults
-from .deps import SettingsDep, require_owner
+from ..worker import SolveWorker
+from .deps import SettingsDep, WorkerDep, require_owner
 from .errors import CONFIG_SAVED_BUT_UNREADABLE, config_write_guard, write_failure_message
 
 log = logging.getLogger(__name__)
@@ -30,8 +31,9 @@ def style_defaults() -> dict[str, object]:
     return STYLE_DEFAULTS.model_dump()
 
 
-def config_out(settings: Settings) -> ConfigOut:
+def config_out(settings: Settings, worker: SolveWorker) -> ConfigOut:
     return ConfigOut(
+        solve_timeout_seconds=worker.timeout,
         site_title=settings.site_title,
         max_upload_mb=settings.max_upload_mb,
         public_gallery_enabled=settings.public_gallery_enabled,
@@ -44,8 +46,8 @@ def config_out(settings: Settings) -> ConfigOut:
 
 
 @router.get("/config")
-async def get_config(settings: SettingsDep) -> ConfigOut:
-    return config_out(settings)
+async def get_config(settings: SettingsDep, worker: WorkerDep) -> ConfigOut:
+    return config_out(settings, worker)
 
 
 def _locked_message(locked: list[str], settings: Settings) -> str:
@@ -86,10 +88,12 @@ def _updates_for(body: ConfigUpdate, settings: Settings) -> dict[str, object | N
 
 
 @router.put("/config")
-async def put_config(body: ConfigUpdate, request: Request, settings: SettingsDep) -> ConfigOut:
+async def put_config(
+    body: ConfigUpdate, request: Request, settings: SettingsDep, worker: WorkerDep
+) -> ConfigOut:
     updates = _updates_for(body, settings)
     if not updates:  # nothing to change: never rewrite the file that holds the secrets
-        return config_out(settings)
+        return config_out(settings, worker)
     source: SettingsSource = request.app.state.settings_source
     lock: asyncio.Lock = request.app.state.config_write_lock
     async with lock:  # two saves (or a save and setup) must not read-modify-write over each other
@@ -103,4 +107,4 @@ async def put_config(body: ConfigUpdate, request: Request, settings: SettingsDep
     if fresh.config_error is not None:  # the write landed, the file no longer parses
         log.error("config.json unusable immediately after a write: %s", fresh.config_error)
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, CONFIG_SAVED_BUT_UNREADABLE)
-    return config_out(fresh)
+    return config_out(fresh, worker)

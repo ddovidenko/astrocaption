@@ -36,8 +36,13 @@ class FakeXHR {
     this.method = method
     this.url = url
   }
+  aborted = false
   send(body: unknown) {
     this.body = body
+  }
+  abort() {
+    this.aborted = true
+    this.onabort?.()
   }
   respond(status: number, text: string) {
     this.status = status
@@ -144,6 +149,15 @@ describe('uploadForm', () => {
     xhr.respond(201, JSON.stringify({ id: 'img' }))
     await expect(p).resolves.toEqual({ id: 'img' })
     expect(seen).toEqual([[5, 10]])
+  })
+
+  it('aborts the request when the signal fires and rejects as cancelled (#80)', async () => {
+    const controller = new AbortController()
+    const p = uploadForm('/api/images', new FormData(), undefined, XHR, controller.signal)
+    const xhr = FakeXHR.last!
+    controller.abort()
+    expect(xhr.aborted).toBe(true)
+    await expect(p).rejects.toMatchObject({ message: 'The upload was cancelled.' })
   })
 
   it('turns an error status into an ApiError with the server sentence', async () => {

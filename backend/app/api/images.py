@@ -6,6 +6,7 @@ import os
 import uuid
 from collections import Counter
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, BinaryIO, Literal
 from urllib.parse import quote
@@ -212,6 +213,19 @@ def _start_solve(
     return _image_out_for(db, settings, _get_or_404(db, image_id))
 
 
+def _abandoned(rec: ImageRecord, worker: SolveWorker) -> bool:
+    """A row left in ``solving`` that no solve will report back for (#80): the worker is not on
+    it and has not queued it (a crash guard dropped it, or it was re-queued at a start that did
+    not finish), and nothing has touched it for a whole solve timeout. Re-solve may take it
+    back; the Images page offers that after the same wait."""
+    if rec.solve_status != SolveStatus.SOLVING or worker.owns(rec.id):
+        return False
+    touched = datetime.fromisoformat(rec.updated_at)
+    if touched.tzinfo is None:
+        touched = touched.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - touched).total_seconds() > worker.timeout
+
+
 def _require_idle(rec: ImageRecord) -> None:
     """409 when a solve is already queued or running: neither route may touch the row then."""
     if rec.busy:
@@ -344,7 +358,8 @@ async def solve_image(
     hints: SolveHints | None = None,
 ) -> ImageOut:
     rec = _get_or_404(db, image_id)
-    _require_idle(rec)
+    if not _abandoned(rec, worker):
+        _require_idle(rec)
     return _start_solve(db, settings, worker, image_id, SolveStatus.PENDING, {"solve_hints": hints})
 
 

@@ -74,6 +74,9 @@ No multi-user, no roles, no invites in v1.
 
 1. Owner uploads a JPG (also accept PNG/TIFF; convert to RGB internally). Max size configurable, default 60 MB.
    The page shows upload progress (bytes sent) and then "Processing…" while the server writes the derivatives.
+   A Cancel button beside the bar aborts the request while bytes are still going out and clears the
+   form without an error; it is withdrawn once every byte is sent, because the server then stores
+   the file whatever the browser does (#80).
 2. Backend stores the original untouched at `data/uploads/<id>/original.<ext>`, generates a
    2048-px preview JPG and a 400-px thumbnail.
 3. Backend submits to nova (async job). Status page polls. Typical 30–120 s.
@@ -102,6 +105,12 @@ No multi-user, no roles, no invites in v1.
    non-stellar objects nova returns with radius 0: there the radius means "no size known", not
    "small", so NGC 206 in M 31 is enabled like any other NGC entry. Decided 2026-09-11, #9).
    `hd`-type stars have radius 0 and are therefore hidden by default (see § 14).
+   A queued or solving card says how long it has been so ("since 3 minutes ago", from the row's
+   `updated_at`, which the worker refreshes on every write). A row still `solving` with no word for a
+   whole solve timeout is stuck (the process restarted without re-queueing it, or a last-resort
+   guard dropped it): the card says so and offers Re-solve again, and `POST /images/{id}/solve`
+   accepts it under the same rule, refusing (409) only while the worker is on the row or has it
+   queued. `GET /config` carries the timeout as `solve_timeout_seconds` for this (#80).
 6. On failure: show nova's job log link and let the owner retry, optionally with scale hints
    (focal length / pixel size passed as nova's `scale_units` etc.). **Check again** is offered only
    after a timeout ("Timed out after…"): it resumes polling the submission and job the row still
