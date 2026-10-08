@@ -73,6 +73,8 @@ No multi-user, no roles, no invites in v1.
 ### 5.2 Upload & solve
 
 1. Owner uploads a JPG (also accept PNG/TIFF; convert to RGB internally). Max size configurable, default 60 MB.
+   The upload panel is also a drop target: dropping one image on it starts the upload at once with the
+   title typed so far; several files, or one the picker would not accept, are refused in plain words (#149).
    The page shows upload progress (bytes sent) and then "Processing…" while the server writes the derivatives.
    A Cancel button beside the bar aborts the request while bytes are still going out and clears the
    form without an error; it is withdrawn once every byte is sent, because the server then stores

@@ -168,6 +168,9 @@ async function listFirst(count: number): Promise<Page<ImageOut>> {
   return { items, next: before }
 }
 
+/** What the picker accepts and a drop must match (#149); the server checks the bytes. */
+const UPLOAD_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.tif', '.tiff']
+
 export function UploadPanel({
   onUploaded,
   maxUploadMb,
@@ -186,7 +189,43 @@ export function UploadPanel({
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     const file = fileRef.current?.files?.[0]
-    if (!file) return
+    if (file) await start(file)
+  }
+
+  // #149: the panel is a drop target. One image, by the same extensions the picker accepts, starts
+  // the upload at once through the same path as the button; anything else is refused on the error
+  // line. A drop while an upload runs is ignored (the request in flight is the one that counts).
+  const [dragging, setDragging] = useState(false)
+  function dragOver(e: React.DragEvent) {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = uploading ? 'none' : 'copy'
+    if (!uploading) setDragging(true)
+  }
+  function dragLeave(e: React.DragEvent) {
+    // Moving between the panel's own children fires leave/enter pairs; only leaving the panel counts.
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+    setDragging(false)
+  }
+  async function drop(e: React.DragEvent) {
+    e.preventDefault()
+    setDragging(false)
+    if (uploading) return
+    const files = Array.from(e.dataTransfer.files)
+    if (files.length === 0) return
+    if (files.length > 1) {
+      setError('Drop one image at a time.')
+      return
+    }
+    const file = files[0]!
+    if (!UPLOAD_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext))) {
+      setError('Drop a JPG, PNG or TIFF.')
+      return
+    }
+    await start(file)
+  }
+
+  async function start(file: File) {
     // Refuse here rather than spend minutes sending a body the server will reject at the door.
     if (maxUploadMb !== null && file.size > maxUploadMb * 1024 * 1024) {
       setError(`The file is ${formatBytes(file.size)}; the upload limit is ${maxUploadMb} MB.`)
@@ -225,10 +264,16 @@ export function UploadPanel({
         : `Uploading… ${Math.floor((progress.sent / progress.total) * 100)}%`
 
   return (
-    <section className="panel">
+    <section
+      className={dragging ? 'panel drop-target dragging' : 'panel drop-target'}
+      onDragEnter={dragOver}
+      onDragOver={dragOver}
+      onDragLeave={dragLeave}
+      onDrop={drop}
+    >
       <h2>Upload</h2>
       <form className="upload" onSubmit={submit}>
-        <input ref={fileRef} type="file" accept=".jpg,.jpeg,.png,.tif,.tiff" required />
+        <input ref={fileRef} type="file" accept={UPLOAD_EXTENSIONS.join(',')} required />
         <input
           type="text"
           placeholder="Title (optional)"
@@ -257,6 +302,7 @@ export function UploadPanel({
         </div>
       )}
       {error && <p className="error">{error}</p>}
+      <p className="meta drop-hint">{dragging ? 'Drop to upload' : 'or drop an image here'}</p>
     </section>
   )
 }

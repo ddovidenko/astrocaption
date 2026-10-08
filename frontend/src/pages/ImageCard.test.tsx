@@ -241,3 +241,52 @@ describe('UploadPanel cancel (#80)', () => {
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
   })
 })
+
+describe('UploadPanel drag and drop (#149)', () => {
+  function panel() {
+    const onUploaded = vi.fn(async () => {})
+    render(<UploadPanel onUploaded={onUploaded} maxUploadMb={null} />)
+    return { onUploaded, section: document.querySelector('section.panel')! }
+  }
+  const transfer = (files: File[]) => ({ dataTransfer: { files, types: ['Files'], dropEffect: 'none' } })
+
+  it('starts the upload from a dropped image with the title typed so far', async () => {
+    vi.mocked(api.upload).mockResolvedValue(image())
+    const { onUploaded, section } = panel()
+    fireEvent.change(screen.getByPlaceholderText('Title (optional)'), { target: { value: 'Pelican' } })
+    const file = new File(['x'], 'Pelican.TIF')
+    fireEvent.drop(section, transfer([file]))
+    await waitFor(() => expect(onUploaded).toHaveBeenCalled())
+    expect(api.upload).toHaveBeenCalledWith(file, 'Pelican', expect.any(Function), expect.any(AbortSignal))
+    expect(document.querySelector('.error')).toBeNull()
+  })
+
+  it('shows the target while a file is over the panel and clears it when it leaves', () => {
+    const { section } = panel()
+    expect(screen.getByText('or drop an image here')).toBeTruthy()
+    fireEvent.dragOver(section, transfer([]))
+    expect(section.classList.contains('dragging')).toBe(true)
+    expect(screen.getByText('Drop to upload')).toBeTruthy()
+    fireEvent.dragLeave(section, { relatedTarget: document.body })
+    expect(section.classList.contains('dragging')).toBe(false)
+    expect(screen.getByText('or drop an image here')).toBeTruthy()
+  })
+
+  it('refuses several files, and a file the picker would not accept', () => {
+    const { section } = panel()
+    fireEvent.drop(section, transfer([new File(['x'], 'a.jpg'), new File(['x'], 'b.jpg')]))
+    expect(screen.getByText('Drop one image at a time.')).toBeTruthy()
+    fireEvent.drop(section, transfer([new File(['x'], 'orion.gif')]))
+    expect(screen.getByText('Drop a JPG, PNG or TIFF.')).toBeTruthy()
+    expect(api.upload).not.toHaveBeenCalled()
+  })
+
+  it('ignores a drop while an upload is running', async () => {
+    vi.mocked(api.upload).mockImplementation(() => new Promise(() => {}))
+    const { section } = panel()
+    fireEvent.drop(section, transfer([new File(['x'], 'one.jpg')]))
+    await screen.findByRole('button', { name: 'Uploading…' })
+    fireEvent.drop(section, transfer([new File(['x'], 'two.jpg')]))
+    expect(api.upload).toHaveBeenCalledTimes(1)
+  })
+})
