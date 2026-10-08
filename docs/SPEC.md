@@ -153,7 +153,11 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
   Unpublishing always works. A published image stays published across re-exports and re-solves,
   but the gallery serves only rows that are currently `solved`, so it drops out while a re-solve
   runs and returns when it succeeds; visitors then see the old export until the owner exports again.
-- Gallery shows published images only, newest first. Hover (or tap on touch) swaps the preview
+- Gallery shows published images only, newest first, 24 at a time: a "Show more" link at the
+  foot appends the next 24 without leaving the page. It is a real link (`?before=<id>`), so a
+  crawler that runs the app can follow the chain and a visitor who opens one starts from that page.
+  The owner's Images page pages the same way; its 3-second poll re-fetches as many cards as are
+  shown. Hover (or tap on touch) swaps the preview
   to the annotated preview. Click opens a full-size view (the 2048 px preview) with the same
   hover behaviour and a link to download the full-resolution annotated export. The unannotated
   original is never public. Every grid card shares one 3:2 box (a portrait image is letterboxed
@@ -312,9 +316,16 @@ Config (`data/config.json`, never in DB): `password_hash`, `session_secret`, `no
 
 Public (no cookie; every miss is 404 `Image not found.`, whether the id is unknown, the image is
 unpublished or not currently solved, its export files are missing, or the gallery is switched off):
-- `GET /gallery` → published images newest first as `GalleryItem` {id, title, width, height,
+- `GET /gallery?limit=24&before=<id>` → one page of published images newest first,
+  `{items: GalleryItem[], next: <id> | null}`. `GalleryItem` is {id, title, width, height,
   exported_at, thumb_url, preview_url, annotated_preview_url, export_url}; the URLs are all under
-  `/api/gallery/{id}/files/…` and carry `?v=<exported_at>` where the file changes with an export
+  `/api/gallery/{id}/files/…` and carry `?v=<exported_at>` where the file changes with an export.
+  Paging is keyset on the list's own order (created time, then insertion): `before` names the last
+  item seen and the page holds what is strictly older, so uploads and deletions elsewhere never
+  shift it; `next` is the last item's id when a page follows, null on the last page. `limit` is
+  1–100, default 24. A `before` that names no image is 422 `That page is no longer available;
+  reload the list.` A published row whose export files are missing is skipped but still counted,
+  so a page can be short by one.
 - `GET /gallery/{id}` → one `GalleryItem`
 - `GET /gallery/{id}/files/{thumb|preview|annotated-preview|export}` → the file, `Cache-Control:
   public, no-cache`; `export` is an attachment named `<slug>-annotated.jpg`; an unknown kind is
@@ -344,7 +355,8 @@ Owner (cookie session):
   writer under a lock, the running app re-reads the file immediately, and a `PUT` with nothing to change
   never rewrites it.
 - `POST /images` (multipart) → id, starts solve
-- `GET /images`, `GET /images/{id}`, `DELETE /images/{id}`
+- `GET /images?limit=24&before=<id>` → `{items: ImageOut[], next}`, paged exactly like
+  `GET /gallery`; `GET /images/{id}`, `DELETE /images/{id}`
 - `PUT /images/{id}/published` {published} → the updated image; 409 when publishing without an export (§ 5.5)
 - `POST /images/{id}/solve` (re-solve, optional scale hints)
 - `POST /images/{id}/check` (check again: resume polling the stored nova job without uploading, #10).

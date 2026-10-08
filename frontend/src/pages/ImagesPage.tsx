@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import {
   ApiError,
+  PAGE_LIMIT,
   api,
   formatBytes,
   hasLayout,
@@ -12,9 +13,11 @@ import {
   type ExportOut,
   type HealthOut,
   type ImageOut,
+  type Page,
 } from '../api'
 import { exportOf, exportState, relativeTime } from '../exportStatus'
 import ConfirmInline from '../ConfirmInline'
+import ShowMore from './ShowMore'
 
 const POLL_MS = 3000
 
@@ -26,42 +29,80 @@ export default function ImagesPage({
   refreshHealth: () => Promise<HealthOut | null>
 }) {
   const [images, setImages] = useState<ImageOut[]>([])
+  const [next, setNext] = useState<string | null>(null)
   const [config, setConfig] = useState<ConfigOut | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [more, setMore] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null })
   // Refreshes overlap: the 3-second poll, an action's own refresh and a card's finally block
   // all call it, and a slow answer arriving after a fast one would put the old list back (a
   // deleted card reappearing, a solved row going back to Solving…). Only the newest applies.
+  // Show more bumps it too, so a refresh that started before the append cannot undo it.
   const seq = useRef(0)
+  // How many cards are on screen, for a refresh to fetch the same number again rather than
+  // fold the list back to the first page.
+  const shown = useRef(0)
+  useEffect(() => {
+    shown.current = images.length
+  }, [images])
+
+  const applyPage = useCallback((page: Page<ImageOut>) => {
+    setImages(page.items)
+    setNext(page.next)
+  }, [])
 
   // One refresh covers all three: a nova key added in config.json, or a config.json that
   // just broke, must reach the banners as promptly as the image rows do.
   const refresh = useCallback(async () => {
     const mine = ++seq.current
     try {
-      const [list, cfg] = await Promise.all([api.listImages(), api.config(), refreshHealth()])
+      const [page, cfg] = await Promise.all([
+        listFirst(Math.max(PAGE_LIMIT, shown.current)),
+        api.config(),
+        refreshHealth(),
+      ])
       if (mine !== seq.current) return
-      setImages(list)
+      applyPage(page)
       setConfig(cfg)
       setError(null)
     } catch (err) {
       if (mine === seq.current) setError(pageError(err))
     }
-  }, [refreshHealth])
+  }, [applyPage, refreshHealth])
 
   // The first load obeys the same "newest answer wins" rule as `refresh`. Not `void refresh()`:
   // react-hooks/set-state-in-effect forbids a setState-wrapping call in an effect body.
   useEffect(() => {
     const mine = ++seq.current
     Promise.all([api.listImages(), api.config()])
-      .then(([list, cfg]) => {
+      .then(([page, cfg]) => {
         if (mine !== seq.current) return
-        setImages(list)
+        applyPage(page)
         setConfig(cfg)
       })
       .catch((err: unknown) => {
         if (mine === seq.current) setError(pageError(err))
       })
-  }, [])
+  }, [applyPage])
+
+  const showMore = useCallback(async () => {
+    if (next === null) return
+    setMore({ busy: true, error: null })
+    try {
+      const page = await api.listImages({ before: next })
+      ++seq.current
+      setImages((current) => [...current, ...page.items])
+      setNext(page.next)
+      setMore({ busy: false, error: null })
+    } catch (err) {
+      // The cursor image was deleted meanwhile (another tab): the list is stale, start it over.
+      if (err instanceof ApiError && err.status === 422) {
+        setMore({ busy: false, error: null })
+        void refresh()
+        return
+      }
+      setMore({ busy: false, error: pageError(err) })
+    }
+  }, [next, refresh])
 
   const busy = images.some((img) => isBusy(img.solve_status))
   useEffect(() => {
@@ -92,8 +133,22 @@ export default function ImagesPage({
           <ImageCard key={img.id} image={img} onChange={refresh} />
         ))}
       </section>
+      <ShowMore next={next} busy={more.busy} error={more.error} onMore={() => void showMore()} />
     </>
   )
+}
+
+/** The first `count` images as one page: pages of at most 100 (the server's cap) joined, so a
+ *  refresh keeps every card the owner has shown. */
+async function listFirst(count: number): Promise<Page<ImageOut>> {
+  const items: ImageOut[] = []
+  let before: string | null = null
+  do {
+    const page: Page<ImageOut> = await api.listImages({ limit: Math.min(100, count - items.length), before })
+    items.push(...page.items)
+    before = page.next
+  } while (before !== null && items.length < count)
+  return { items, next: before }
 }
 
 function UploadPanel({

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError, type HealthOut } from '../api'
@@ -32,7 +32,7 @@ const health = (over: Partial<HealthOut> = {}): HealthOut => ({
 
 describe('GalleryPage', () => {
   it('lists published images as links to the full view', async () => {
-    vi.mocked(api.gallery).mockResolvedValue([item])
+    vi.mocked(api.gallery).mockResolvedValue({ items: [item], next: null })
     render(
       <MemoryRouter>
         <GalleryPage health={health()} />
@@ -40,10 +40,58 @@ describe('GalleryPage', () => {
     )
     const link = await screen.findByRole('link', { name: /Orion/ })
     expect(link.getAttribute('href')).toBe('/gallery/img-1')
+    expect(api.gallery).toHaveBeenCalledWith({ before: null })
+    expect(screen.queryByRole('link', { name: 'Show more' })).toBeNull()
+  })
+
+  it('appends the next page on Show more and stops on the last one', async () => {
+    const second = { ...item, id: 'img-2', title: 'Pleiades' }
+    vi.mocked(api.gallery)
+      .mockResolvedValueOnce({ items: [item], next: 'img-1' })
+      .mockResolvedValueOnce({ items: [second], next: null })
+    render(
+      <MemoryRouter>
+        <GalleryPage health={health()} />
+      </MemoryRouter>,
+    )
+    const more = await screen.findByRole('link', { name: 'Show more' })
+    expect(more.getAttribute('href')).toBe('?before=img-1')
+    fireEvent.click(more)
+    expect(await screen.findByRole('link', { name: /Pleiades/ })).toBeTruthy()
+    expect(screen.getByRole('link', { name: /Orion/ })).toBeTruthy()
+    expect(api.gallery).toHaveBeenLastCalledWith({ before: 'img-1' })
+    expect(screen.queryByRole('link', { name: 'Show more' })).toBeNull()
+  })
+
+  it('starts from the page a followed Show more link names', async () => {
+    vi.mocked(api.gallery).mockResolvedValue({ items: [item], next: null })
+    render(
+      <MemoryRouter initialEntries={['/gallery?before=img-7']}>
+        <GalleryPage health={health()} />
+      </MemoryRouter>,
+    )
+    await screen.findByRole('link', { name: /Orion/ })
+    expect(api.gallery).toHaveBeenCalledWith({ before: 'img-7' })
+  })
+
+  it('restarts from the top when the cursor image was unpublished meanwhile', async () => {
+    vi.mocked(api.gallery)
+      .mockResolvedValueOnce({ items: [item], next: 'img-1' })
+      .mockRejectedValueOnce(new ApiError(422, 'That page is no longer available; reload the list.'))
+      .mockResolvedValueOnce({ items: [{ ...item, id: 'img-3', title: 'Andromeda' }], next: null })
+    render(
+      <MemoryRouter>
+        <GalleryPage health={health()} />
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('link', { name: 'Show more' }))
+    expect(await screen.findByRole('link', { name: /Andromeda/ })).toBeTruthy()
+    expect(screen.queryByRole('link', { name: /Orion/ })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Show more' })).toBeNull()
   })
 
   it('says when nothing is published', async () => {
-    vi.mocked(api.gallery).mockResolvedValue([])
+    vi.mocked(api.gallery).mockResolvedValue({ items: [], next: null })
     render(
       <MemoryRouter>
         <GalleryPage health={health()} />

@@ -13,6 +13,7 @@ import sqlite3
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
+from typing import NamedTuple
 
 from pydantic import BaseModel, ValidationError
 
@@ -30,6 +31,20 @@ from .models import (
 )
 
 log = logging.getLogger(__name__)
+
+#: Rows per page when the caller does not say (SPEC § 8); the API clamps to 1..100.
+PAGE_LIMIT = 24
+
+
+class UnknownCursor(LookupError):
+    """``before`` names no image: the row was deleted after the caller saw it."""
+
+
+class ImagePage(NamedTuple):
+    items: list[ImageRecord]
+    #: The id to pass as ``before`` for the next page, or None when this is the last one.
+    next: str | None
+
 
 SCHEMA_VERSION = 5
 
@@ -291,23 +306,42 @@ class Database:
             row = conn.execute("SELECT * FROM images WHERE id = ?", (image_id,)).fetchone()
         return _row_to_image(row) if row else None
 
-    def _list_images(self, where: str = "", params: tuple[object, ...] = ()) -> list[ImageRecord]:
+    def _list_images(
+        self, limit: int, before: str | None, where: str = "", params: tuple[object, ...] = ()
+    ) -> ImagePage:
         # created_at has whole-second resolution (utcnow_iso), so two rows inserted within the
         # same second tie there; rowid (insertion order) breaks the tie the way "id" (a random
-        # UUID) cannot.
+        # UUID) cannot. Paging is keyset on that same (created_at, rowid) order (SPEC § 8): the
+        # page after `before` is everything strictly older than that row, so an upload or a
+        # delete elsewhere never shifts it. One row more than asked tells whether a page follows.
+        conds = [where] if where else []
+        values: list[object] = list(params)
         with self.connect() as conn:
+            if before is not None:
+                cursor = conn.execute(
+                    "SELECT created_at, rowid FROM images WHERE id = ?", (before,)
+                ).fetchone()
+                if cursor is None:
+                    raise UnknownCursor(before)
+                conds.append("(created_at < ? OR (created_at = ? AND rowid < ?))")
+                values += [cursor[0], cursor[0], cursor[1]]
+            clause = f" WHERE {' AND '.join(conds)}" if conds else ""
             rows = conn.execute(
-                f"SELECT * FROM images{where} ORDER BY created_at DESC, rowid DESC", params
+                f"SELECT * FROM images{clause} ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                (*values, limit + 1),
             ).fetchall()
-        return [_row_to_image(r) for r in rows]
+        items = [_row_to_image(r) for r in rows[:limit]]
+        return ImagePage(items, items[-1].id if len(rows) > limit else None)
 
-    def list_images(self) -> list[ImageRecord]:
-        return self._list_images()
+    def list_images(self, limit: int = PAGE_LIMIT, before: str | None = None) -> ImagePage:
+        return self._list_images(limit, before)
 
-    def list_published_images(self) -> list[ImageRecord]:
+    def list_published_images(
+        self, limit: int = PAGE_LIMIT, before: str | None = None
+    ) -> ImagePage:
         """The gallery's rows: published and currently solved, newest first (SPEC § 5.5)."""
         return self._list_images(
-            " WHERE published = 1 AND solve_status = ?", (SolveStatus.SOLVED.value,)
+            limit, before, "published = 1 AND solve_status = ?", (SolveStatus.SOLVED.value,)
         )
 
     def images_needing_solve(self) -> list[ImageRecord]:

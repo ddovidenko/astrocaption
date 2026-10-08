@@ -540,6 +540,14 @@ class PublishRequest(BaseModel):
     published: bool
 
 
+class Page[T](BaseModel):
+    """One page of a newest-first list (SPEC § 8). ``next`` is the last item's id, to be sent back
+    as ``before`` for the page after it; None when there is none."""
+
+    items: list[T]
+    next: str | None
+
+
 class GalleryItem(BaseModel):
     """One published image as a visitor sees it (SPEC § 8, public). Only URLs under
     ``/api/gallery``; never a path, never anything about the solve."""
