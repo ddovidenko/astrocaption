@@ -98,7 +98,8 @@ def test_gallery_lists_published_images_newest_first_and_nothing_else(
     second = published_image(client, sample_jpeg)
     resp = anon_client.get("/api/gallery")
     assert resp.status_code == 200, resp.text
-    items = resp.json()
+    assert resp.json()["next"] is None
+    items = resp.json()["items"]
     assert [i["id"] for i in items] == [second["id"], first["id"]]
     assert unpublished["id"] not in {i["id"] for i in items}
     item = items[0]
@@ -120,7 +121,23 @@ def test_gallery_lists_published_images_newest_first_and_nothing_else(
     assert item["annotated_preview_url"].startswith(f"{base}annotated-preview?v=")
     assert item["export_url"].startswith(f"{base}export?v=")
     # No cookie was involved: the same list is served to the owner too.
-    assert client.get("/api/gallery").json() == items
+    assert client.get("/api/gallery").json()["items"] == items
+
+
+def test_gallery_is_paged_and_a_skipped_row_still_moves_the_cursor(
+    client: TestClient, anon_client: TestClient, settings: Settings, sample_jpeg: Path
+) -> None:
+    oldest = published_image(client, sample_jpeg)
+    gone = published_image(client, sample_jpeg)
+    newest = published_image(client, sample_jpeg)
+    (settings.renders_dir / gone["id"] / "annotated.jpg").unlink()
+    first = anon_client.get("/api/gallery", params={"limit": 2}).json()
+    # The second row is skipped (export missing) but remains the cursor, so nothing repeats.
+    assert [i["id"] for i in first["items"]] == [newest["id"]]
+    assert first["next"] == gone["id"]
+    second = anon_client.get("/api/gallery", params={"limit": 2, "before": first["next"]}).json()
+    assert ([i["id"] for i in second["items"]], second["next"]) == ([oldest["id"]], None)
+    assert anon_client.get("/api/gallery", params={"before": "nope"}).status_code == 422
 
 
 def test_gallery_payloads_never_carry_server_paths(
@@ -172,7 +189,7 @@ def test_gallery_hides_unpublished_unknown_and_unsolved_images(
     assert anon_client.get(f"/api/gallery/{image['id']}").status_code == 200
     # A re-solve in flight takes the image out of the gallery; it is not unpublished.
     Database(settings.db_path).update_image(image["id"], {"solve_status": SolveStatus.SOLVING})
-    assert anon_client.get("/api/gallery").json() == []
+    assert anon_client.get("/api/gallery").json() == {"items": [], "next": None}
     assert anon_client.get(f"/api/gallery/{image['id']}").status_code == 404
     assert client.get(f"/api/images/{image['id']}").json()["published"] is True
 
@@ -183,7 +200,7 @@ def test_gallery_skips_a_published_row_whose_export_vanished(
     kept = published_image(client, sample_jpeg)
     gone = published_image(client, sample_jpeg)
     (settings.renders_dir / gone["id"] / "annotated.jpg").unlink()
-    assert [i["id"] for i in anon_client.get("/api/gallery").json()] == [kept["id"]]
+    assert [i["id"] for i in anon_client.get("/api/gallery").json()["items"]] == [kept["id"]]
     resp = anon_client.get(f"/api/gallery/{gone['id']}")
     assert resp.status_code == 404 and resp.json() == {"detail": NOT_FOUND}
 

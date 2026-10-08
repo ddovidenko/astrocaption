@@ -118,7 +118,25 @@ def test_upload_stores_original_untouched_with_derivatives(
     assert client.get(body["original_url"]).headers["content-type"] == "image/jpeg"
     assert client.get(f"/api/images/{body['id']}/files/annotated-preview").status_code == 404
     listed = client.get("/api/images").json()
-    assert [i["id"] for i in listed] == [body["id"]]
+    assert [i["id"] for i in listed["items"]] == [body["id"]]
+    assert listed["next"] is None
+
+
+def test_list_images_is_paged(client: TestClient, sample_jpeg: Path) -> None:
+    ids = [upload(client, sample_jpeg, title=f"Image {n}")["id"] for n in range(3)]
+    first = client.get("/api/images", params={"limit": 2}).json()
+    assert [i["id"] for i in first["items"]] == [ids[2], ids[1]]
+    assert first["next"] == ids[1]
+    second = client.get("/api/images", params={"limit": 2, "before": first["next"]}).json()
+    assert [i["id"] for i in second["items"]] == [ids[0]]
+    assert second["next"] is None
+    # The cursor row was deleted meanwhile: plain language, and the page starts over.
+    client.delete(f"/api/images/{ids[1]}")
+    resp = client.get("/api/images", params={"limit": 2, "before": ids[1]})
+    assert resp.status_code == 422
+    assert resp.json() == {"detail": "That page is no longer available; reload the list."}
+    assert client.get("/api/images", params={"limit": 0}).status_code == 422
+    assert client.get("/api/images", params={"limit": 101}).status_code == 422
 
 
 def test_preview_file_answers_head_for_the_editor_probe(

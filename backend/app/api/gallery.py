@@ -17,10 +17,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
 from ..config import Settings
-from ..db import Database
-from ..models import GalleryItem, ImageRecord
+from ..db import PAGE_LIMIT, Database, UnknownCursor
+from ..models import GalleryItem, ImageRecord, Page
 from ..storage import export_exists, render_dir, slug_of
 from .deps import DbDep, SettingsDep
+from .images import PAGE_GONE, BeforeParam, LimitParam
 
 log = logging.getLogger(__name__)
 
@@ -71,17 +72,25 @@ def _visible(settings: Settings, db: Database, image_id: str) -> ImageRecord:
 
 
 @router.get("")
-async def list_gallery(settings: SettingsDep, db: DbDep) -> list[GalleryItem]:
+async def list_gallery(
+    settings: SettingsDep, db: DbDep, limit: LimitParam = PAGE_LIMIT, before: BeforeParam = None
+) -> Page[GalleryItem]:
+    try:
+        page = db.list_published_images(limit, before)
+    except UnknownCursor:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, PAGE_GONE) from None
     items: list[GalleryItem] = []
-    for rec in db.list_published_images():
+    for rec in page.items:
         if not export_exists(settings, rec):
             # Published, then the render dir was emptied by hand: not the visitor's problem.
+            # The row still counts towards the page, so a skipped one short-changes the page
+            # by one rather than repeating or hiding a neighbour.
             log.warning(
                 "gallery: skipping published image %s: its export files are missing", rec.id
             )
             continue
         items.append(gallery_item(rec))
-    return items
+    return Page(items=items, next=page.next)
 
 
 @router.get("/{image_id}")

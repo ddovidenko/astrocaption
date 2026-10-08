@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.config import Settings
-from app.db import SCHEMA_VERSION, Database
+from app.db import SCHEMA_VERSION, Database, UnknownCursor
 from app.models import Annotations, ImageRecord, Label, SolveHints, SolveStatus, StyleConfig
 from tests.conftest import seed_image
 
@@ -140,7 +140,7 @@ def test_corrupt_json_cell_does_not_break_listing(settings: Settings) -> None:
             "UPDATE images SET solve_hints_json = ?, calibration_json = ? WHERE id = ?",
             ("{not json", "[1,2]", rec.id),
         )
-    listed = db.list_images()
+    listed = db.list_images().items
     assert [i.id for i in listed] == [rec.id]
     assert listed[0].solve_hints is None and listed[0].calibration is None
 
@@ -326,4 +326,69 @@ def test_list_published_images_is_published_solved_newest_first(tmp_path: Path) 
                 solve_status=status,
             )
         )
-    assert [r.id for r in db.list_published_images()] == ["new-pub", "old-pub"]
+    assert [r.id for r in db.list_published_images().items] == ["new-pub", "old-pub"]
+
+
+def _plain_image(image_id: str, created: str, published: bool = False) -> ImageRecord:
+    return ImageRecord(
+        id=image_id,
+        created_at=created,
+        updated_at=created,
+        title=image_id,
+        original_name="x.jpg",
+        original_path=f"uploads/{image_id}/original.jpg",
+        preview_path=f"uploads/{image_id}/preview.jpg",
+        thumb_path=f"uploads/{image_id}/thumb.jpg",
+        width=100,
+        height=80,
+        published=published,
+        solve_status=SolveStatus.SOLVED,
+    )
+
+
+def test_list_images_pages_newest_first_by_created_at_then_insertion(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    # Three rows share one second (the resolution of created_at), so insertion order decides.
+    for image_id, created in [
+        ("a", "2026-09-01T00:00:00Z"),
+        ("b", "2026-09-02T00:00:00Z"),
+        ("c", "2026-09-02T00:00:00Z"),
+        ("d", "2026-09-02T00:00:00Z"),
+        ("e", "2026-09-03T00:00:00Z"),
+    ]:
+        db.insert_image(_plain_image(image_id, created))
+    page = db.list_images(limit=2)
+    assert [r.id for r in page.items] == ["e", "d"]
+    assert page.next == "d"
+    page = db.list_images(limit=2, before="d")
+    assert [r.id for r in page.items] == ["c", "b"]
+    assert page.next == "b"
+    page = db.list_images(limit=2, before="b")
+    assert [r.id for r in page.items] == ["a"]
+    assert page.next is None
+    # An exact fit still ends the chain rather than promising an empty page.
+    assert db.list_images(limit=5).next is None
+    # A row that lands after the cursor row (newer) never shifts the page after it.
+    db.insert_image(_plain_image("f", "2026-09-04T00:00:00Z"))
+    assert [r.id for r in db.list_images(limit=2, before="d").items] == ["c", "b"]
+
+
+def test_list_images_unknown_cursor_raises(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    db.insert_image(_plain_image("a", "2026-09-01T00:00:00Z"))
+    with pytest.raises(UnknownCursor):
+        db.list_images(limit=2, before="gone")
+
+
+def test_list_published_images_pages_the_filtered_rows(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    for image_id, published in [("a", True), ("b", False), ("c", True), ("d", True)]:
+        db.insert_image(_plain_image(image_id, "2026-09-01T00:00:00Z", published))
+    page = db.list_published_images(limit=2)
+    assert [r.id for r in page.items] == ["d", "c"]
+    assert page.next == "c"
+    page = db.list_published_images(limit=2, before="c")
+    assert ([r.id for r in page.items], page.next) == (["a"], None)

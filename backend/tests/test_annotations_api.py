@@ -373,7 +373,7 @@ def test_image_out_carries_the_hashes_for_the_export_staleness_rule(
     before = client.get(f"/api/images/{image_id}").json()
     assert before["annotations_hash"] == ann["content_hash"]
     assert before["exported_at"] is None and before["exported_hash"] is None
-    listed = {img["id"]: img for img in client.get("/api/images").json()}
+    listed = {img["id"]: img for img in client.get("/api/images").json()["items"]}
     assert listed[image_id]["annotations_hash"] == ann["content_hash"]
     assert listed[image_id]["exported_hash"] is None
 
@@ -390,7 +390,7 @@ def test_image_out_carries_the_hashes_for_the_export_staleness_rule(
     after_put = client.get(f"/api/images/{image_id}").json()
     assert after_put["annotations_hash"] == saved["content_hash"]
     assert after_put["exported_hash"] == exported["exported_hash"] != saved["content_hash"]
-    listed = {img["id"]: img for img in client.get("/api/images").json()}
+    listed = {img["id"]: img for img in client.get("/api/images").json()["items"]}
     assert listed[image_id]["exported_hash"] != listed[image_id]["annotations_hash"]
 
     # Back to the exported content (an undo): a new version, the same document, exported again.
@@ -434,7 +434,7 @@ def test_annotations_hash_is_null_before_a_solve_stores_a_document(
         login(client)
         image_id = upload(client, sample_jpeg)["id"]
         assert client.get(f"/api/images/{image_id}").json()["annotations_hash"] is None
-        listed = client.get("/api/images").json()
+        listed = client.get("/api/images").json()["items"]
         assert listed[0]["annotations_hash"] is None
 
 

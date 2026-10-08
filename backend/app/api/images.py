@@ -10,14 +10,14 @@ from pathlib import Path
 from typing import Annotated, BinaryIO, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ..catalog import kind_for
 from ..config import Settings, SettingsSource
-from ..db import Database, hash_of
+from ..db import PAGE_LIMIT, Database, UnknownCursor, hash_of
 from ..fonts import list_fonts, resolved_style
 from ..layout import autoplace, default_style
 from ..models import (
@@ -31,6 +31,7 @@ from ..models import (
     NamePreference,
     ObjectKind,
     ObjectOut,
+    Page,
     PublishRequest,
     SolveHints,
     SolveObject,
@@ -281,14 +282,29 @@ async def upload_image(
     return image_out(rec, settings, 0, None)
 
 
+PAGE_GONE = "That page is no longer available; reload the list."
+
+LimitParam = Annotated[int, Query(ge=1, le=100)]
+BeforeParam = Annotated[str | None, Query(min_length=1)]
+
+
 @router.get("")
-async def list_images(settings: SettingsDep, db: DbDep) -> list[ImageOut]:
+async def list_images(
+    settings: SettingsDep, db: DbDep, limit: LimitParam = PAGE_LIMIT, before: BeforeParam = None
+) -> Page[ImageOut]:
+    try:
+        page = db.list_images(limit, before)
+    except UnknownCursor:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, PAGE_GONE) from None
     counts = db.object_counts()
     hashes = db.annotations_hashes()
-    return [
-        image_out(rec, settings, counts.get(rec.id, 0), hashes.get(rec.id))
-        for rec in db.list_images()
-    ]
+    return Page(
+        items=[
+            image_out(rec, settings, counts.get(rec.id, 0), hashes.get(rec.id))
+            for rec in page.items
+        ],
+        next=page.next,
+    )
 
 
 @router.get("/{image_id}")

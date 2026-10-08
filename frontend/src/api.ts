@@ -198,6 +198,29 @@ export interface ExportOut {
   encoding: string
 }
 
+/** One page of a newest-first list (SPEC § 8). `next` is the id to send back as `before` for
+ *  the page after it, null on the last page. Mirrors the server's Page model. */
+export interface Page<T> {
+  items: T[]
+  next: string | null
+}
+
+/** Rows per page unless asked otherwise; the server clamps `limit` to 1..100. */
+export const PAGE_LIMIT = 24
+
+export interface PageQuery {
+  limit?: number
+  before?: string | null
+}
+
+function paged(path: string, { limit, before }: PageQuery): string {
+  const q = new URLSearchParams()
+  if (limit !== undefined) q.set('limit', String(limit))
+  if (before) q.set('before', before)
+  const query = q.toString()
+  return query ? `${path}?${query}` : path
+}
+
 /** One published image as the public gallery serves it. Mirrors GalleryItem. All URLs are
  *  under /api/gallery and need no session. */
 export interface GalleryItem {
@@ -386,7 +409,7 @@ export const api = {
   config: () => request<ConfigOut>('/api/config'),
   fonts: () => request<FontOut[]>('/api/fonts'),
   updateConfig: (body: ConfigUpdate) => request<ConfigOut>('/api/config', json('PUT', body)),
-  listImages: () => request<ImageOut[]>('/api/images'),
+  listImages: (page: PageQuery = {}) => request<Page<ImageOut>>(paged('/api/images', page)),
   image: (id: string) => request<ImageOut>(`/api/images/${id}`),
   /** The style an image would use with no owner overrides: the site defaults with the config's
    *  `default_style` applied. Used to preview or reset a per-image style in the Style tab. */
@@ -420,7 +443,8 @@ export const api = {
   setPublished: (id: string, published: boolean) =>
     request<ImageOut>(`/api/images/${id}/published`, json('PUT', { published })),
   // Public: no session. A 404 means unpublished, unknown, or the gallery is switched off.
-  gallery: () => request<GalleryItem[]>('/api/gallery', undefined, { sessionAware: false }),
+  gallery: (page: PageQuery = {}) =>
+    request<Page<GalleryItem>>(paged('/api/gallery', page), undefined, { sessionAware: false }),
   galleryImage: (id: string) => request<GalleryItem>(`/api/gallery/${id}`, undefined, { sessionAware: false }),
 }
 

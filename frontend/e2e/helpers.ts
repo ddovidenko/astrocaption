@@ -1,7 +1,7 @@
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Annotations, AnnotationsUpdate, ExportOut, HealthOut, ImageOut, ObjectOut } from '../src/api'
+import type { Annotations, AnnotationsUpdate, ExportOut, HealthOut, ImageOut, ObjectOut, Page as ApiPage } from '../src/api'
 import type { EditorTestHook } from '../src/editor/EditorCanvas'
 
 // Shared steps for the e2e specs. The whole run shares one data dir (`make e2e` mints a scratch
@@ -102,7 +102,7 @@ export async function uploadImage(page: Page, title: string): Promise<Locator> {
 export async function imagesTitled(request: APIRequestContext, title: string): Promise<ImageOut[]> {
   const res = await request.get('/api/images')
   expect(res.status(), 'GET /api/images').toBe(200)
-  return ((await res.json()) as ImageOut[]).filter((i) => i.title === title)
+  return ((await res.json()) as ApiPage<ImageOut>).items.filter((i) => i.title === title)
 }
 
 /** Removes every image titled `title` through the API, so a re-run on the same data dir starts

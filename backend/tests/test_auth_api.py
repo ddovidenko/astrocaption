@@ -146,7 +146,7 @@ def test_setup_then_login_then_logout(tmp_path: Path, monkeypatch: pytest.Monkey
         assert "astrocaption_session=" in cookie and "HttpOnly" in cookie
         assert "SameSite=lax" in cookie and "Secure" not in cookie and "Max-Age=2592000" in cookie
         assert client.get("/api/health").json()["authenticated"] is True
-        assert client.get("/api/images").json() == []
+        assert client.get("/api/images").json()["items"] == []
         assert client.get("/api/config").json()["nova_api_key_set"] is True
 
         out = client.post("/api/logout")
