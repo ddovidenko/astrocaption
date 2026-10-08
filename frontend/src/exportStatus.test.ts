@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { exportOf, exportState, relativeTime } from './exportStatus'
+import { exportOf, exportState, elapsed, relativeTime } from './exportStatus'
 
 // #91: whether the last export still matches the document, by content: the hash of the document
 // the export rendered against the stored document's hash. Never a version or a clock: an undo back
@@ -45,5 +45,17 @@ describe('relativeTime', () => {
   })
   it('never reads in the future (a clock ahead of the server counts as just now)', () => {
     expect(at('2026-09-21T12:00:30Z')).toBe('just now')
+  })
+})
+
+describe('elapsed', () => {
+  const now = Date.parse('2026-09-21T12:00:00Z')
+  const since = (iso: string) => elapsed(iso, now)
+  it('reads as a span, never as a date (#80: "no word from the solver for …")', () => {
+    expect(since('2026-09-21T11:59:40Z')).toBe('under a minute')
+    expect(since('2026-09-21T11:44:00Z')).toBe('16 minutes')
+    expect(since('2026-09-21T10:00:00Z')).toBe('2 hours')
+    expect(since('2026-07-01T12:00:00Z')).toBe('82 days')
+    expect(since('not a date')).toBe('not a date')
   })
 })

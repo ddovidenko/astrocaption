@@ -31,6 +31,18 @@ const MINUTE = 60_000
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 
+/** The span since `iso` as words: "under a minute", "16 minutes", "2 hours", "45 days", for a
+ *  sentence that is not about the past ("no word for …"); the raw text when it does not parse. */
+export function elapsed(iso: string, now: number = Date.now()): string {
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return iso
+  const ago = now - t
+  if (ago < MINUTE) return 'under a minute'
+  if (ago < HOUR) return span(Math.floor(ago / MINUTE), 'minute')
+  if (ago < DAY) return span(Math.floor(ago / HOUR), 'hour')
+  return span(Math.floor(ago / DAY), 'day')
+}
+
 /** "just now", "3 minutes ago", "2 hours ago", "5 days ago", then "on 2026-07-01"; the raw text
  *  when it does not parse. A stamp ahead of the browser's clock reads as just now. */
 export function relativeTime(iso: string, now: number = Date.now()): string {
@@ -38,9 +50,10 @@ export function relativeTime(iso: string, now: number = Date.now()): string {
   if (Number.isNaN(t)) return iso
   const ago = now - t
   if (ago < MINUTE) return 'just now'
-  const unit = (n: number, name: string) => `${n} ${name}${n === 1 ? '' : 's'} ago`
-  if (ago < HOUR) return unit(Math.floor(ago / MINUTE), 'minute')
-  if (ago < DAY) return unit(Math.floor(ago / HOUR), 'hour')
-  if (ago < 31 * DAY) return unit(Math.floor(ago / DAY), 'day')
+  if (ago < HOUR) return `${span(Math.floor(ago / MINUTE), 'minute')} ago`
+  if (ago < DAY) return `${span(Math.floor(ago / HOUR), 'hour')} ago`
+  if (ago < 31 * DAY) return `${span(Math.floor(ago / DAY), 'day')} ago`
   return `on ${new Date(t).toISOString().slice(0, 10)}`
 }
+
+const span = (n: number, name: string) => `${n} ${name}${n === 1 ? '' : 's'}`

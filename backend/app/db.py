@@ -362,7 +362,11 @@ class Database:
         assignments = ", ".join(f"{k} = :{k}" for k in values)
         values["id"] = image_id
         with self.connect() as conn:
-            conn.execute(f"UPDATE images SET {assignments} WHERE id = :id", values)
+            cur = conn.execute(f"UPDATE images SET {assignments} WHERE id = :id", values)
+        if cur.rowcount == 0:
+            # Allowed: the worker writes to rows a delete may have removed meanwhile. Said here
+            # rather than passed over in silence (#80).
+            log.debug("update_image: no row with id %s (fields %s)", image_id, sorted(values))
 
     def delete_image(self, image_id: str) -> bool:
         with self.connect() as conn:

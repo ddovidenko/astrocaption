@@ -637,6 +637,8 @@ class ConfigOut(BaseModel):
     locked: list[str]  # fields pinned by environment variables
     locked_by: dict[str, str]  # locked field -> the variable that pins it, never its value
     style_defaults: StyleDefaults  # built-ins for fields with no override
+    #: The worker's solve deadline, so the Images page can tell a stuck row from a slow one (#80).
+    solve_timeout_seconds: float
 
 
 class StyleOverrides(BaseModel):

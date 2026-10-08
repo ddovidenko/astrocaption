@@ -156,6 +156,8 @@ export interface ConfigOut {
   locked: string[]
   /** Locked field -> the environment variable that pins it (never its value). */
   locked_by: Record<string, string>
+  /** The worker's solve deadline; a row in `solving` for longer than this with no word is stuck (#80). */
+  solve_timeout_seconds: number
 }
 
 /** Partial: absent keeps, `nova_api_key: null` clears; `default_style` replaces the override set. */
@@ -366,10 +368,13 @@ export function uploadForm<T>(
   form: FormData,
   onProgress?: UploadProgress,
   XHR: typeof XMLHttpRequest = XMLHttpRequest,
+  signal?: AbortSignal,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const xhr = new XHR()
     xhr.open('POST', url)
+    // Cancel (#80): the browser stops sending and fires onabort, which rejects below.
+    signal?.addEventListener('abort', () => xhr.abort(), { once: true })
     xhr.timeout = UPLOAD_TIMEOUT_MS
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress?.(e.loaded, e.total)
@@ -414,11 +419,11 @@ export const api = {
   /** The style an image would use with no owner overrides: the site defaults with the config's
    *  `default_style` applied. Used to preview or reset a per-image style in the Style tab. */
   imageDefaultStyle: (id: string) => request<StyleConfig>(`/api/images/${id}/default-style`),
-  upload(file: File, title: string, onProgress?: UploadProgress): Promise<ImageOut> {
+  upload(file: File, title: string, onProgress?: UploadProgress, signal?: AbortSignal): Promise<ImageOut> {
     const form = new FormData()
     form.append('file', file)
     if (title.trim()) form.append('title', title.trim())
-    return uploadForm<ImageOut>('/api/images', form, onProgress)
+    return uploadForm<ImageOut>('/api/images', form, onProgress, XMLHttpRequest, signal)
   },
   resolve: (id: string, hints?: SolveHints) =>
     request<ImageOut>(`/api/images/${id}/solve`, json('POST', hints)),
