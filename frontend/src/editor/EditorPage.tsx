@@ -62,7 +62,11 @@ export default function EditorPage() {
   const scale = useEditor((s) => s.view.scale)
   const canUndo = useEditor((s) => s.undo.length > 0 && isEditable(s) && !hasLivePreview(s))
   const canRedo = useEditor((s) => s.redo.length > 0 && isEditable(s) && !hasLivePreview(s))
-  const [panelOpen, setPanelOpen] = useState(true)
+  // Open beside the canvas on a desktop; closed on a phone, where it would cover most of the
+  // image (#169). jsdom has no matchMedia, hence the guard.
+  const [panelOpen, setPanelOpen] = useState(
+    () => typeof window.matchMedia !== 'function' || !window.matchMedia('(max-width: 640px)').matches
+  )
 
   useEffect(() => {
     if (!id) return
