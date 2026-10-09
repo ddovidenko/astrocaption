@@ -257,7 +257,7 @@ describe('UploadPanel drag and drop (#149)', () => {
     const file = new File(['x'], 'Pelican.TIF')
     fireEvent.drop(section, transfer([file]))
     await waitFor(() => expect(onUploaded).toHaveBeenCalled())
-    expect(api.upload).toHaveBeenCalledWith(file, 'Pelican', expect.any(Function), expect.any(AbortSignal))
+    expect(api.upload).toHaveBeenCalledWith(file, 'Pelican', expect.any(Function), expect.any(AbortSignal), null)
     expect(document.querySelector('.error')).toBeNull()
   })
 

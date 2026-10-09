@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from . import __version__
-from .api import auth, config, docs, fonts, gallery, health, images
+from .api import auth, config, docs, fonts, gallery, health, images, uploads
 from .auth import LoginLimiter, set_owner_password, validate_new_password
 from .config import Settings, SettingsSource
 from .db import Database
@@ -71,6 +71,7 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         nonlocal http_client
         cfg.ensure_dirs()
+        uploads.clear_partial_uploads(cfg)
         _headless_setup(source, setup_password)
         db.init()
         http_client = httpx.AsyncClient(
@@ -122,6 +123,7 @@ def create_app(
     app.include_router(fonts.router)
     app.include_router(gallery.router)
     app.include_router(images.router)
+    app.include_router(uploads.router)
 
     if cfg.fonts_dir.is_dir():
         app.mount("/fonts", StaticFiles(directory=cfg.fonts_dir), name="fonts")

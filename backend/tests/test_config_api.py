@@ -49,6 +49,7 @@ def test_put_is_partial_and_keeps_the_secrets(
         # The worker's deadline (the default here: no env override), for the Images page to
         # tell a stuck row from a slow one (#80).
         assert body["solve_timeout_seconds"] == 900
+        assert body["upload_chunk_mb"] == 16
         after = read_config(tmp_path)
         assert after["password_hash"] == before["password_hash"]
         assert after["session_secret"] == before["session_secret"]

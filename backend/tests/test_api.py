@@ -74,6 +74,7 @@ def test_health_and_fonts(client: TestClient) -> None:
         "locked_by": {},
         "style_defaults": style_defaults,
         "solve_timeout_seconds": 10,
+        "upload_chunk_mb": 16,
     }
     fonts = client.get("/api/fonts").json()
     assert len(fonts) == 24

@@ -639,6 +639,22 @@ class ConfigOut(BaseModel):
     style_defaults: StyleDefaults  # built-ins for fields with no override
     #: The worker's solve deadline, so the Images page can tell a stuck row from a slow one (#80).
     solve_timeout_seconds: float
+    #: Files larger than this go up in chunks of this size (#166); the browser picks the path.
+    upload_chunk_mb: int
+
+
+class UploadSessionRequest(BaseModel):
+    """Opens a chunked upload (#166): the file's name, byte size and the optional title."""
+
+    name: str = Field(min_length=1, max_length=512)
+    size: int = Field(gt=0)
+    title: str | None = None
+
+
+class UploadSessionOut(BaseModel):
+    id: str
+    chunk_bytes: int
+    chunks: int
 
 
 class StyleOverrides(BaseModel):

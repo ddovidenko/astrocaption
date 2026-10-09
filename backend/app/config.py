@@ -35,6 +35,12 @@ DEFAULT_NOVA_BASE_URL = "https://nova.astrometry.net"
 # module) so that the env parsing below has one home; ``SolveWorker`` imports them back.
 DEFAULT_POLL_SECONDS = 5.0
 DEFAULT_SOLVE_TIMEOUT_SECONDS = 15.0 * 60
+# Chunked uploads (#166): a file larger than one chunk goes up in requests of this size, so it
+# passes a proxy's per-request body cap (Cloudflare's free plan: 100 MB). Env-only, like the
+# solve knobs; the browser reads it from GET /config.
+DEFAULT_UPLOAD_CHUNK_MB = 16
+MIN_UPLOAD_CHUNK_MB = 1
+MAX_UPLOAD_CHUNK_MB = 64
 
 LOCKABLE: dict[str, tuple[str, ...]] = {
     "nova_api_key": ("NOVA_API_KEY", "ASTROMETRY_API_KEY"),
@@ -100,6 +106,7 @@ class Settings:
     # lockable and never on the config page (changing them means restarting the app).
     solve_poll_seconds: float = DEFAULT_POLL_SECONDS
     solve_timeout_seconds: float = DEFAULT_SOLVE_TIMEOUT_SECONDS
+    upload_chunk_mb: int = DEFAULT_UPLOAD_CHUNK_MB
     default_style: dict[str, object] = field(default_factory=dict)
     config_error: str | None = None  # why config.json was ignored, if it was
     password_hash: str | None = field(default=None, repr=False)
@@ -110,6 +117,11 @@ class Settings:
     @property
     def uploads_dir(self) -> Path:
         return self.data_dir / "uploads"
+
+    @property
+    def partial_uploads_dir(self) -> Path:
+        """Chunked uploads in progress (#166); never an image directory."""
+        return self.uploads_dir / ".partial"
 
     @property
     def renders_dir(self) -> Path:
@@ -312,6 +324,15 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         lo=1,
         hi=86400,
     )
+    chunk_mb = int(
+        _positive_seconds(
+            e.get("ASTROCAPTION_UPLOAD_CHUNK_MB"),
+            default=DEFAULT_UPLOAD_CHUNK_MB,
+            name="ASTROCAPTION_UPLOAD_CHUNK_MB",
+            lo=MIN_UPLOAD_CHUNK_MB,
+            hi=MAX_UPLOAD_CHUNK_MB,
+        )
+    )
     raw_hash = cfg.get("password_hash")
     raw_secret = cfg.get("session_secret")
     password_hash = raw_hash if isinstance(raw_hash, str) and raw_hash else None
@@ -333,6 +354,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         nova_base_url=e.get("NOVA_BASE_URL", DEFAULT_NOVA_BASE_URL).rstrip("/"),
         solve_poll_seconds=poll_seconds,
         solve_timeout_seconds=solve_timeout,
+        upload_chunk_mb=chunk_mb,
         default_style=default_style,
         config_error=config_error,
         password_hash=password_hash,

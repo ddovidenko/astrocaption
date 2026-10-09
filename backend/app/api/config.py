@@ -36,6 +36,7 @@ def config_out(settings: Settings, worker: SolveWorker) -> ConfigOut:
         solve_timeout_seconds=worker.timeout,
         site_title=settings.site_title,
         max_upload_mb=settings.max_upload_mb,
+        upload_chunk_mb=settings.upload_chunk_mb,
         public_gallery_enabled=settings.public_gallery_enabled,
         nova_api_key_set=settings.nova_api_key_set,
         default_style=dict(settings.default_style),

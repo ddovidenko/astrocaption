@@ -158,6 +158,14 @@ export interface ConfigOut {
   locked_by: Record<string, string>
   /** The worker's solve deadline; a row in `solving` for longer than this with no word is stuck (#80). */
   solve_timeout_seconds: number
+  /** Files larger than this go up in chunks of this size (#166), so each request stays under a proxy's body cap. */
+  upload_chunk_mb: number
+}
+
+export interface UploadSessionOut {
+  id: string
+  chunk_bytes: number
+  chunks: number
 }
 
 /** Partial: absent keeps, `nova_api_key: null` clears; `default_style` replaces the override set. */
@@ -360,19 +368,24 @@ const PROXY_UPLOAD_MESSAGES: Record<number, string> = {
   504: 'The server did not answer the upload in time. Try again.',
 }
 
-/** Multipart POST over XMLHttpRequest — the one browser transport that reports upload
+/** An upload request over XMLHttpRequest — the one browser transport that reports upload
  *  progress — with the same session and error handling as `request()`: a 401 sends the shell to
  *  /login, every body goes through `parseBody`. `XHR` is injectable for tests. */
-export function uploadForm<T>(
+export function uploadRequest<T>(
+  method: 'POST' | 'PUT',
   url: string,
-  form: FormData,
+  body: FormData | Blob,
   onProgress?: UploadProgress,
   XHR: typeof XMLHttpRequest = XMLHttpRequest,
   signal?: AbortSignal,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error(UPLOAD_CANCELLED))
+      return
+    }
     const xhr = new XHR()
-    xhr.open('POST', url)
+    xhr.open(method, url)
     // Cancel (#80): the browser stops sending and fires onabort, which rejects below.
     signal?.addEventListener('abort', () => xhr.abort(), { once: true })
     xhr.timeout = UPLOAD_TIMEOUT_MS
@@ -381,16 +394,10 @@ export function uploadForm<T>(
     }
     // A refused upload is often cut off mid-body, which the browser reports as a transport
     // error with no status at all; the size is the first thing to check when that happens.
-    xhr.onerror = () =>
-      reject(
-        new Error(
-          'The upload did not finish: the connection dropped, or the server refused the file' +
-            ' before it was fully sent (check the size against the upload limit).',
-        ),
-      )
+    xhr.onerror = () => reject(new TransportError(UPLOAD_DROPPED))
     xhr.ontimeout = () =>
-      reject(new Error('The upload timed out. Check the connection and try again.'))
-    xhr.onabort = () => reject(new Error('The upload was cancelled.'))
+      reject(new TransportError('The upload timed out. Check the connection and try again.'))
+    xhr.onabort = () => reject(new Error(UPLOAD_CANCELLED))
     xhr.onload = () => {
       try {
         resolve(settle<T>(xhr.status, xhr.responseText, true, PROXY_UPLOAD_MESSAGES))
@@ -398,8 +405,82 @@ export function uploadForm<T>(
         reject(err)
       }
     }
-    xhr.send(form)
+    xhr.send(body)
   })
+}
+
+/** Multipart POST; see `uploadRequest`. */
+export function uploadForm<T>(
+  url: string,
+  form: FormData,
+  onProgress?: UploadProgress,
+  XHR: typeof XMLHttpRequest = XMLHttpRequest,
+  signal?: AbortSignal,
+): Promise<T> {
+  return uploadRequest<T>('POST', url, form, onProgress, XHR, signal)
+}
+
+export const UPLOAD_CANCELLED = 'The upload was cancelled.'
+const UPLOAD_DROPPED =
+  'The upload did not finish: the connection dropped, or the server refused the file' +
+  ' before it was fully sent (check the size against the upload limit).'
+
+/** The connection failed before the server answered: nothing is known about what it would have
+ *  said, so a chunk that hit this is worth sending again. */
+export class TransportError extends Error {}
+
+/** How many times one chunk is sent before the upload gives up (#166). */
+export const CHUNK_ATTEMPTS = 3
+
+/** Chunked upload (#166): one session, the file in `chunk_bytes` pieces sent in order, then
+ *  `finish`, which answers with the image exactly as the single-shot upload does. Progress is
+ *  summed across chunks so the caller sees one bar. A chunk whose connection dropped, timed out
+ *  or met a 5xx is sent again (the server replaces it); any other refusal is final. Cancel aborts
+ *  the chunk in flight and drops the session; nothing is stored until `finish`. */
+export async function uploadChunked(
+  file: File,
+  title: string,
+  onProgress?: UploadProgress,
+  signal?: AbortSignal,
+  XHR: typeof XMLHttpRequest = XMLHttpRequest,
+): Promise<ImageOut> {
+  let base: string | null = null
+  try {
+    const session = await request<UploadSessionOut>('/api/uploads', {
+      ...json('POST', { name: file.name, size: file.size, title: title.trim() || null }),
+      signal,
+    })
+    base = `/api/uploads/${session.id}`
+    for (let n = 0; n < session.chunks; n++) {
+      // A Cancel that landed between two chunks: the abort listener only fires on the request
+      // in flight, so the gap has to look for itself.
+      if (signal?.aborted) throw new Error(UPLOAD_CANCELLED)
+      const offset = n * session.chunk_bytes
+      const piece = file.slice(offset, Math.min(offset + session.chunk_bytes, file.size))
+      const report = (loaded: number) => onProgress?.(offset + loaded, file.size)
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await uploadRequest<void>('PUT', `${base}/${n}`, piece, report, XHR, signal)
+          break
+        } catch (err) {
+          if (signal?.aborted || attempt >= CHUNK_ATTEMPTS || !retryable(err)) throw err
+        }
+      }
+    }
+    onProgress?.(file.size, file.size) // every byte is out: the panel reads this as Processing…
+    return await request<ImageOut>(`${base}/finish`, json('POST'))
+  } catch (err) {
+    if (signal?.aborted) {
+      // Best effort: the server sweeps what is left after a day anyway.
+      if (base) void fetch(base, { method: 'DELETE', keepalive: true }).catch(() => undefined)
+      throw new Error(UPLOAD_CANCELLED, { cause: err })
+    }
+    throw err
+  }
+}
+
+function retryable(err: unknown): boolean {
+  return err instanceof TransportError || (err instanceof ApiError && err.status >= 500)
 }
 
 export const api = {
@@ -419,7 +500,18 @@ export const api = {
   /** The style an image would use with no owner overrides: the site defaults with the config's
    *  `default_style` applied. Used to preview or reset a per-image style in the Style tab. */
   imageDefaultStyle: (id: string) => request<StyleConfig>(`/api/images/${id}/default-style`),
-  upload(file: File, title: string, onProgress?: UploadProgress, signal?: AbortSignal): Promise<ImageOut> {
+  /** `chunkMb` is the config's `upload_chunk_mb` (null until it is known): a file larger than one
+   *  chunk goes through `uploadChunked`, anything else in the one multipart request. */
+  upload(
+    file: File,
+    title: string,
+    onProgress?: UploadProgress,
+    signal?: AbortSignal,
+    chunkMb: number | null = null,
+  ): Promise<ImageOut> {
+    if (chunkMb !== null && file.size > chunkMb * 1024 * 1024) {
+      return uploadChunked(file, title, onProgress, signal)
+    }
     const form = new FormData()
     form.append('file', file)
     if (title.trim()) form.append('title', title.trim())
