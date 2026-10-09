@@ -99,6 +99,18 @@ class NovaSolver:
                     scale_est=request.scale_arcsec_per_px,
                     scale_err=request.scale_tolerance_pct,
                 )
+            if request.downsample_factor is not None:
+                params["downsample_factor"] = request.downsample_factor
+            if (
+                request.center_ra is not None
+                and request.center_dec is not None
+                and request.radius_deg is not None
+            ):
+                params.update(
+                    center_ra=request.center_ra,
+                    center_dec=request.center_dec,
+                    radius=request.radius_deg,
+                )
             with request.image_path.open("rb") as fh:
                 payload = await self._json(
                     "POST",

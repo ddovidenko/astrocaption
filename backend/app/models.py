@@ -20,6 +20,7 @@ from pydantic import (
     ValidationError,
     ValidationInfo,
     field_validator,
+    model_validator,
 )
 from pydantic_core import PydanticCustomError
 
@@ -412,11 +413,28 @@ class Calibration(BaseModel):
 
 
 class SolveHints(BaseModel):
-    """Optional hints passed to the solver when re-solving after a failure."""
+    """Optional hints passed to the solver when re-solving after a failure (#29).
+
+    Focal length and pixel size become nova's scale hint; ``downsample_factor`` is passed
+    through; centre and radius (degrees) narrow the search to one patch of sky and are only
+    meaningful together, so a partial position hint is refused rather than half-applied."""
 
     focal_length_mm: float | None = Field(default=None, gt=0)
     pixel_size_um: float | None = Field(default=None, gt=0)
     scale_tolerance_pct: float = Field(default=20.0, gt=0, le=100)
+    downsample_factor: int | None = Field(default=None, ge=2, le=8)
+    center_ra: float | None = Field(default=None, ge=0, le=360)
+    center_dec: float | None = Field(default=None, ge=-90, le=90)
+    radius_deg: float | None = Field(default=None, gt=0, le=180)
+
+    @model_validator(mode="after")
+    def _position_hint_is_all_or_nothing(self) -> SolveHints:
+        given = [self.center_ra, self.center_dec, self.radius_deg]
+        if any(v is not None for v in given) and not all(v is not None for v in given):
+            raise PydanticCustomError(
+                "position_hint_incomplete", "centre RA, Dec and radius must be given together"
+            )
+        return self
 
     @property
     def arcsec_per_pixel(self) -> float | None:
@@ -751,6 +769,7 @@ VALIDATION_MESSAGES: dict[str, str] = {
     "model_attributes_type": "must be an object",
     "null_not_allowed": "cannot be null; leave the field out to keep the current value",
     "blank": "must not be blank",
+    "position_hint_incomplete": "centre RA, Dec and radius must be given together",
 }
 GENERIC_VALIDATION_MESSAGE = "is not valid"
 

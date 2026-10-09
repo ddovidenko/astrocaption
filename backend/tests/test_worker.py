@@ -124,6 +124,24 @@ def test_scale_hint_is_converted_to_solve_copy_pixels(settings: Settings) -> Non
     assert req.scale_tolerance_pct == 10
 
 
+def test_downsample_and_position_hints_reach_the_solver(settings: Settings) -> None:
+    """#29: unlike the scale hint, these are not in image pixels and pass through unchanged."""
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db, width=6000)
+    solver = FakeSolver()
+    hints = SolveHints(downsample_factor=4, center_ra=83.8, center_dec=-5.4, radius_deg=3.0)
+    db.update_image(rec.id, {"solve_hints": hints})
+    asyncio.run(make_worker(settings, db, solver).process(rec.id))
+    [req] = solver.requests
+    assert req.scale_arcsec_per_px is None
+    assert (req.downsample_factor, req.center_ra, req.center_dec, req.radius_deg) == (
+        4,
+        83.8,
+        -5.4,
+        3.0,
+    )
+
+
 def test_resume_after_restart_skips_upload(settings: Settings) -> None:
     db = Database(settings.db_path)
     rec = seed_image(settings, db)

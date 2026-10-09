@@ -249,6 +249,12 @@ export interface SolveHints {
   focal_length_mm?: number
   pixel_size_um?: number
   scale_tolerance_pct?: number
+  /** nova's downsample_factor; 2 or 4 in the form (#29). */
+  downsample_factor?: number
+  /** A position hint, degrees; the server wants all three or none. */
+  center_ra?: number
+  center_dec?: number
+  radius_deg?: number
 }
 
 export class ApiError extends Error {

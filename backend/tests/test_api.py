@@ -774,6 +774,34 @@ def test_resolve_persists_hints_on_the_row(
     assert wait_for_status(client, body["id"], {"solved", "failed"})["solve_status"] == "solved"
 
 
+def test_resolve_refuses_a_partial_position_hint(client: TestClient, sample_jpeg: Path) -> None:
+    """#29: centre RA, Dec and radius only mean something together; the 422 says so without
+    echoing the submitted numbers."""
+    body = upload(client, sample_jpeg)
+    wait_for_status(client, body["id"], {"solved", "failed"})
+    resp = client.post(f"/api/images/{body['id']}/solve", json={"center_ra": 83.8})
+    assert resp.status_code == 422
+    assert "together" in resp.json()["detail"]
+    assert "83.8" not in resp.text
+    resp = client.post(f"/api/images/{body['id']}/solve", json={"downsample_factor": 3.5})
+    assert resp.status_code == 422
+    assert "whole number" in resp.json()["detail"]
+
+
+def test_resolve_stores_downsample_and_position_hints(
+    client: TestClient, settings: Settings, sample_jpeg: Path
+) -> None:
+    body = upload(client, sample_jpeg)
+    wait_for_status(client, body["id"], {"solved", "failed"})
+    hints = {"downsample_factor": 2, "center_ra": 83.8, "center_dec": -5.4, "radius_deg": 3}
+    resp = client.post(f"/api/images/{body['id']}/solve", json=hints)
+    assert resp.status_code == 200, resp.text
+    row = Database(settings.db_path).get_image(body["id"])
+    assert row is not None and row.solve_hints is not None
+    assert row.solve_hints.model_dump(exclude_none=True) == {**hints, "scale_tolerance_pct": 20.0}
+    assert wait_for_status(client, body["id"], {"solved", "failed"})["solve_status"] == "solved"
+
+
 def test_health_reflects_a_key_added_after_start(env_client: tuple[TestClient, Path]) -> None:
     client, data_dir = env_client
     assert client.get("/api/health").json()["setup_required"] is True
