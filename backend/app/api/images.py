@@ -75,11 +75,14 @@ UPLOAD_ENVELOPE_BYTES = 64 * 1024
 FileKind = Literal["original", "preview", "thumb", "annotated-preview"]
 
 
+UNSUPPORTED_TYPE_MESSAGE = "Unsupported file type. Upload a JPG, PNG or TIFF."
+
+
 class UploadTooLargeError(ValueError):
     pass
 
 
-def _too_large_detail(settings: Settings) -> str:
+def too_large_detail(settings: Settings) -> str:
     return f"File is larger than the {settings.max_upload_mb} MB upload limit."
 
 
@@ -110,7 +113,7 @@ class UploadGuard:
                 settings.max_upload_mb * 1024 * 1024 + UPLOAD_ENVELOPE_BYTES
             ):
                 response = JSONResponse(
-                    {"detail": _too_large_detail(settings)},
+                    {"detail": too_large_detail(settings)},
                     status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 )
                 await response(scope, receive, send)
@@ -242,17 +245,42 @@ async def upload_image(
 ) -> ImageOut:
     filename = file.filename or ""
     if normalised_extension(filename) is None:
-        raise HTTPException(
-            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            "Unsupported file type. Upload a JPG, PNG or TIFF.",
-        )
+        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, UNSUPPORTED_TYPE_MESSAGE)
     limit = settings.max_upload_mb * 1024 * 1024
     image_id = str(uuid.uuid4())
-    directory = image_dir(settings, image_id)
-    directory.mkdir(parents=True, exist_ok=False)
-    upload_path = directory / "original.upload"
+    upload_path = start_image_dir(settings, image_id)
     try:
         await asyncio.to_thread(_copy_limited, file.file, upload_path, limit)
+    except UploadTooLargeError:
+        delete_image_files(settings, image_id)
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, too_large_detail(settings)) from None
+    except Exception:
+        delete_image_files(settings, image_id)
+        raise
+    return await ingest_upload(settings, db, worker, image_id, upload_path, filename, title)
+
+
+def start_image_dir(settings: Settings, image_id: str) -> Path:
+    """A fresh image directory; returns where the incoming bytes go before they are probed."""
+    directory = image_dir(settings, image_id)
+    directory.mkdir(parents=True, exist_ok=False)
+    return directory / "original.upload"
+
+
+async def ingest_upload(
+    settings: Settings,
+    db: Database,
+    worker: SolveWorker,
+    image_id: str,
+    upload_path: Path,
+    filename: str,
+    title: str | None,
+) -> ImageOut:
+    """The one path from bytes on disk to a queued image row, shared by the single-shot upload
+    and the chunked one (#166): probe, derivatives, row, enqueue. Any failure leaves nothing
+    behind on disk."""
+    directory = upload_path.parent
+    try:
         # The stored extension follows the detected format, not the upload's file name.
         width, height, ext = await asyncio.to_thread(probe_image, upload_path)
         original = upload_path.with_name(f"original.{ext}")
@@ -273,11 +301,6 @@ async def upload_image(
         )
         db.insert_image(rec)
         worker.enqueue(image_id)
-    except UploadTooLargeError:
-        delete_image_files(settings, image_id)
-        raise HTTPException(
-            status.HTTP_413_CONTENT_TOO_LARGE, _too_large_detail(settings)
-        ) from None
     except UnsupportedImageError as exc:
         delete_image_files(settings, image_id)
         raise HTTPException(

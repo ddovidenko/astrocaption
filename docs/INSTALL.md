@@ -63,6 +63,7 @@ a new one inside the running container and logs every browser out; on a source c
 | Reverse proxy | `TRUST_PROXY=1` env: trust `X-Forwarded-*` from the proxy; session cookie `Secure` over https | off |
 | Solve timeout | `ASTROCAPTION_SOLVE_TIMEOUT_SECONDS` env | 900 (bounds 1-86400) |
 | Solve poll interval | `ASTROCAPTION_SOLVE_POLL_SECONDS` env | 5 (bounds 0.1-3600) |
+| Upload chunk | `ASTROCAPTION_UPLOAD_CHUNK_MB` env: files larger than this go up in requests of this size | 16 (bounds 1-64) |
 
 Public gallery: when on, signed-out visitors see the published images at `/`, each with a
 hover-to-reveal annotated preview and a link to the full-resolution annotated export; nothing
@@ -201,8 +202,10 @@ everywhere:
   recreated under a running container is invisible to it: the app behaves like a fresh install
   and writes into the deleted directory until the stack is restarted. Do not complete setup in
   that state; restart instead.
-- Uploads are large requests: every proxy below raises its body limit, and the app's own upload
-  limit (default 60 MB, config page) must fit under whatever sits in front of it.
+- Uploads are large requests, but never larger than one chunk (16 MB by default, table above): a
+  file bigger than that goes up in several requests of that size. Every proxy below sets a body
+  limit that leaves room for one chunk; the app's own upload limit (default 60 MB, config page)
+  is independent of it.
 
 ## Behind a reverse proxy
 
@@ -305,9 +308,9 @@ A proxied ("orange cloud") record works, with three things to know:
   `CF-Connecting-IP`. Have the proxy forward that one instead, so the access log shows the real
   visitor. Caddy: `header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}` inside the
   `reverse_proxy` block; nginx: `proxy_set_header X-Forwarded-For $http_cf_connecting_ip;`.
-- The free plan caps request bodies at **100 MB**. Set the app's upload limit to 100 or below on
-  the config page; a larger upload fails at the edge with no useful message. Resumable uploads
-  that would lift this are issue #166.
+- The free plan caps request bodies at **100 MB**. Uploads are chunked (16 MB per request by
+  default, `ASTROCAPTION_UPLOAD_CHUNK_MB`), so the app's upload limit can sit anywhere up to its
+  1 GB maximum; keep the chunk under the cap.
 
 Other setups (a Cloudflare Tunnel, Tailscale, a reverse proxy on another machine) follow the same
 two rules: the proxy terminates https and sends the two forwarded headers, and nothing but the

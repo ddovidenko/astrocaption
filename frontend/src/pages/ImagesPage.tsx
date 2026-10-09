@@ -136,7 +136,11 @@ export default function ImagesPage({
           solves fail until a key is present.
         </div>
       )}
-      <UploadPanel onUploaded={refresh} maxUploadMb={config?.max_upload_mb ?? null} />
+      <UploadPanel
+        onUploaded={refresh}
+        maxUploadMb={config?.max_upload_mb ?? null}
+        chunkMb={config?.upload_chunk_mb ?? null}
+      />
       {error && <p className="error">{error}</p>}
       <section className="images">
         {images.length === 0 && <p className="meta">No images yet. Upload a finished JPG to start.</p>}
@@ -174,10 +178,13 @@ const UPLOAD_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.tif', '.tiff']
 export function UploadPanel({
   onUploaded,
   maxUploadMb,
+  chunkMb = null,
 }: {
   onUploaded: () => Promise<void>
   /** From the config the page has loaded; null until it arrives, and then no pre-check. */
   maxUploadMb: number | null
+  /** The config's chunk size (#166); null until it arrives, and then every file goes up in one request. */
+  chunkMb?: number | null
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [title, setTitle] = useState('')
@@ -237,7 +244,7 @@ export function UploadPanel({
     const controller = new AbortController()
     abortRef.current = controller
     try {
-      await api.upload(file, title, (sent, total) => setProgress({ sent, total }), controller.signal)
+      await api.upload(file, title, (sent, total) => setProgress({ sent, total }), controller.signal, chunkMb)
       setTitle('')
       if (fileRef.current) fileRef.current.value = ''
       await onUploaded()

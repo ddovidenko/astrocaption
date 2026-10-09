@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError,
   arcsecPerPixel,
@@ -11,13 +11,17 @@ import {
   parseBody,
   setUnauthorizedHandler,
   statusLabel,
+  type ImageOut,
   UPLOAD_TIMEOUT_MS,
+  uploadChunked,
   uploadForm,
+  api,
 } from './api'
 
 /** Enough of XMLHttpRequest for uploadForm: records the request, lets a test drive the events. */
 class FakeXHR {
   static last: FakeXHR | null = null
+  static all: FakeXHR[] = []
   method = ''
   url = ''
   body: unknown = null
@@ -31,6 +35,7 @@ class FakeXHR {
   ontimeout: (() => void) | null = null
   constructor() {
     FakeXHR.last = this
+    FakeXHR.all.push(this)
   }
   open(method: string, url: string) {
     this.method = method
@@ -223,5 +228,117 @@ describe('uploadForm', () => {
     const p = uploadForm('/api/images', new FormData(), undefined, XHR)
     FakeXHR.last!.onabort!()
     await expect(p).rejects.toThrow('The upload was cancelled.')
+  })
+})
+
+describe('uploadChunked (#166)', () => {
+  const CHUNK = 1024
+  const file = new File([new Uint8Array(2500)], 'wide.png', { type: 'image/png' })
+  const image = { id: 'img-9', title: 'Wide' } as unknown as ImageOut
+  const calls: Array<{ url: string; method: string; body: unknown }> = []
+
+  /** A fetch that opens the session with 1 KB chunks and answers finish with the image. */
+  function stubFetch(finishStatus = 201) {
+    calls.length = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, method: init?.method ?? 'GET', body: init?.body ? JSON.parse(init.body as string) : null })
+        if (url === '/api/uploads') {
+          return new Response(JSON.stringify({ id: 's1', chunk_bytes: CHUNK, chunks: 3 }), { status: 201 })
+        }
+        if (url.endsWith('/finish')) {
+          return new Response(JSON.stringify(finishStatus === 201 ? image : { detail: 'Not a usable image: nope' }), {
+            status: finishStatus,
+          })
+        }
+        return new Response(null, { status: 204 })
+      }),
+    )
+  }
+  const chunkRequest = async (n: number, attempt = 1) => {
+    const url = `/api/uploads/s1/${n}`
+    await vi.waitFor(() => expect(FakeXHR.all.filter((x) => x.url === url)).toHaveLength(attempt))
+    return FakeXHR.all.filter((x) => x.url === url)[attempt - 1]!
+  }
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    FakeXHR.all = []
+  })
+
+  it('sends the file in order, one bar across the chunks, then finishes', async () => {
+    stubFetch()
+    const seen: Array<[number, number]> = []
+    const p = uploadChunked(file, '  Wide ', (s, t) => seen.push([s, t]), undefined, XHR)
+    const first = await chunkRequest(0)
+    expect(first.method).toBe('PUT')
+    expect((first.body as Blob).size).toBe(CHUNK)
+    first.upload.onprogress!({ lengthComputable: true, loaded: 512, total: CHUNK })
+    first.respond(204, '')
+    const second = await chunkRequest(1)
+    second.upload.onprogress!({ lengthComputable: true, loaded: 100, total: CHUNK })
+    second.respond(204, '')
+    const third = await chunkRequest(2)
+    expect((third.body as Blob).size).toBe(2500 - 2 * CHUNK)
+    third.respond(204, '')
+    await expect(p).resolves.toEqual(image)
+    expect(seen).toEqual([
+      [512, 2500],
+      [CHUNK + 100, 2500],
+      [2500, 2500],
+    ])
+    expect(calls[0]).toEqual({ url: '/api/uploads', method: 'POST', body: { name: 'wide.png', size: 2500, title: 'Wide' } })
+    expect(calls[1]).toMatchObject({ url: '/api/uploads/s1/finish', method: 'POST' })
+  })
+
+  it('sends a dropped chunk again, up to three times, and gives up on a refusal', async () => {
+    stubFetch()
+    const p = uploadChunked(file, '', undefined, undefined, XHR)
+    ;(await chunkRequest(0)).onerror!()
+    ;(await chunkRequest(0, 2)).ontimeout!()
+    ;(await chunkRequest(0, 3)).respond(503, '')
+    await expect(p).rejects.toMatchObject({ status: 503 })
+    expect(FakeXHR.all).toHaveLength(3)
+
+    FakeXHR.all = []
+    const q = uploadChunked(file, '', undefined, undefined, XHR)
+    ;(await chunkRequest(0)).respond(413, JSON.stringify({ detail: 'The upload sent a larger chunk than it declared; start it again.' }))
+    await expect(q).rejects.toMatchObject({ status: 413, message: /larger chunk/ })
+    expect(FakeXHR.all).toHaveLength(1)
+  })
+
+  it('cancel aborts the chunk in flight and drops the session', async () => {
+    stubFetch()
+    const controller = new AbortController()
+    const p = uploadChunked(file, '', undefined, controller.signal, XHR)
+    ;(await chunkRequest(0)).respond(204, '')
+    const second = await chunkRequest(1)
+    controller.abort()
+    expect(second.aborted).toBe(true)
+    await expect(p).rejects.toMatchObject({ message: 'The upload was cancelled.' })
+    await vi.waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.url === '/api/uploads/s1')).toBe(true))
+    expect(calls.some((c) => c.url.endsWith('/finish'))).toBe(false)
+  })
+
+  it('surfaces the finish refusal as the server wrote it', async () => {
+    stubFetch(415)
+    const p = uploadChunked(file, '', undefined, undefined, XHR)
+    for (let n = 0; n < 3; n++) (await chunkRequest(n)).respond(204, '')
+    await expect(p).rejects.toMatchObject({ status: 415, message: 'Not a usable image: nope' })
+  })
+
+  it('api.upload takes the chunked path only for a file larger than one chunk', async () => {
+    stubFetch()
+    vi.stubGlobal('XMLHttpRequest', FakeXHR)
+    const small = new File([new Uint8Array(10)], 'small.jpg')
+    void api.upload(small, '', undefined, undefined, 1)
+    await vi.waitFor(() => expect(FakeXHR.last?.url).toBe('/api/images'))
+    expect(calls).toHaveLength(0)
+    const big = new File([new Uint8Array(1024 * 1024 + 1)], 'big.jpg')
+    void api.upload(big, '', undefined, undefined, 1).catch(() => undefined)
+    await vi.waitFor(() => expect(calls[0]?.url).toBe('/api/uploads'))
+    // Without a known chunk size every file goes up in one request.
+    void api.upload(big, '', undefined, undefined, null)
+    await vi.waitFor(() => expect(FakeXHR.all.filter((x) => x.url === '/api/images')).toHaveLength(2))
   })
 })

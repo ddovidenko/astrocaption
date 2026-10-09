@@ -75,6 +75,10 @@ No multi-user, no roles, no invites in v1.
 1. Owner uploads a JPG (also accept PNG/TIFF; convert to RGB internally). Max size configurable, default 60 MB.
    The upload panel is also a drop target: dropping one image on it starts the upload at once with the
    title typed so far; several files, or one the picker would not accept, are refused in plain words (#149).
+   A file larger than one chunk (`ASTROCAPTION_UPLOAD_CHUNK_MB`, default 16, reported as `upload_chunk_mb` on
+   `GET /config`) goes up as a chunked upload (§ 8, `/uploads`): one session, the chunks in order, each request
+   under a proxy's body cap (Cloudflare's free plan: 100 MB), then a finish that stores exactly what a single
+   request would have (#166). Nothing is stored until the finish, so Cancel applies to the whole transfer.
    The page shows upload progress (bytes sent) and then "Processing…" while the server writes the derivatives.
    A Cancel button beside the bar aborts the request while bytes are still going out and clears the
    form without an error; it is withdrawn once every byte is sent, because the server then stores
@@ -352,7 +356,8 @@ Owner (cookie session):
   read or no longer holds a usable password; 500 when the new password was written but the file could not
   be read back afterwards (the password did change; the browser is not re-signed-in).
 - `GET/PUT /config` → {site_title, max_upload_mb, nova_api_key_set, default_style, style_defaults, locked,
-  locked_by, public_gallery_enabled}. `PUT` is partial: absent fields are kept, `nova_api_key: null` clears the key, and
+  locked_by, public_gallery_enabled, solve_timeout_seconds, upload_chunk_mb}; the last two are read-only
+  (env-only knobs). `PUT` is partial: absent fields are kept, `nova_api_key: null` clears the key, and
   `default_style` replaces the owner's whole override set — a save from the page therefore stores exactly the
   fields it shows filled in, and every field left blank goes back to the built-in default (derived from the
   image size for `font_size`, `halo_width`, `marker_width` and `marker_min_radius`). It is validated against
@@ -366,6 +371,13 @@ Owner (cookie session):
   writer under a lock, the running app re-reads the file immediately, and a `PUT` with nothing to change
   never rewrites it.
 - `POST /images` (multipart) → id, starts solve
+- Chunked upload (#166), for a file larger than `upload_chunk_mb`: `POST /uploads` {name, size, title} →
+  {id, chunk_bytes, chunks} (415 on an extension the picker would not accept, 413 on a size over the upload
+  limit, both before any byte moves); `PUT /uploads/{id}/{n}` raw chunk bytes (a repeat replaces the chunk;
+  413 when larger than the session expects, refused on `Content-Length` before the body is read; 422 when
+  short); `POST /uploads/{id}/finish` → the same `ImageOut` as `POST /images`, 409 while a chunk is missing;
+  `DELETE /uploads/{id}` drops a cancelled session. Sessions live under `data/uploads/.partial/<id>/`, are
+  swept after a day and all at startup. An unknown id is 404 `That upload is no longer open; start it again.`
 - `GET /images?limit=24&before=<id>` → `{items: ImageOut[], next}`, paged exactly like
   `GET /gallery`; `GET /images/{id}`, `DELETE /images/{id}`
 - `PUT /images/{id}/published` {published} → the updated image; 409 when publishing without an export (§ 5.5)

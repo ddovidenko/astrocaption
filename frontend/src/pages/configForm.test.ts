@@ -37,6 +37,7 @@ describe('config form helpers', () => {
       public_gallery_enabled: true,
       nova_api_key_set: true,
       solve_timeout_seconds: 900,
+      upload_chunk_mb: 16,
       default_style: { font_file: 'Roboto-Bold.ttf' },
       style_defaults: {
         font_file: 'Inter-Regular.ttf',
@@ -106,6 +107,7 @@ describe('config form helpers', () => {
       public_gallery_enabled: true,
       nova_api_key_set: true,
       solve_timeout_seconds: 900,
+      upload_chunk_mb: 16,
       default_style: { font_file: 'Roboto-Bold.ttf' },
       style_defaults: {
         font_file: 'Inter-Regular.ttf',
