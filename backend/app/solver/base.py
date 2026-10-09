@@ -28,6 +28,11 @@ class SolveRequest:
     image_path: Path
     scale_arcsec_per_px: float | None = None  # in pixels of ``image_path``
     scale_tolerance_pct: float = 20.0
+    downsample_factor: int | None = None
+    # A position hint: all three or none (SolveHints enforces it); degrees.
+    center_ra: float | None = None
+    center_dec: float | None = None
+    radius_deg: float | None = None
 
 
 @dataclass(frozen=True)

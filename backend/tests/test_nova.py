@@ -134,13 +134,42 @@ def test_full_flow_replays_fixtures(
     assert b"fakejpeg" in upload_body
 
 
+def upload_params(replay: Replay) -> dict[str, Any]:
+    _, body = replay.requests[1]
+    start = body.index(b"{", body.index(b'name="request-json"'))
+    params: dict[str, Any] = json.loads(body[start : body.index(b"}", start) + 1])
+    return params
+
+
 def test_no_hints_means_no_scale_fields(tmp_path: Path) -> None:
     replay = Replay(happy_routes())
     image = tmp_path / "solve.jpg"
     image.write_bytes(b"x")
     run(make_solver(replay).submit(SolveRequest(image)))
-    _, body = replay.requests[1]
-    assert b"scale_units" not in body
+    params = upload_params(replay)
+    assert not {"scale_units", "downsample_factor", "center_ra", "center_dec", "radius"} & set(
+        params
+    )
+
+
+def test_downsample_and_position_hints_are_passed_through(tmp_path: Path) -> None:
+    """#29: the extra nova upload parameters, named as the API names them."""
+    replay = Replay(happy_routes())
+    image = tmp_path / "solve.jpg"
+    image.write_bytes(b"x")
+    run(
+        make_solver(replay).submit(
+            SolveRequest(
+                image, downsample_factor=2, center_ra=83.8, center_dec=-5.4, radius_deg=3.0
+            )
+        )
+    )
+    params = upload_params(replay)
+    assert params["downsample_factor"] == 2
+    assert params["center_ra"] == pytest.approx(83.8)
+    assert params["center_dec"] == pytest.approx(-5.4)
+    assert params["radius"] == pytest.approx(3.0)
+    assert "scale_units" not in params
 
 
 def test_bad_api_key_is_reported_without_leaking_it(tmp_path: Path) -> None:

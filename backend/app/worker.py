@@ -221,6 +221,10 @@ class SolveWorker:
                 image_path=solve_copy,
                 scale_arcsec_per_px=hint * scale if hint is not None else None,
                 scale_tolerance_pct=hints.scale_tolerance_pct if hints else 20.0,
+                downsample_factor=hints.downsample_factor if hints else None,
+                center_ra=hints.center_ra if hints else None,
+                center_dec=hints.center_dec if hints else None,
+                radius_deg=hints.radius_deg if hints else None,
             )
             submission_id = await solver.submit(request)
             # Only now does the row leave PENDING: the new ids replace the old ones atomically.

@@ -174,6 +174,57 @@ describe('ImageCard downloads', () => {
   })
 })
 
+// #29: the rarer nova levers sit behind More hints; only what is filled in is sent.
+describe('ImageCard re-solve hints', () => {
+  const failed = () => image({ solve_status: 'failed', solve_error: 'nope' })
+
+  it('keeps downsample and the position hint behind a toggle', () => {
+    renderCard(failed())
+    expect(screen.queryByLabelText('Downsample')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'More hints' }))
+    expect(screen.getByLabelText('Downsample')).toBeTruthy()
+    expect(screen.getByLabelText('Centre RA °')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Fewer hints' }))
+    expect(screen.queryByLabelText('Downsample')).toBeNull()
+  })
+
+  it('sends only the hints that were filled in', async () => {
+    vi.mocked(api.resolve).mockResolvedValue(image({ solve_status: 'pending' }))
+    renderCard(failed())
+    fireEvent.click(screen.getByRole('button', { name: 'More hints' }))
+    fireEvent.change(screen.getByLabelText('Downsample'), { target: { value: '2' } })
+    fireEvent.change(screen.getByLabelText('Centre RA °'), { target: { value: '83.8' } })
+    fireEvent.change(screen.getByLabelText('Dec °'), { target: { value: '-5.4' } })
+    fireEvent.change(screen.getByLabelText('Radius °'), { target: { value: '3' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Re-solve' }))
+    await waitFor(() => expect(api.resolve).toHaveBeenCalledTimes(1))
+    expect(api.resolve).toHaveBeenCalledWith('img-1', {
+      downsample_factor: 2,
+      center_ra: 83.8,
+      center_dec: -5.4,
+      radius_deg: 3,
+    })
+  })
+
+  it('sends a half position hint as given, so the server can refuse it in words', async () => {
+    vi.mocked(api.resolve).mockResolvedValue(image({ solve_status: 'pending' }))
+    renderCard(failed())
+    fireEvent.click(screen.getByRole('button', { name: 'More hints' }))
+    fireEvent.change(screen.getByLabelText('Centre RA °'), { target: { value: '83.8' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Re-solve' }))
+    await waitFor(() => expect(api.resolve).toHaveBeenCalledTimes(1))
+    expect(api.resolve).toHaveBeenCalledWith('img-1', { center_ra: 83.8 })
+  })
+
+  it('sends nothing when the inputs are blank', async () => {
+    vi.mocked(api.resolve).mockResolvedValue(image({ solve_status: 'pending' }))
+    renderCard(failed())
+    fireEvent.click(screen.getByRole('button', { name: 'Re-solve' }))
+    await waitFor(() => expect(api.resolve).toHaveBeenCalledTimes(1))
+    expect(api.resolve).toHaveBeenCalledWith('img-1', undefined)
+  })
+})
+
 // #173: Edit and Export follow the layout, not the status. A failed re-solve keeps the previous
 // layout (the editor edits and exports it); a never-solved failure and a solve in flight have none.
 describe('ImageCard edit and export availability', () => {

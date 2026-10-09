@@ -14,6 +14,7 @@ import {
   type HealthOut,
   type ImageOut,
   type Page,
+  type SolveHints,
 } from '../api'
 import { elapsed, exportOf, exportState, relativeTime } from '../exportStatus'
 import ConfirmInline from '../ConfirmInline'
@@ -336,6 +337,12 @@ export function ImageCard({
   const shownError = error?.updatedAt === image.updated_at ? error.message : null
   const [focal, setFocal] = useState('')
   const [pixel, setPixel] = useState('')
+  // The rarer nova levers (#29) sit behind a toggle so a failed card stays the size it was.
+  const [moreHints, setMoreHints] = useState(false)
+  const [downsample, setDownsample] = useState('')
+  const [ra, setRa] = useState('')
+  const [dec, setDec] = useState('')
+  const [radius, setRadius] = useState('')
   const [quality, setQuality] = useState<number | null>(null)
   const [scale, setScale] = useState(1)
   const [lastExport, setLastExport] = useState<ExportOut | null>(null)
@@ -360,10 +367,19 @@ export function ImageCard({
   }
 
   const resolve = () => {
+    const hints: SolveHints = {}
     const f = Number(focal)
     const p = Number(pixel)
-    const hints = f > 0 && p > 0 ? { focal_length_mm: f, pixel_size_um: p } : undefined
-    return run(() => api.resolve(image.id, hints))
+    if (f > 0 && p > 0) Object.assign(hints, { focal_length_mm: f, pixel_size_um: p })
+    if (downsample !== '') hints.downsample_factor = Number(downsample)
+    // Sent whenever any of the three is filled in: a half position hint is the server's 422
+    // to word, not something the card quietly drops.
+    if (ra !== '' || dec !== '' || radius !== '') {
+      if (ra !== '') hints.center_ra = Number(ra)
+      if (dec !== '') hints.center_dec = Number(dec)
+      if (radius !== '') hints.radius_deg = Number(radius)
+    }
+    return run(() => api.resolve(image.id, Object.keys(hints).length ? hints : undefined))
   }
   const checkAgain = () => run(() => api.checkSolve(image.id))
   const exportNow = () =>
@@ -519,7 +535,63 @@ export function ImageCard({
                       value={pixel}
                       onChange={(e) => setPixel(e.target.value)}
                     />
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => setMoreHints((v) => !v)}
+                      aria-expanded={moreHints}
+                    >
+                      {moreHints ? 'Fewer hints' : 'More hints'}
+                    </button>
                   </span>
+                  {moreHints && (
+                    <span className="hints">
+                      <label className="hints">
+                        Downsample
+                        <select
+                          value={downsample}
+                          onChange={(e) => setDownsample(e.target.value)}
+                          title="Shrinks the image before nova looks for stars; try 2 or 4 on a noisy or saturated field"
+                        >
+                          <option value="">none</option>
+                          <option value="2">2</option>
+                          <option value="4">4</option>
+                        </select>
+                      </label>
+                      <input
+                        type="number"
+                        placeholder="Centre RA °"
+                        aria-label="Centre RA °"
+                        min={0}
+                        max={360}
+                        step="any"
+                        value={ra}
+                        onChange={(e) => setRa(e.target.value)}
+                        title="Where the field is, degrees (0–360); narrows the search with Dec and radius"
+                      />
+                      <input
+                        type="number"
+                        placeholder="Dec °"
+                        aria-label="Dec °"
+                        min={-90}
+                        max={90}
+                        step="any"
+                        value={dec}
+                        onChange={(e) => setDec(e.target.value)}
+                      />
+                      <input
+                        type="number"
+                        placeholder="Radius °"
+                        aria-label="Radius °"
+                        min={0}
+                        max={180}
+                        step="any"
+                        value={radius}
+                        onChange={(e) => setRadius(e.target.value)}
+                        title="How far from the centre nova should look, degrees"
+                      />
+                    </span>
+                  )}
                 </>
               )}
               <button className="secondary" onClick={resolve} disabled={working}>

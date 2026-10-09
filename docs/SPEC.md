@@ -117,8 +117,11 @@ No multi-user, no roles, no invites in v1.
    guard dropped it): the card says so and offers Re-solve again, and `POST /images/{id}/solve`
    accepts it under the same rule, refusing (409) only while the worker is on the row or has it
    queued. `GET /config` carries the timeout as `solve_timeout_seconds` for this (#80).
-6. On failure: show nova's job log link and let the owner retry, optionally with scale hints
-   (focal length / pixel size passed as nova's `scale_units` etc.). **Check again** is offered only
+6. On failure: show nova's job log link and let the owner retry, optionally with hints: focal
+   length / pixel size (passed as nova's `scale_units` etc.) inline, and behind **More hints** a
+   downsample factor (2 or 4, nova's `downsample_factor`) and a position hint — centre RA and Dec
+   plus a search radius, in degrees (`center_ra`, `center_dec`, `radius`), which the server
+   accepts only as all three together (plain 422 otherwise) (#29). **Check again** is offered only
    after a timeout ("Timed out after…"): it resumes polling the submission and job the row still
    holds, without uploading anything again (#10), and ignores the scale hints — a resume never
    builds a new request, so hints apply to Re-solve. It is never offered after nova reported a
@@ -304,7 +307,7 @@ images
   nova_submission_id, nova_job_id  int?
   wcs_text      text?
   calibration   json?  (nova's ra, dec, radius, pixscale, orientation, parity)
-  solve_hints   json?  (focal length / pixel size from the last Re-solve; kept so a restart reuses them)
+  solve_hints   json?  (focal length / pixel size, downsample factor, centre RA/Dec + radius from the last Re-solve; kept so a restart reuses them)
   published     bool
   exported_at   text?
   updated_at
@@ -381,7 +384,7 @@ Owner (cookie session):
 - `GET /images?limit=24&before=<id>` → `{items: ImageOut[], next}`, paged exactly like
   `GET /gallery`; `GET /images/{id}`, `DELETE /images/{id}`
 - `PUT /images/{id}/published` {published} → the updated image; 409 when publishing without an export (§ 5.5)
-- `POST /images/{id}/solve` (re-solve, optional scale hints)
+- `POST /images/{id}/solve` (re-solve, optional hints: scale, downsample factor, centre + radius)
 - `POST /images/{id}/check` (check again: resume polling the stored nova job without uploading, #10).
   409 unless the row's `check_available` is true (a failed solve that timed out and still holds a
   submission id); `ImageOut.check_available` is what the card draws the button from.
