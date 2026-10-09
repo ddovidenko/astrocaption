@@ -380,6 +380,10 @@ export function uploadRequest<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error(UPLOAD_CANCELLED))
+      return
+    }
     const xhr = new XHR()
     xhr.open(method, url)
     // Cancel (#80): the browser stops sending and fires onabort, which rejects below.
@@ -440,13 +444,17 @@ export async function uploadChunked(
   signal?: AbortSignal,
   XHR: typeof XMLHttpRequest = XMLHttpRequest,
 ): Promise<ImageOut> {
-  const session = await request<UploadSessionOut>(
-    '/api/uploads',
-    json('POST', { name: file.name, size: file.size, title: title.trim() || null }),
-  )
-  const base = `/api/uploads/${session.id}`
+  let base: string | null = null
   try {
+    const session = await request<UploadSessionOut>('/api/uploads', {
+      ...json('POST', { name: file.name, size: file.size, title: title.trim() || null }),
+      signal,
+    })
+    base = `/api/uploads/${session.id}`
     for (let n = 0; n < session.chunks; n++) {
+      // A Cancel that landed between two chunks: the abort listener only fires on the request
+      // in flight, so the gap has to look for itself.
+      if (signal?.aborted) throw new Error(UPLOAD_CANCELLED)
       const offset = n * session.chunk_bytes
       const piece = file.slice(offset, Math.min(offset + session.chunk_bytes, file.size))
       const report = (loaded: number) => onProgress?.(offset + loaded, file.size)
@@ -464,7 +472,7 @@ export async function uploadChunked(
   } catch (err) {
     if (signal?.aborted) {
       // Best effort: the server sweeps what is left after a day anyway.
-      void fetch(base, { method: 'DELETE', keepalive: true }).catch(() => undefined)
+      if (base) void fetch(base, { method: 'DELETE', keepalive: true }).catch(() => undefined)
       throw new Error(UPLOAD_CANCELLED, { cause: err })
     }
     throw err

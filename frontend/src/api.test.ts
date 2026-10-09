@@ -320,6 +320,19 @@ describe('uploadChunked (#166)', () => {
     expect(calls.some((c) => c.url.endsWith('/finish'))).toBe(false)
   })
 
+  it('a cancel between two chunks stops the next one from going out', async () => {
+    stubFetch()
+    const controller = new AbortController()
+    const p = uploadChunked(file, '', undefined, controller.signal, XHR)
+    const first = await chunkRequest(0)
+    first.respond(204, '')
+    controller.abort()
+    await expect(p).rejects.toMatchObject({ message: 'The upload was cancelled.' })
+    expect(FakeXHR.all.map((x) => x.url)).toEqual(['/api/uploads/s1/0'])
+    await vi.waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true))
+    expect(calls.some((c) => c.url.endsWith('/finish'))).toBe(false)
+  })
+
   it('surfaces the finish refusal as the server wrote it', async () => {
     stubFetch(415)
     const p = uploadChunked(file, '', undefined, undefined, XHR)
