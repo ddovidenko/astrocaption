@@ -101,7 +101,11 @@ class NovaSolver:
                 )
             if request.downsample_factor is not None:
                 params["downsample_factor"] = request.downsample_factor
-            if request.center_ra is not None and request.center_dec is not None:
+            if (
+                request.center_ra is not None
+                and request.center_dec is not None
+                and request.radius_deg is not None
+            ):
                 params.update(
                     center_ra=request.center_ra,
                     center_dec=request.center_dec,
