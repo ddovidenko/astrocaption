@@ -19,7 +19,7 @@ from pathlib import Path
 from .config import DEFAULT_POLL_SECONDS, DEFAULT_SOLVE_TIMEOUT_SECONDS, Settings, SettingsSource
 from .db import Database
 from .layout import build_default_annotations, rematch_annotations
-from .models import ImageRecord, SolveFailureKind, SolveStatus
+from .models import Calibration, ImageRecord, SolveFailureKind, SolveStatus
 from .objects import objects_from_nova
 from .solver import JobState, Solver, SolveRequest, SolverError, TransientSolverError
 from .solver.nova import status_url
@@ -259,16 +259,8 @@ class SolveWorker:
             rec.id, submission_id, deadline, lambda: solver.fetch_result(submission_id, jid)
         )
         self._ensure_present(rec.id)
-        await asyncio.to_thread(self._store_result, rec, scale, result.annotations, result.wcs_text)
-        self.db.update_image(
-            rec.id,
-            {
-                "solve_status": SolveStatus.SOLVED,
-                "solve_error": None,
-                "solve_failure": None,
-                "wcs_text": result.wcs_text or None,
-                "calibration": result.calibration,
-            },
+        await asyncio.to_thread(
+            self._store_result, rec, scale, result.annotations, result.wcs_text, result.calibration
         )
 
     async def _poll_until[T](
@@ -318,8 +310,10 @@ class SolveWorker:
         scale: float,
         annotations: object,
         wcs_text: str,
+        calibration: Calibration | None,
     ) -> None:
-        """Blocking part of a successful solve: files, objects and the default layout."""
+        """Blocking part of a successful solve: the files, then the objects, the layout and the
+        solved row in one transaction (#174)."""
         settings = self.settings
         directory = image_dir(settings, rec.id)
         (directory / "nova_annotations.json").write_text(
@@ -341,5 +335,15 @@ class SolveWorker:
             ann = rematch_annotations(
                 previous, old_objects, new_objects, rec.width, rec.height, fonts
             )
-        self.db.replace_objects(rec.id, new_objects)
-        self.db.save_annotations(ann)
+        self.db.store_solve_result(
+            rec.id,
+            new_objects,
+            ann,
+            {
+                "solve_status": SolveStatus.SOLVED,
+                "solve_error": None,
+                "solve_failure": None,
+                "wcs_text": wcs_text or None,
+                "calibration": calibration,
+            },
+        )

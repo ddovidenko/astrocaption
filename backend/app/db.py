@@ -216,6 +216,19 @@ def _load_labels(raw_json: str, image_id: str) -> list[Label]:
     return labels
 
 
+def _image_update(image_id: str, fields: Mapping[str, object]) -> tuple[str, dict[str, object]]:
+    """The ``UPDATE images`` statement and its parameters for ``fields`` plus a fresh
+    ``updated_at``; unknown columns are refused before anything is sent to SQLite."""
+    values = _encode(fields)
+    unknown = set(values) - set(IMAGE_COLUMNS)
+    if unknown:
+        raise ValueError(f"unknown image columns: {sorted(unknown)}")
+    values["updated_at"] = utcnow_iso()
+    assignments = ", ".join(f"{k} = :{k}" for k in values)
+    values["id"] = image_id
+    return f"UPDATE images SET {assignments} WHERE id = :id", values
+
+
 def _annotation_row(ann: Annotations) -> tuple[str, str]:
     """``(style_json, labels_json)`` for the ``annotations`` table's write path, shared by
     ``save_annotations`` and ``update_annotations_if_version``."""
@@ -354,19 +367,59 @@ class Database:
 
     def update_image(self, image_id: str, fields: Mapping[str, object]) -> None:
         """Update the given record fields; ``updated_at`` is always refreshed."""
-        values = _encode(fields)
-        unknown = set(values) - set(IMAGE_COLUMNS)
-        if unknown:
-            raise ValueError(f"unknown image columns: {sorted(unknown)}")
-        values["updated_at"] = utcnow_iso()
-        assignments = ", ".join(f"{k} = :{k}" for k in values)
-        values["id"] = image_id
+        sql, values = _image_update(image_id, fields)
         with self.connect() as conn:
-            cur = conn.execute(f"UPDATE images SET {assignments} WHERE id = :id", values)
+            cur = conn.execute(sql, values)
         if cur.rowcount == 0:
             # Allowed: the worker writes to rows a delete may have removed meanwhile. Said here
             # rather than passed over in silence (#80).
             log.debug("update_image: no row with id %s (fields %s)", image_id, sorted(values))
+
+    def store_solve_result(
+        self,
+        image_id: str,
+        objects: list[SolveObject],
+        ann: Annotations,
+        fields: Mapping[str, object],
+    ) -> bool:
+        """A finished solve, in one transaction (#174): the objects replaced, the layout
+        upserted and the row updated (``fields`` plus ``updated_at``), so a reader of
+        ``/objects`` and ``/annotations`` sees either the previous solve or this one, never the
+        new objects with the old labels. False, with nothing written, when the image row is
+        gone: a delete landed during the solve, and its objects and layout must not come back.
+        """
+        sql, values = _image_update(image_id, fields)
+        style_json, labels_json = _annotation_row(ann)
+        with self.connect() as conn:
+            conn.execute("BEGIN")
+            try:
+                cur = conn.execute(sql, values)
+                if cur.rowcount == 0:
+                    conn.execute("ROLLBACK")
+                    log.debug("store_solve_result: no row with id %s; nothing stored", image_id)
+                    return False
+                conn.execute("DELETE FROM objects WHERE image_id = ?", (image_id,))
+                conn.executemany(
+                    "INSERT INTO objects (image_id, id, catalog_names, type, x, y, radius)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        (image_id, o.id, json.dumps(o.catalog_names), o.type, o.x, o.y, o.radius)
+                        for o in objects
+                    ],
+                )
+                conn.execute(
+                    "INSERT INTO annotations (image_id, style_json, labels_json, version,"
+                    " updated_at) VALUES (?, ?, ?, ?, ?)"
+                    " ON CONFLICT (image_id) DO UPDATE SET style_json = excluded.style_json,"
+                    " labels_json = excluded.labels_json, version = excluded.version,"
+                    " updated_at = excluded.updated_at",
+                    (image_id, style_json, labels_json, ann.version, ann.updated_at),
+                )
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+        return True
 
     def delete_image(self, image_id: str) -> bool:
         with self.connect() as conn:

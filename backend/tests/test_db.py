@@ -8,7 +8,15 @@ import pytest
 
 from app.config import Settings
 from app.db import SCHEMA_VERSION, Database, UnknownCursor
-from app.models import Annotations, ImageRecord, Label, SolveHints, SolveStatus, StyleConfig
+from app.models import (
+    Annotations,
+    ImageRecord,
+    Label,
+    SolveHints,
+    SolveObject,
+    SolveStatus,
+    StyleConfig,
+)
 from tests.conftest import seed_image
 
 
@@ -406,3 +414,69 @@ def test_list_published_images_pages_the_filtered_rows(tmp_path: Path) -> None:
     assert page.next == "c"
     page = db.list_published_images(limit=2, before="c")
     assert ([r.id for r in page.items], page.next) == (["a"], None)
+
+
+def _solved(db: Database, image_id: str, object_ids: list[int], version: int) -> None:
+    objects = [
+        SolveObject(id=i, catalog_names=[f"NGC {i}"], type="galaxy", x=10.0 * i, y=20.0, radius=5)
+        for i in object_ids
+    ]
+    ann = Annotations(
+        image_id=image_id,
+        style=StyleConfig(),
+        labels=[Label(object_id=i) for i in object_ids],
+        version=version,
+    )
+    assert db.store_solve_result(
+        image_id, objects, ann, {"solve_status": SolveStatus.SOLVED, "solve_error": None}
+    )
+
+
+def test_store_solve_result_lands_objects_layout_and_status_together(settings: Settings) -> None:
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    _solved(db, rec.id, [1, 2], version=1)
+    stored = db.get_image(rec.id)
+    assert stored is not None and stored.solve_status == SolveStatus.SOLVED
+    assert [o.id for o in db.get_objects(rec.id)] == [1, 2]
+    ann = db.get_annotations(rec.id)
+    assert ann is not None and [lab.object_id for lab in ann.labels] == [1, 2]
+    # A re-solve replaces all three at once; the previous objects are gone, not merged.
+    _solved(db, rec.id, [3], version=2)
+    assert [o.id for o in db.get_objects(rec.id)] == [3]
+    ann = db.get_annotations(rec.id)
+    assert ann is not None and ann.version == 2 and [lab.object_id for lab in ann.labels] == [3]
+
+
+def test_store_solve_result_that_fails_part_way_leaves_the_previous_solve(
+    settings: Settings,
+) -> None:
+    """A duplicate object id breaks the insert after the row update and the delete: everything
+    rolls back, so a reader never sees the solved row with no objects (#174)."""
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    _solved(db, rec.id, [1, 2], version=1)
+    before = (db.get_image(rec.id), db.get_objects(rec.id), db.get_annotations(rec.id))
+    dup = [
+        SolveObject(id=7, catalog_names=["M 7"], type="cluster", x=1, y=1),
+        SolveObject(id=7, catalog_names=["M 7"], type="cluster", x=2, y=2),
+    ]
+    ann = Annotations(image_id=rec.id, style=StyleConfig(), labels=[Label(object_id=7)], version=2)
+    with pytest.raises(Exception):  # noqa: B017 - sqlite3.IntegrityError, by way of the driver
+        db.store_solve_result(rec.id, dup, ann, {"solve_status": SolveStatus.SOLVED})
+    assert (db.get_image(rec.id), db.get_objects(rec.id), db.get_annotations(rec.id)) == before
+
+
+def test_store_solve_result_for_a_deleted_image_writes_nothing(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    assert db.delete_image(rec.id)
+    objects = [SolveObject(id=1, catalog_names=["M 1"], type="nebula", x=1, y=1)]
+    ann = Annotations(image_id=rec.id, style=StyleConfig(), labels=[Label(object_id=1)])
+    with caplog.at_level(logging.DEBUG, logger="app.db"):
+        assert not db.store_solve_result(rec.id, objects, ann, {"solve_status": SolveStatus.SOLVED})
+    assert "store_solve_result: no row with id img-1" in caplog.text
+    assert db.get_objects(rec.id) == []
+    assert db.get_annotations(rec.id) is None
