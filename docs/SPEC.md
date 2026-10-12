@@ -491,6 +491,11 @@ with the built-in default and a server-log warning naming the file; `GET /annota
 - A new password is 8 to 1024 characters wherever it is chosen (setup page, `ASTROCAPTION_PASSWORD`,
   CLI, config page); the CLI refuses to write a `config.json` owned by another user and says which command to run
   as whom, so a reset can never leave the app unable to read its own config.
+- Every owner-password write (setup page, `ASTROCAPTION_PASSWORD`, CLI, config page) goes through one writer
+  that holds the cross-process `config.json` lock from the read to the read-back (#49): the decision (setup still
+  required; the hash just verified still the stored one) is taken on what the file holds under the lock, and a
+  file that reads back without the pair just written is reported rather than claimed. A password change that
+  finds another hash in the file (a reset from the shell meanwhile) is a 409 and writes nothing.
 
 ## 11. Docker & distribution
 

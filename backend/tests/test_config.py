@@ -5,16 +5,26 @@ import logging
 import os
 import stat
 import threading
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
-from app.auth import set_owner_password, verify_password
+from app.auth import (
+    PasswordNotStored,
+    PasswordRefused,
+    require_setup,
+    set_owner_password,
+    verify_password,
+)
 from app.config import (
     CONFIG_FIX_HINT,
     DEFAULT_POLL_SECONDS,
     DEFAULT_SOLVE_TIMEOUT_SECONDS,
     ConfigError,
+    SettingsSource,
+    _merge_and_write,
+    config_write_lock,
     load_settings,
     update_config,
 )
@@ -80,7 +90,7 @@ def test_half_written_config_reopens_setup(
     assert s.setup_required is True and s.auth_ready is False and s.config_error is None
     assert "session_secret" in caplog.text and "value" not in caplog.text
 
-    set_owner_password(s, "hunter2hunter2")
+    set_owner_password(SettingsSource(env=env_for(tmp_path)), "hunter2hunter2")
     after = load_settings(env_for(tmp_path))
     assert after.auth_ready and after.setup_required is False
     assert after.password_hash and verify_password("hunter2hunter2", after.password_hash)
@@ -172,8 +182,9 @@ def test_update_config_survives_a_chmod_that_is_refused(
 
 
 def test_set_owner_password_writes_hash_secret_and_optional_fields(tmp_path: Path) -> None:
-    before = load_settings(env_for(tmp_path))
-    set_owner_password(before, "hunter2hunter2", nova_api_key="  key  ", site_title="")
+    source = SettingsSource(env=env_for(tmp_path))
+    written = set_owner_password(source, "hunter2hunter2", nova_api_key="  key  ", site_title="")
+    assert written.before.setup_required is True
     after = load_settings(env_for(tmp_path))
     assert after.auth_ready and after.setup_required is False
     assert after.password_hash and verify_password("hunter2hunter2", after.password_hash)
@@ -186,15 +197,71 @@ def test_set_owner_password_writes_hash_secret_and_optional_fields(tmp_path: Pat
 def test_set_owner_password_skips_fields_pinned_by_the_environment(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    before = load_settings(env_for(tmp_path, NOVA_API_KEY="from-env"))
-    assert set(before.locked_by) == {"nova_api_key"}
+    source = SettingsSource(env=env_for(tmp_path, NOVA_API_KEY="from-env"))
+    assert set(source.current().locked_by) == {"nova_api_key"}
     with caplog.at_level(logging.INFO, logger="app.auth"):
-        set_owner_password(before, "hunter2hunter2", nova_api_key="typed-key", site_title="My Sky")
+        set_owner_password(source, "hunter2hunter2", nova_api_key="typed-key", site_title="My Sky")
     written = json.loads((tmp_path / "config.json").read_text())
     assert "nova_api_key" not in written
     assert written["site_title"] == "My Sky"
     assert "setup: nova_api_key ignored, pinned by the environment" in caplog.text
     assert "typed-key" not in caplog.text and "site_title ignored" not in caplog.text
+
+
+def test_set_owner_password_decides_and_writes_under_the_config_lock(tmp_path: Path) -> None:
+    """The CLI and the app are two processes on one file (#49): while one holds the lock, the
+    other's read, decision and write all wait, so a decision is never taken on a stale read."""
+    path = tmp_path / "config.json"
+    source = SettingsSource(env=env_for(tmp_path))
+    done = threading.Event()
+
+    def write() -> None:
+        set_owner_password(source, "hunter2hunter2", precondition=require_setup)
+        done.set()
+
+    with config_write_lock(path):
+        worker = threading.Thread(target=write)
+        worker.start()
+        assert not done.wait(0.3)  # still waiting on the lock
+        assert not path.exists()  # and has read nothing it could have decided on
+    worker.join(5)
+    assert done.is_set()
+    assert load_settings(env_for(tmp_path)).auth_ready
+
+
+def test_set_owner_password_refuses_on_what_the_file_holds_now(tmp_path: Path) -> None:
+    """Setup completed (by the CLI, say) since the caller last looked: the precondition sees
+    the fresh file and nothing is written - not even a new session secret."""
+    source = SettingsSource(env=env_for(tmp_path))
+    set_owner_password(source, "hunter2hunter2")
+    before = (tmp_path / "config.json").read_bytes()
+    with pytest.raises(PasswordRefused, match="already set"):
+        set_owner_password(source, "another-password", precondition=require_setup)
+    assert (tmp_path / "config.json").read_bytes() == before
+    (tmp_path / "config.json").write_text("{nope")
+    with pytest.raises(ConfigError):
+        set_owner_password(source, "another-password")
+    assert (tmp_path / "config.json").read_text() == "{nope"
+
+
+def test_set_owner_password_reports_a_read_back_that_is_not_what_it_wrote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The write landed but the file reads back without the pair (an I/O fault, or a writer
+    that bypassed the lock): the caller is told, rather than left to claim a sign-in works."""
+    path = tmp_path / "config.json"
+
+    def write_then_lose_the_secret(p: Path, updates: Mapping[str, object | None]) -> None:
+        _merge_and_write(p, updates)  # not update_config: the caller holds the lock
+        data = json.loads(p.read_text())
+        data.pop("session_secret")
+        p.write_text(json.dumps(data))
+
+    monkeypatch.setattr("app.auth._merge_and_write", write_then_lose_the_secret)
+    with pytest.raises(PasswordNotStored, match="session secret"):
+        set_owner_password(SettingsSource(env=env_for(tmp_path)), "hunter2hunter2")
+    assert "password_hash" in json.loads(path.read_text())
+    assert not load_settings(env_for(tmp_path)).auth_ready
 
 
 def test_settings_source_reload_reads_a_same_stamp_write(tmp_path: Path) -> None:

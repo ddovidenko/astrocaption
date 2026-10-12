@@ -424,14 +424,22 @@ def write_and_reload[T](source: SettingsSource, write: Callable[[], T]) -> tuple
 
 
 @contextmanager
-def _config_write_lock(path: Path) -> Iterator[None]:
+def config_write_lock(path: Path) -> Iterator[None]:
     """Hold ``config.json.lock`` exclusively while config.json is read and rewritten.
 
     The app's own writers share an asyncio lock, but the CLI (``app.cli reset-password``)
     is a second process on the same file: without this, its read-modify-write could
     interleave with the config page's and drop one of the two changes. The lock file is
-    only a handle for ``flock`` - it stays empty, and a leftover one is harmless.
+    only a handle for ``flock`` - it stays empty, and a leftover one is harmless. It lives
+    next to config.json, so the data directory is created here if it is missing.
+
+    ``update_config`` takes it around its own merge; a caller whose *decision* must also be
+    covered (``auth.set_owner_password``: read, decide, write, read back) holds it itself and
+    writes with ``_merge_and_write``. It must not call ``update_config`` while holding it:
+    ``flock`` locks conflict between two descriptors in the same process, so that would
+    wait on itself forever.
     """
+    path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path.with_suffix(".json.lock"), os.O_WRONLY | os.O_CREAT, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
@@ -450,33 +458,37 @@ def update_config(path: Path, updates: Mapping[str, object | None]) -> None:
     A file that cannot be parsed is left untouched and reported, never replaced. Parse,
     write and rename happen under a cross-process lock, so two writers never lose an update.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with _config_write_lock(path):
-        current: dict[str, object] = _parse_config(path) if path.is_file() else {}
-        for key, value in updates.items():
-            if value is None:
-                current.pop(key, None)
-            else:
-                current[key] = value
-        # A unique temp name, not a fixed one: two writers (and a crashed earlier run)
-        # must never share the half-written file that is about to be published.
-        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".config-", suffix=".tmp")
-        tmp = Path(tmp_name)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(current, fh, indent=2)
-                fh.write("\n")
-                fh.flush()
-                os.fsync(fh.fileno())  # the bytes, before the rename that publishes them
-            os.replace(tmp, path)
-        except BaseException:
-            tmp.unlink(missing_ok=True)
-            raise
-        _fsync_dir(path.parent)  # and the rename itself, or a crash can lose the whole file
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            log.warning("could not restrict permissions on %s", path.name)
+    with config_write_lock(path):
+        _merge_and_write(path, updates)
+
+
+def _merge_and_write(path: Path, updates: Mapping[str, object | None]) -> None:
+    """``update_config`` without the lock: for a caller that already holds ``config_write_lock``."""
+    current: dict[str, object] = _parse_config(path) if path.is_file() else {}
+    for key, value in updates.items():
+        if value is None:
+            current.pop(key, None)
+        else:
+            current[key] = value
+    # A unique temp name, not a fixed one: two writers (and a crashed earlier run)
+    # must never share the half-written file that is about to be published.
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".config-", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(current, fh, indent=2)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())  # the bytes, before the rename that publishes them
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    _fsync_dir(path.parent)  # and the rename itself, or a crash can lose the whole file
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        log.warning("could not restrict permissions on %s", path.name)
 
 
 def _fsync_dir(directory: Path) -> None:

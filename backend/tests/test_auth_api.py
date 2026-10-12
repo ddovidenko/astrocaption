@@ -8,6 +8,7 @@ from collections.abc import Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -16,6 +17,7 @@ from starlette.routing import BaseRoute
 
 from app.api.auth import (
     PASSWORD_CHANGED_BUT_UNREADABLE,
+    PASSWORD_CHANGED_MEANWHILE,
     SAME_PASSWORD_MESSAGE,
     WRONG_CURRENT_MESSAGE,
 )
@@ -23,10 +25,11 @@ from app.auth import (
     COOKIE_NAME,
     LoginLimiter,
     hash_password,
+    set_owner_password,
     validate_new_password,
     verify_password,
 )
-from app.config import SettingsSource, update_config
+from app.config import Settings, SettingsSource, update_config
 from tests.conftest import TEST_PASSWORD, env_app_client, login
 
 # Routes that must stay reachable while logged out: health for the Docker healthcheck,
@@ -533,11 +536,16 @@ def test_password_change_500_when_the_file_cannot_be_read_back(
     with env_app_client(tmp_path, monkeypatch) as client:
         client.post("/api/setup", json={"password": "hunter2hunter2"})
         login(client, "hunter2hunter2")
-        monkeypatch.setattr(
-            SettingsSource,
-            "reload",
-            lambda self: replace(self.current(), password_hash=None, session_secret=None),
-        )
+        # The first reload is the one under the lock that decides; only the read-back lies.
+        real_reload, reloads = SettingsSource.reload, iter(range(10**6))
+
+        def reload_then_lose_the_pair(self: SettingsSource) -> Settings:
+            fresh = real_reload(self)
+            if next(reloads) == 0:
+                return fresh
+            return replace(fresh, password_hash=None, session_secret=None)
+
+        monkeypatch.setattr(SettingsSource, "reload", reload_then_lose_the_pair)
         with caplog.at_level(logging.ERROR, logger="app.api.auth"):
             resp = client.post(
                 "/api/password",
@@ -551,6 +559,41 @@ def test_password_change_500_when_the_file_cannot_be_read_back(
     # The new password is on disk: the sentence above is the truth, not a guess.
     stored = json.loads((tmp_path / "data" / "config.json").read_text())["password_hash"]
     assert verify_password("new-password-1", stored)
+
+
+def test_password_change_refuses_when_the_hash_changed_between_check_and_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A CLI reset lands after the current password was verified but before the write (#49):
+    the write re-reads under the lock, sees another hash, and refuses rather than overwrite
+    the reset. Nothing is written, so the reset password is the one that signs in."""
+    config_path = tmp_path / "data" / "config.json"
+
+    def reset_lands_first(*args: Any, **kwargs: Any) -> Any:
+        update_config(
+            config_path,
+            {"password_hash": hash_password("reset-from-shell"), "session_secret": "x" * 43},
+        )
+        return set_owner_password(*args, **kwargs)
+
+    with env_app_client(tmp_path, monkeypatch) as client:
+        client.post("/api/setup", json={"password": "hunter2hunter2"})
+        login(client, "hunter2hunter2")
+        monkeypatch.setattr("app.api.auth.set_owner_password", reset_lands_first)
+        with caplog.at_level(logging.WARNING, logger="app.api.auth"):
+            resp = client.post(
+                "/api/password",
+                json={"current_password": "hunter2hunter2", "new_password": "new-password-1"},
+            )
+        assert resp.status_code == 409
+        assert resp.json() == {"detail": PASSWORD_CHANGED_MEANWHILE}
+        assert "set-cookie" not in resp.headers
+        assert "changed between the check and the write" in caplog.text
+        assert "new-password-1" not in caplog.text and "reset-from-shell" not in caplog.text
+        stored = json.loads(config_path.read_text())["password_hash"]
+        assert verify_password("reset-from-shell", stored)
+        assert client.post("/api/login", json={"password": "new-password-1"}).status_code == 401
+        assert client.post("/api/login", json={"password": "reset-from-shell"}).status_code == 204
 
 
 def test_password_change_needs_a_session(anon_client: TestClient) -> None:

@@ -15,8 +15,9 @@ import logging
 import secrets
 import time
 from collections.abc import Callable
+from typing import NamedTuple
 
-from .config import Settings, update_config
+from .config import ConfigError, Settings, SettingsSource, _merge_and_write, config_write_lock
 from .models import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH
 
 log = logging.getLogger(__name__)
@@ -199,36 +200,91 @@ class LoginLimiter:
         self._locked_until = 0.0
 
 
+class PasswordRefused(Exception):
+    """The caller's precondition said no once config.json was read under the lock; nothing
+    was written. ``reason`` is for the caller and the log, never the response."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class PasswordNotStored(Exception):
+    """The write landed, but config.json read back without the pair just written (an I/O
+    fault, or a writer that bypassed the lock): the password may well have changed, yet the
+    app cannot sign anybody in with it. ``detail`` is for the log."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+class PasswordWrite(NamedTuple):
+    password_hash: str
+    session_secret: str
+    before: Settings
+    """What config.json held when the lock was taken (the CLI words its report from it)."""
+
+
+def require_setup(settings: Settings) -> str | None:
+    """The precondition first-run setup shares between the route and ``ASTROCAPTION_PASSWORD``."""
+    return None if settings.setup_required else "an owner password is already set"
+
+
 def set_owner_password(
-    settings: Settings,
+    source: SettingsSource,
     password: str,
     *,
     nova_api_key: str | None = None,
     site_title: str | None = None,
-) -> tuple[str, str]:
-    """Write the owner password hash and a fresh session secret (SPEC § 5.1 step 4).
+    precondition: Callable[[Settings], str | None] | None = None,
+) -> PasswordWrite:
+    """Write the owner password hash and a fresh session secret (SPEC § 5.1 step 4, § 10).
 
-    Returns the ``(password_hash, session_secret)`` pair it wrote, so a caller that needs to
-    mint a session from it uses what this call stored rather than whatever a later read of
-    config.json happens to find (the CLI and setup ignore it).
+    The one writer of the owner password, for setup, ``ASTROCAPTION_PASSWORD``, the CLI and
+    the password change (#49). It holds the cross-process config lock from the read to the
+    read-back, so the decision is taken on what the file holds *now*, not on a read from
+    before a prompt or a scrypt: config.json is re-read under the lock, a ``config_error``
+    raises ``ConfigError``, ``precondition`` (given the fresh settings) may refuse with a
+    reason (``PasswordRefused``, nothing written), the pair is written, and the file is read
+    back: a result that is not a usable pair, or not the pair just written, raises
+    ``PasswordNotStored``. Every read goes through ``source.reload()``, so the running app
+    sees the change at once.
 
-    ``nova_api_key``/``site_title`` are skipped when ``settings.locked_by`` already pins
+    Returns the pair it wrote, so a caller that needs to mint a session from it uses what
+    this call stored rather than whatever a later read of config.json happens to find.
+
+    ``nova_api_key``/``site_title`` are skipped when the fresh settings' ``locked_by`` pins
     them: the environment variable wins regardless, so writing the form value would only
     park a stale one in config.json that never takes effect.
     """
-    password_hash = hash_password(password)
-    session_secret = secrets.token_urlsafe(32)
-    updates: dict[str, object | None] = {
-        "password_hash": password_hash,
-        "session_secret": session_secret,
-    }
-    for name, raw in (("nova_api_key", nova_api_key), ("site_title", site_title)):
-        value = raw.strip() if raw else ""
-        if not value:
-            continue
-        if name in settings.locked_by:
-            log.info("setup: %s ignored, pinned by the environment", name)
-            continue
-        updates[name] = value
-    update_config(settings.config_path, updates)
-    return password_hash, session_secret
+    config_path = source.current().config_path  # fixed for the life of the process
+    with config_write_lock(config_path):
+        before = source.reload()
+        if before.config_error is not None:
+            raise ConfigError(before.config_error)
+        if precondition is not None and (reason := precondition(before)) is not None:
+            raise PasswordRefused(reason)
+        password_hash = hash_password(password)
+        session_secret = secrets.token_urlsafe(32)
+        updates: dict[str, object | None] = {
+            "password_hash": password_hash,
+            "session_secret": session_secret,
+        }
+        for name, raw in (("nova_api_key", nova_api_key), ("site_title", site_title)):
+            value = raw.strip() if raw else ""
+            if not value:
+                continue
+            if name in before.locked_by:
+                log.info("setup: %s ignored, pinned by the environment", name)
+                continue
+            updates[name] = value
+        _merge_and_write(config_path, updates)
+        after = source.reload()
+        if not after.auth_ready:
+            raise PasswordNotStored(
+                after.config_error or "no usable password hash and session secret"
+            )
+        if after.password_hash != password_hash:
+            raise PasswordNotStored("the stored password hash is not the one just written")
+    return PasswordWrite(password_hash, session_secret, before)
