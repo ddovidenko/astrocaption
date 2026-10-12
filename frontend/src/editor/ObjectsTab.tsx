@@ -137,11 +137,15 @@ export default function ObjectsTab() {
 
   return (
     <div className="tab-body">
+      {/* Uncontrolled on purpose (#90): the editor leaves Ctrl+Z in a text field to the browser,
+          and Chromium's undo stack on a controlled input can replay a stale insertion ("M 31" →
+          "M 312"). Nothing ever writes the query back, so the DOM is the box's only owner; the
+          state below merely mirrors it for the filter. */}
       <input
         type="text"
         aria-label="Search objects"
         placeholder="Search objects"
-        value={query}
+        defaultValue=""
         onChange={(e) => setQuery(e.target.value)}
       />
       <div className="chips">

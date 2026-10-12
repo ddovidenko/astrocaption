@@ -38,6 +38,18 @@ test('the side panel: kind chips, keyboard tabs, kept state, names follow the pr
   await expect(page.getByLabel('Search objects')).toHaveValue('M 4')
   await page.getByLabel('Search objects').fill('')
 
+  // The browser's own undo (the editor leaves Ctrl+Z to a focused text field) only ever shortens
+  // what was typed; a controlled input let Chromium replay a stale insertion (#90: "M 312"). The
+  // list must agree with whatever the box shows.
+  const search = page.getByLabel('Search objects')
+  await search.pressSequentially('M 31', { delay: 40 })
+  await expect(search).toHaveValue('M 31')
+  await search.press('Control+z')
+  const undone = await search.inputValue()
+  expect('M 31'.startsWith(undone)).toBe(true)
+  await expect(page.getByText(`${objects.filter((o) => o.catalog_names.some((n) => n.toLowerCase().includes(undone.toLowerCase()))).length} of 20 objects`)).toBeVisible()
+  await search.fill('')
+
   // Keyboard: ArrowRight selects and focuses the next tab.
   await page.getByRole('tab', { name: 'Objects' }).focus()
   await page.keyboard.press('ArrowRight')
