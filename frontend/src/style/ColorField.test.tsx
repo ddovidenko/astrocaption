@@ -9,13 +9,16 @@ afterEach(() => {
 })
 
 /** jsdom measures everything as 0x0, so the open-time measurement has to be fed by hand: the
- *  wrapper (`.color-field`) is the swatch's row, everything else — here the bound `openPicker`
- *  falls back to, `document.documentElement` — is the container it is measured against. */
+ *  wrapper (`.color-field`) is the swatch's row, the popover (`.popover`) is what ColorField
+ *  measures once it is rendered (here 248 × 232, the overrides-mode size), and everything else —
+ *  the bound ColorField falls back to, `document.documentElement` — is the container. */
 function mockRects(wrap: { left: number; bottom: number }, bound: { right: number; bottom: number }) {
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
     const r = this.classList.contains('color-field')
       ? { left: wrap.left, right: wrap.left + 120, top: wrap.bottom - 30, bottom: wrap.bottom }
-      : { left: 0, right: bound.right, top: 0, bottom: bound.bottom }
+      : this.classList.contains('popover')
+        ? { left: 0, right: 248, top: 0, bottom: 232 }
+        : { left: 0, right: bound.right, top: 0, bottom: bound.bottom }
     return { ...r, x: r.left, y: r.top, width: r.right - r.left, height: r.bottom - r.top, toJSON: () => r } as DOMRect
   })
 }
@@ -125,6 +128,36 @@ describe('ColorField placement', () => {
     const f = mount()
     f.open()
     expect(screen.getByRole('dialog').className).toBe('popover popover-right popover-up')
+  })
+
+  it('takes the side with more room when the popover fits on neither (#104)', () => {
+    // A 300 px tall container: 100 px above the swatch row, 170 px below. Neither holds 232 px.
+    mockRects({ left: 10, bottom: 130 }, { right: 1000, bottom: 300 })
+    const f = mount()
+    f.open()
+    expect(screen.getByRole('dialog').className).toBe('popover')
+    cleanup()
+    // Flipped: 170 px above, 100 px below.
+    mockRects({ left: 10, bottom: 200 }, { right: 1000, bottom: 300 })
+    const g = mount()
+    g.open()
+    expect(screen.getByRole('dialog').className).toBe('popover popover-up')
+  })
+
+  it('the Escape that closes the picker goes no further (#104)', () => {
+    const f = mount()
+    f.open()
+    const reached = vi.fn()
+    window.addEventListener('keydown', reached)
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    window.removeEventListener('keydown', reached)
+    expect(f.dialog()).toBeNull()
+    expect(reached).not.toHaveBeenCalled()
+    // Closed, the next Escape passes through to the editor.
+    window.addEventListener('keydown', reached)
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    window.removeEventListener('keydown', reached)
+    expect(reached).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -5,6 +5,7 @@ import { styleFormFromConfig, type ColorKey, type NumberKey, type StyleForm as S
 import { loadBundledFont } from './fonts'
 import { isEditable, useEditor } from './store'
 import { fallbackSentence, isNumberKey, patchForField } from './styleTab'
+import { useTaggedDraft } from './taggedDraft'
 
 /** One pending debounced commit for a number field: the patch is fixed at schedule time (the
  *  keystroke that (re)started the wait), so a later keystroke cancels and replaces the whole
@@ -21,7 +22,14 @@ const NUMBER_DEBOUNCE_MS = 400
 /** The image's global style, edited live (SPEC § 6.3). Each committed field is one undo entry;
  *  a font is committed only once the browser has loaded it, so the canvas never measures an
  *  unloaded family (#62); colours commit when their picker closes; numbers commit debounced
- *  (above). */
+ *  (above).
+ *
+ *  The store is the form's source of truth. Only three things can differ from it, and each is a
+ *  draft tagged with the style and the history position it was raised against (`useTaggedDraft`,
+ *  #100): the number fields mid-debounce (or holding text that is not a value yet), the font while
+ *  the browser loads it, and a colour while its picker is dragged. A commit, an undo or a redo
+ *  changes the tag and the drafts are derived away in that same render, so a stale keystroke
+ *  never paints over what history restored. */
 export default function StyleTab() {
   const style = useEditor((s) => s.style)
   const historySeq = useEditor((s) => s.historySeq)
@@ -32,9 +40,16 @@ export default function StyleTab() {
   const setStyle = useEditor((s) => s.setStyle)
   const fonts = useMemo<FontOut[]>(() => [...fontsMap.values()], [fontsMap])
 
-  const [draft, setDraft] = useState<StyleFormValues | null>(style ? styleFormFromConfig(style) : null)
+  // historySeq is in the tag alongside style: an undo/redo that only touched labels leaves the
+  // style object itself unchanged, but a number field's not-yet-committed text must still give
+  // way to what history just restored.
+  const [numbers, setNumbers] = useTaggedDraft<Partial<Record<NumberKey, string>>>([style, historySeq])
+  const [colors, setColors, dropColors] = useTaggedDraft<Partial<Record<ColorKey, string>>>([style, historySeq])
+  const [font, setFont, dropFont] = useTaggedDraft<string>([style, historySeq])
+  // A fresh font or value replaces whatever the notice was about, so it is tagged with the style
+  // alone: a labels-only undo must leave a transient font-load error standing.
+  const [fontError, setFontError, dropFontError] = useTaggedDraft<string>([style])
   const [fontLoading, setFontLoading] = useState<string | null>(null)
-  const [fontError, setFontError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -55,7 +70,7 @@ export default function StyleTab() {
   // Cancel when the style changes or history moves (undo/redo), even one that only touched
   // labels: a value typed before the undo would otherwise land on top of what it restored. A
   // timer that just fired deleted its own entry before calling setStyle, so it never cancels
-  // itself.
+  // itself. (The typed text itself is a draft tagged the same way, so it is already gone.)
   useEffect(() => {
     for (const key of pendingKeys()) takePending(key)
   }, [style, historySeq])
@@ -71,26 +86,12 @@ export default function StyleTab() {
     }
   }, [])
 
-  // The store is the source of truth: undo/redo, a reset and every commit re-derive the draft.
-  // historySeq is tracked alongside style: an undo/redo that only touched labels leaves the style
-  // object itself unchanged, but a number field's stale, not-yet-committed draft value must still
-  // be dropped in favour of what history just restored (the cancel effect above only clears the
-  // timer; this is what makes the input stop showing the discarded keystroke).
-  // Adjusted during render rather than in an effect (react-hooks/set-state-in-effect; the React
-  // docs' "adjusting state when a prop changes" pattern) so the stale draft never paints.
-  const [renderedStyle, setRenderedStyle] = useState(style)
-  const [renderedHistorySeq, setRenderedHistorySeq] = useState(historySeq)
-  if (style !== renderedStyle || historySeq !== renderedHistorySeq) {
-    // A style change clears the notice (a fresh font/value replaces whatever it was about); a
-    // labels-only undo/redo (historySeq moved, style did not) must leave a transient font-load
-    // error notice standing.
-    if (style !== renderedStyle) setFontError(null)
-    setRenderedStyle(style)
-    setRenderedHistorySeq(historySeq)
-    setDraft(style ? styleFormFromConfig(style) : null)
-  }
+  const values = useMemo<StyleFormValues | null>(
+    () => (style ? { ...styleFormFromConfig(style), ...numbers, ...colors, ...(font === null ? {} : { font_file: font }) } : null),
+    [style, numbers, colors, font],
+  )
 
-  if (!style || !draft) return null
+  if (!style || !values) return null
 
   /** (Re)starts a field's debounce: any previous wait for this field is cancelled, and — while
    *  the text is currently a value the API accepts — a fresh 400ms wait begins for exactly that
@@ -115,26 +116,33 @@ export default function StyleTab() {
   }
 
   const onChange = <K extends keyof StyleFormValues>(key: K, value: StyleFormValues[K]) => {
-    setDraft((d) => (d ? { ...d, [key]: value } : d))
     if (key === 'font_file') {
       void changeFont(value as string)
       return
     }
-    if (key === 'text_color' || key === 'marker_color' || key === 'leader_color' || key === 'halo_color') return
+    if (key === 'text_color' || key === 'marker_color' || key === 'leader_color' || key === 'halo_color') {
+      setColors({ ...colors, [key]: value as string })
+      return
+    }
     if (isNumberKey(key)) {
+      setNumbers({ ...numbers, [key]: value as string })
       scheduleNumberCommit(key, value as string)
       return
     }
+    // A select: committed on the spot, nothing to hold.
     const patch = patchForField(key, value)
     if (patch) setStyle(patch)
   }
 
   const onColorCommit = (key: ColorKey, hex?: string) => {
-    // A typed commit carries the just-typed hex, since `draft` here is whatever the last render
+    // A typed commit carries the just-typed hex, since the draft here is whatever the last render
     // captured — a keystroke's onChange and its onCommit both fire before this closure's own
-    // component re-renders, so `draft[key]` can still be the pre-keystroke value (#B).
-    const patch = patchForField(key, hex ?? draft[key])
+    // component re-renders, so the draft can still be the pre-keystroke value (#B).
+    const patch = patchForField(key, hex ?? values[key])
     if (patch) setStyle(patch)
+    // A close that changed nothing leaves the store as it was, and with it the tag: drop the
+    // draft by hand so the stored colour shows again.
+    dropColors()
   }
 
   async function changeFont(file: string): Promise<void> {
@@ -142,18 +150,20 @@ export default function StyleTab() {
     // pending: the notice promises that "picking a font" clears it, and store.setStyle lets that
     // same-value patch through in that case (#C), so it must reach setStyle here too.
     if (!file || (file === style?.font_file && !fallback)) return
+    setFont(file)
     setFontLoading(file)
-    setFontError(null)
+    dropFontError()
     try {
       await loadBundledFont(file)
       useEditor.getState().setStyle({ font_file: file })
     } catch (err) {
-      setFontError(pageError(err))
-      // Restore only the font field: the rest of the draft may hold edits (a number mid-debounce,
-      // say) that a failed font load must not discard.
-      const current = useEditor.getState().style
-      if (current) setDraft((d) => (d ? { ...d, font_file: current.font_file } : d))
+      // null is a lost session: the shell is already sending the owner to /login (api.ts).
+      const message = pageError(err)
+      if (message) setFontError(message)
     } finally {
+      // The commit above changed the tag and the draft with it; after a failure the select must
+      // show the stored font again. Only the font goes: a number mid-debounce keeps its text.
+      dropFont()
       setFontLoading(null)
     }
   }
@@ -179,7 +189,7 @@ export default function StyleTab() {
     <div className="tab-body">
       <StyleForm
         mode="values"
-        values={draft}
+        values={values}
         defaults={style}
         fonts={fonts}
         disabled={!editable || fontLoading !== null || busy}

@@ -96,12 +96,12 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
 .swatch-note { color: var(--muted); font-size: 0.8rem; font-weight: 400; }
 .popover { position: absolute; z-index: 10; top: calc(100% + 0.4rem); left: 0; min-width: 232px; display: grid; gap: 0.6rem; padding: 0.75rem; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); }
 .popover .react-colorful { width: 200px; height: 160px; }
-/* Which side a popover opens on is decided by ColorField at open time, by measuring against its
-   container (POPOVER_WIDTH there matches this rule's min-width, above) — not by grid column
-   parity, which a `.span2` row ahead of a field can throw off. */
+/* Which side a popover opens on is decided by ColorField at open time, by measuring the rendered
+   popover against its container (so a change to the rules above needs no mirror in code) — not
+   by grid column parity, which a `.span2` row ahead of a field can throw off. */
 .popover-right { left: auto; right: 0; }
-/* Likewise for the vertical axis (POPOVER_HEIGHT there): above the swatch when the container —
-   the floating label toolbar's clipping .editor-canvas, say — has no room below it. */
+/* Likewise for the vertical axis: above the swatch when the container — the floating label
+   toolbar's clipping .editor-canvas, say — has no room below it, or more room above. */
 .popover-up { top: auto; bottom: calc(100% + 0.4rem); }
 .popover-row { display: flex; gap: 0.5rem; align-items: center; }
 .popover-row button { white-space: nowrap; }
