@@ -102,6 +102,25 @@ describe('useCanvasGestures keys', () => {
     expect(result.current.spacePan).toBe(false)
   })
 
+  it('Escape on a toolbar button clears the selection; in a toolbar field it does not (#104)', () => {
+    mount()
+    const toolbar = document.createElement('div')
+    toolbar.className = 'label-toolbar'
+    const swatch = document.createElement('button')
+    const field = document.createElement('input')
+    toolbar.append(swatch, field)
+    document.body.append(toolbar)
+    useEditor.getState().select(1)
+    field.focus()
+    key('keydown', { key: 'Escape' })
+    expect(useEditor.getState().selectedIds.has(1)).toBe(true)
+    swatch.focus()
+    key('keydown', { key: 'Delete' }) // still a toolbar control: Delete stays with it
+    expect(useEditor.getState().labels.get(1)!.enabled).toBe(true)
+    key('keydown', { key: 'Escape' })
+    expect(useEditor.getState().selectedIds.size).toBe(0)
+  })
+
   it('f fits and 1 shows actual pixels', () => {
     mount()
     useEditor.getState().setView({ scale: 3, x: -500, y: -400 })

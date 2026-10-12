@@ -93,7 +93,11 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
           return
         }
       }
-      if (inField() || e.ctrlKey || e.metaKey || e.altKey) return
+      // Escape on a toolbar *button* (the colour swatch, refocused when its picker closed on the
+      // previous Escape) is the editor's: a second Escape clears the selection (#104). The
+      // toolbar's fields keep it, as they keep every key.
+      const toolbarButton = el instanceof HTMLButtonElement && el.closest('.label-toolbar') !== null
+      if ((inField() && !(e.key === 'Escape' && toolbarButton)) || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === 'f' || e.key === 'F') useEditor.getState().fit()
       else if (e.key === '1') useEditor.getState().actual()
       else if (e.key === 'Escape') useEditor.getState().select(null)
