@@ -99,10 +99,10 @@ describe('autosave', () => {
     expect(f.calls).toHaveLength(1)
   })
 
-  it('422 → the stale-document sentence in the conflict state, with the history cleared', async () => {
+  it("a 409 for a document naming objects the image no longer has → the server's sentence in the conflict state, history cleared (#115)", async () => {
     const f = fakeSave()
     stop = startAutosave('img', { save: f.save })
-    f.setFail(new ApiError(422, "labels: the document must list every one of this image's objects."))
+    f.setFail(new ApiError(409, "This image's objects changed; reload the editor."))
     useEditor.getState().toggleObject(1)
     await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS)
     expect(useEditor.getState().save).toEqual({
@@ -112,7 +112,7 @@ describe('autosave', () => {
     expect(useEditor.getState().undo).toEqual([])
   })
 
-  it('a 422 that is not about the objects stays the retryable error state, history kept', async () => {
+  it('a 422 (a font that is not bundled) stays the retryable error state, history kept', async () => {
     const f = fakeSave()
     stop = startAutosave('img', { save: f.save })
     f.setFail(new ApiError(422, 'style.font_file is not a bundled font.'))

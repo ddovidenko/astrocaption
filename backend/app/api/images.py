@@ -456,11 +456,10 @@ NOT_RESUMABLE_MESSAGE = (
 ALREADY_SOLVED_MESSAGE = "This image is already solved; use Re-solve to solve it again."
 CONFLICT_MESSAGE = "This image was changed elsewhere. Reload to continue editing."
 NOT_SOLVED_MESSAGE = "Image has not been solved yet."
-# The three sentences below mean "the document is stale": the editor recognises them by the
-# `labels:` prefix and offers Reload instead of Retry (notices.ts `isStaleDocumentError`).
-OBJECTS_DUPLICATE_MESSAGE = "labels: each of this image's objects may appear only once."
-OBJECTS_UNKNOWN_MESSAGE = "labels: every label must name one of this image's objects."
-OBJECTS_MISSING_MESSAGE = "labels: the document must list every one of this image's objects."
+# A document whose labels do not match the image's objects is stale (#115): a 409 like the version
+# mismatch, so the editor offers Reload rather than a Retry that can never succeed. Which check
+# failed is logged, not told.
+OBJECTS_CHANGED_MESSAGE = "This image's objects changed; reload the editor."
 FONT_MESSAGE = "style.font_file is not a bundled font."
 
 
@@ -506,26 +505,27 @@ def _editable_layout(db: Database, image_id: str) -> tuple[ImageRecord, Annotati
 def _validate_document(
     doc: AnnotationsUpdate, objects: list[SolveObject], settings: Settings, image_id: str
 ) -> None:
-    """Plain 422s for what the models cannot check: object ids and the font bundle. Messages
-    never repeat the submitted value (CLAUDE.md); the offending ids are logged server-side only.
-    The document must list every one of the image's objects exactly once (the server always
-    emits one label per object; a shorter list would silently delete labels on a full-replace
-    PUT), so duplicate, unknown and missing ids are each their own cause and their own sentence.
+    """What the models cannot check. The document must list every one of the image's objects
+    exactly once (the server always emits one label per object; a shorter list would silently
+    delete labels on a full-replace PUT): duplicate, unknown and missing ids are each logged as
+    their own cause and answered with one 409, the stale-document sentence (#115). A font that is
+    not bundled is a plain 422. Messages never repeat the submitted value (CLAUDE.md); the
+    offending ids go to the server log only.
     """
     ids = [lab.object_id for lab in doc.labels]
     known = {o.id for o in objects}
     duplicates = sorted(i for i, n in Counter(ids).items() if n > 1)
     if duplicates:
         log.info("annotations for %s rejected: duplicate object ids %s", image_id, duplicates)
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, OBJECTS_DUPLICATE_MESSAGE)
+        raise HTTPException(status.HTTP_409_CONFLICT, OBJECTS_CHANGED_MESSAGE)
     unknown = sorted(set(ids) - known)
     if unknown:
         log.info("annotations for %s rejected: unknown object ids %s", image_id, unknown)
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, OBJECTS_UNKNOWN_MESSAGE)
+        raise HTTPException(status.HTTP_409_CONFLICT, OBJECTS_CHANGED_MESSAGE)
     missing = sorted(known - set(ids))
     if missing:
         log.info("annotations for %s rejected: missing object ids %s", image_id, missing)
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, OBJECTS_MISSING_MESSAGE)
+        raise HTTPException(status.HTTP_409_CONFLICT, OBJECTS_CHANGED_MESSAGE)
     if doc.style.font_file not in {f.file for f in list_fonts(settings.fonts_dir)}:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, FONT_MESSAGE)
 
