@@ -19,8 +19,14 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from . import __version__
 from .api import auth, config, docs, fonts, gallery, health, images, uploads
-from .auth import LoginLimiter, set_owner_password, validate_new_password
-from .config import Settings, SettingsSource
+from .auth import (
+    LoginLimiter,
+    PasswordRefused,
+    require_setup,
+    set_owner_password,
+    validate_new_password,
+)
+from .config import ConfigError, Settings, SettingsSource
 from .db import Database
 from .fonts import FontNotFoundError, layout_engine_available
 from .models import validation_message
@@ -190,30 +196,31 @@ async def font_not_found_error(_: Request, exc: FontNotFoundError) -> JSONRespon
 def _headless_setup(source: SettingsSource, password: str | None) -> None:
     """``ASTROCAPTION_PASSWORD``: complete first-run setup without the browser (SPEC § 11).
 
-    Unset and empty mean the same thing: nothing to do.
+    Unset and empty mean the same thing: nothing to do. The decision (is setup still
+    required?) is taken under the config lock, inside ``set_owner_password`` (#49).
     """
     if not password:
-        return
-    current = source.current()
-    if current.config_error is not None:
-        log.error(
-            "ASTROCAPTION_PASSWORD ignored: %s cannot be read (%s); fix or remove it and "
-            "restart to run setup",
-            current.config_path.name,
-            current.config_error,
-        )
-        return
-    if not current.setup_required:
-        log.info(
-            "ASTROCAPTION_PASSWORD ignored: an owner password is already set; remove the "
-            "variable, see docs/INSTALL.md to reset the password"
-        )
         return
     refusal = validate_new_password(password)
     if refusal is not None:  # the same bound the login endpoint enforces; never the value
         log.error("ASTROCAPTION_PASSWORD ignored: %s Open /setup instead.", refusal)
         return
-    set_owner_password(current, password)
+    try:
+        set_owner_password(source, password, precondition=require_setup)
+    except ConfigError as exc:
+        log.error(
+            "ASTROCAPTION_PASSWORD ignored: %s cannot be read (%s); fix or remove it and "
+            "restart to run setup",
+            source.current().config_path.name,
+            exc.public,
+        )
+        return
+    except PasswordRefused:
+        log.info(
+            "ASTROCAPTION_PASSWORD ignored: an owner password is already set; remove the "
+            "variable, see docs/INSTALL.md to reset the password"
+        )
+        return
     log.info("owner password set from ASTROCAPTION_PASSWORD")
 
 

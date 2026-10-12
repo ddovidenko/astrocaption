@@ -13,7 +13,7 @@ import pytest
 
 from app.auth import issue_session, session_is_valid, verify_password
 from app.cli import EXIT_CONFIG, EXIT_OK, EXIT_REFUSED, main, reset_password, run
-from app.config import CONFIG_NOT_JSON, ConfigError, load_settings, update_config
+from app.config import CONFIG_NOT_JSON, ConfigError, _merge_and_write, load_settings
 from tests.conftest import TEST_PASSWORD, env_app_client, env_for, login, read_config, seed_owner
 
 OLD, NEW = TEST_PASSWORD, "new-password-22"
@@ -257,7 +257,7 @@ def test_disk_full_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     def boom(*_args: object, **_kwargs: object) -> None:
         raise OSError(errno.ENOSPC, "no space")
 
-    monkeypatch.setattr("app.auth.update_config", boom)
+    monkeypatch.setattr("app.auth._merge_and_write", boom)
     code, out, err, _ = run_cli(tmp_path, NEW, NEW)
 
     assert code == EXIT_CONFIG and out == ""
@@ -271,7 +271,7 @@ def test_a_failed_setup_write_is_reported(tmp_path: Path, monkeypatch: pytest.Mo
     def boom(*_args: object, **_kwargs: object) -> None:
         raise OSError(errno.ENOSPC, "no space")
 
-    monkeypatch.setattr("app.auth.update_config", boom)
+    monkeypatch.setattr("app.auth._merge_and_write", boom)
     code, out, err, _ = run_cli(tmp_path, NEW, NEW)
 
     assert code == EXIT_CONFIG and out == ""
@@ -288,7 +288,7 @@ def test_a_config_error_on_the_write_path_is_logged_and_shown_in_plain_language(
     def boom(*_args: object, **_kwargs: object) -> None:
         raise ConfigError(CONFIG_NOT_JSON, "line 3 column 5")
 
-    monkeypatch.setattr("app.auth.update_config", boom)
+    monkeypatch.setattr("app.auth._merge_and_write", boom)
     with caplog.at_level(logging.ERROR, logger="app.cli"):
         code, out, err, _ = run_cli(tmp_path, NEW, NEW)
 
@@ -323,21 +323,21 @@ def test_a_config_removed_while_typing_completes_setup_instead_of_half_resetting
 def test_a_config_left_incomplete_by_the_write_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Another writer dropped the session_secret right after the write landed: the file
-    cannot sign anybody in, so the command must not claim it can."""
+    """The file read back without its session_secret right after the write landed: it cannot
+    sign anybody in, so the command must not claim it can."""
     seed_owner(tmp_path)
 
     def write_then_lose_the_secret(path: Path, updates: dict[str, object | None]) -> None:
-        update_config(path, updates)
+        _merge_and_write(path, updates)  # not update_config: the caller holds the lock
         data = json.loads(path.read_text())
         data.pop("session_secret")
         path.write_text(json.dumps(data))
 
-    monkeypatch.setattr("app.auth.update_config", write_then_lose_the_secret)
+    monkeypatch.setattr("app.auth._merge_and_write", write_then_lose_the_secret)
     code, out, err, _ = run_cli(tmp_path, NEW, NEW)
 
     assert code == EXIT_CONFIG and out == ""
-    assert "changed while the password was being typed" in err
+    assert "was written but is incomplete" in err
     assert not load_settings(env_for(tmp_path)).auth_ready
 
 

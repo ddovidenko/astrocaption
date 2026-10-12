@@ -16,11 +16,12 @@ import sys
 from collections.abc import Callable, Mapping
 from typing import TextIO
 
-from .auth import set_owner_password, validate_new_password
+from .auth import PasswordNotStored, set_owner_password, validate_new_password
 from .config import (
     DISK_FULL_ERRNOS,
     ConfigError,
     Settings,
+    SettingsSource,
     load_settings,
     write_failure_message,
 )
@@ -122,14 +123,13 @@ def reset_password(
     if repeat != password:
         return refuse(f"The two passwords do not match. {UNCHANGED}")
 
-    # Read again: typing a password takes as long as the owner takes, and config.json may
-    # have been set up, reset or removed meanwhile. The write is the same either way (a new
-    # hash and session secret: the hash change alone logs every browser out); the second
-    # read only decides what to call it.
-    settings = load_settings(env)
-    was_setup = settings.setup_required
+    # The write re-reads config.json under the cross-process lock: typing a password takes as
+    # long as the owner takes, and the file may have been set up, reset or removed meanwhile.
+    # The write is the same either way (a new hash and session secret: the hash change alone
+    # logs every browser out); what the file held when the lock was taken only decides what to
+    # call it. Reading it back under that same lock is what lets the success line be a fact.
     try:
-        set_owner_password(settings, password)
+        written = set_owner_password(SettingsSource(env=env), password)
     except ConfigError as exc:  # the file changed under us since it was read
         log.error("config.json could not be used: %s", exc.detail)
         return refuse(exc.public, EXIT_CONFIG)
@@ -144,15 +144,15 @@ def reset_password(
             )
         sentence = write_failure_message("The password", disk_full=exc.errno in DISK_FULL_ERRNOS)
         return refuse(f"{sentence} {UNCHANGED}", EXIT_CONFIG)
-
-    if not load_settings(env).auth_ready:
-        # Someone else rewrote the file between the read above and the write: the result
-        # cannot sign anybody in, so do not claim it can.
+    except PasswordNotStored as exc:
+        # The write landed but the read-back is not a usable pair: the result cannot sign
+        # anybody in, so do not claim it can.
+        log.error("config.json read back wrong after the write: %s", exc.detail)
         return refuse(
-            f"{settings.config_path} changed while the password was being typed and is now "
-            "incomplete; run the command again.",
+            f"{settings.config_path} was written but is incomplete; run the command again.",
             EXIT_CONFIG,
         )
+    was_setup = written.before.setup_required
     if was_setup:
         print(
             f"Setup completed: the owner password hash is stored in {settings.config_path}.",

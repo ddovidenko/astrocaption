@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from functools import partial
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -13,12 +12,15 @@ from ..auth import (
     COOKIE_NAME,
     SESSION_TTL_SECONDS,
     LoginLimiter,
+    PasswordNotStored,
+    PasswordRefused,
     issue_session,
+    require_setup,
     set_owner_password,
     validate_new_password,
     verify_password,
 )
-from ..config import Settings, SettingsSource, write_and_reload
+from ..config import Settings, SettingsSource
 from ..models import LoginRequest, PasswordChangeRequest, SetupRequest
 from .deps import SettingsDep, is_authenticated, require_owner
 from .errors import config_write_guard
@@ -30,6 +32,14 @@ router = APIRouter(prefix="/api", tags=["auth"])
 WRONG_CURRENT_MESSAGE = "The current password is wrong."
 SAME_PASSWORD_MESSAGE = "The new password must differ from the current one."
 NOT_CONFIGURED_MESSAGE = "The site is not configured; run setup again."
+PASSWORD_CHANGED_MEANWHILE = (
+    "The password was changed by something else meanwhile (a reset from the shell, or another "
+    "browser); sign in again with the current one before changing it."
+)
+SETUP_SAVED_BUT_UNREADABLE = (
+    "The password was saved, but config.json could not be read back afterwards. Try signing "
+    "in; if that fails, see docs/LOCKOUT.md and the server log."
+)
 PASSWORD_CHANGED_BUT_UNREADABLE = (
     "The password was changed, but config.json could not be read back afterwards, so this "
     "browser was not re-signed-in. Sign in again with the new password; if that fails, see "
@@ -118,15 +128,24 @@ async def setup(body: SetupRequest, request: Request) -> None:
         refusal = validate_new_password(body.password)
         if refusal is not None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, refusal)
-        # Unreadable since the check, or unwritable.
-        with config_write_guard("The password", "setup could not write config.json"):
-            await asyncio.to_thread(
-                set_owner_password,
-                settings,
-                body.password,
-                nova_api_key=body.nova_api_key,
-                site_title=body.site_title,
-            )
+        # The same checks again under the cross-process lock (#49: the CLI may have completed
+        # setup while this request was in flight), then unreadable or unwritable.
+        source: SettingsSource = request.app.state.settings_source
+        try:
+            with config_write_guard("The password", "setup could not write config.json"):
+                await asyncio.to_thread(
+                    set_owner_password,
+                    source,
+                    body.password,
+                    nova_api_key=body.nova_api_key,
+                    site_title=body.site_title,
+                    precondition=require_setup,
+                )
+        except PasswordRefused:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Setup has already been completed.")
+        except PasswordNotStored as exc:
+            log.error("setup wrote config.json but it read back wrong: %s", exc.detail)
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, SETUP_SAVED_BUT_UNREADABLE)
 
 
 @router.post("/login", status_code=status.HTTP_204_NO_CONTENT)
@@ -177,10 +196,13 @@ async def change_password(
     who made the change stays signed in. A wrong current password is 403, never 401: the page
     treats a 401 as a lost session.
 
-    The whole read-check-write runs under ``config_write_lock``, verify included: that lock is
-    what keeps setup, the config page and this route from interleaving on config.json. The
-    two body-only refusals come first, before the cooldown is ever consulted - they read
-    nothing but the request, so a doomed 422 must not cost a scrypt or a limiter slot.
+    The read-check-write runs under ``config_write_lock``, which orders this route against
+    setup and the config page; the write itself re-reads config.json under the cross-process
+    file lock and only lands if the hash it finds is still the one verified here (#49), so a
+    reset from the shell can never be overwritten by a change that was checked against the
+    password it replaced. The two body-only refusals come first, before the cooldown is ever
+    consulted - they read nothing but the request, so a doomed 422 must not cost a scrypt or
+    a limiter slot.
     """
     source: SettingsSource = request.app.state.settings_source
     lock: asyncio.Lock = request.app.state.config_write_lock
@@ -205,29 +227,37 @@ async def change_password(
         )
         if not ok:
             raise HTTPException(status.HTTP_403_FORBIDDEN, WRONG_CURRENT_MESSAGE)
-        with config_write_guard("The password", "password change could not write config.json"):
-            (written_hash, written_secret), fresh = await asyncio.to_thread(
-                write_and_reload, source, partial(set_owner_password, settings, body.new_password)
-            )
-        if not fresh.auth_ready:
+        verified_hash = settings.password_hash
+
+        def still_the_verified_hash(fresh: Settings) -> str | None:
+            if not fresh.auth_ready:
+                return "config.json no longer holds a usable password"
+            if fresh.password_hash != verified_hash:
+                return "the password hash changed between the check and the write"
+            return None
+
+        try:
+            with config_write_guard("The password", "password change could not write config.json"):
+                written = await asyncio.to_thread(
+                    set_owner_password,
+                    source,
+                    body.new_password,
+                    precondition=still_the_verified_hash,
+                )
+        except PasswordRefused as exc:
+            log.warning("password change refused: %s", exc.reason)
+            raise HTTPException(status.HTTP_409_CONFLICT, PASSWORD_CHANGED_MEANWHILE)
+        except PasswordNotStored as exc:
             # set_owner_password already wrote the new hash - the password IS changed - but
-            # the reload cannot see a full pair, so the app itself can no longer authenticate
+            # the read-back cannot see the pair, so the app itself can no longer authenticate
             # anyone; a cookie minted here would be useless. Say exactly that.
             log.error(
-                "password changed but config.json could not be read back afterward: %s",
-                fresh.config_error or "no usable password hash and session secret",
+                "password changed but config.json could not be read back afterward: %s", exc.detail
             )
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR, PASSWORD_CHANGED_BUT_UNREADABLE
             )
-        if fresh.password_hash != written_hash:
-            # Something else (a CLI reset) rewrote the file between the write and the reload.
-            # The cookie below is still minted from the pair this route wrote, because that is
-            # the truth about what happened here; the next request will refuse it, which is
-            # what the CLI promised when it said every browser would be signed out.
-            log.warning(
-                "config.json was rewritten again right after the password change; "
-                "this browser will be signed out on its next request"
-            )
         log.info("owner password changed")
-    set_session_cookie(response, request, secret=written_secret, password_hash=written_hash)
+    set_session_cookie(
+        response, request, secret=written.session_secret, password_hash=written.password_hash
+    )
