@@ -62,10 +62,11 @@ No multi-user, no roles, no invites in v1.
 6. Headless installs set `ASTROCAPTION_PASSWORD` instead: at startup, when `config.json` has no
    password hash, the app performs step 4 with that password. The variable is read once and never stored.
 7. A `config.json` that exists but cannot be parsed is **not** "not set up": setup stays closed
-   (`POST /setup` answers 409), login is refused, and `/api/health` carries `config_error` so the owner can
-   fix or delete the file. `config_error` is a fixed plain sentence ("config.json is not valid JSON; fix
-   it, or remove it and run setup again (removing it resets the owner password)"); the parser's reason and
-   the file's path go to the server log only.
+   (`POST /setup` answers 409, or 500 when the server could not read the file at all: permissions, I/O),
+   login is refused, and `/api/health` carries `config_error` so the owner can fix or delete the file.
+   `config_error` is a fixed plain sentence ("config.json is not valid JSON; fix it, or remove it and run
+   setup again (removing it resets the owner password)"); the parser's reason and the file's path go to the
+   server log only.
 8. A `config.json` holding only one of `password_hash`/`session_secret` cannot authenticate anybody, so it
    reopens setup; setup writes both halves fresh and merges them into whatever else the file holds.
    Concurrent setup submissions are serialised: the first wins, the rest get the 404 of step 5.
@@ -367,9 +368,10 @@ Owner (cookie session):
   Logged-out calls to any owner route get 401 with a plain message.
 - `POST /password` {current_password, new_password} → 204 with a fresh cookie; 403 on a wrong current
   password; 429 with `Retry-After` during the cooldown (shared with `POST /login`); 422 on a rule violation
-  (new password out of the 8–1024 range, or the same as the current one); 409 when `config.json` cannot be
-  read or no longer holds a usable password; 500 when the new password was written but the file could not
-  be read back afterwards (the password did change; the browser is not re-signed-in).
+  (new password out of the 8–1024 range, or the same as the current one); 409 when `config.json` parses
+  wrong or no longer holds a usable password (500 when the server could not read it at all); 500 when the
+  new password was written but the file could not be read back afterwards (the password did change; the
+  browser is not re-signed-in).
 - `GET/PUT /config` → {site_title, max_upload_mb, nova_api_key_set, default_style, style_defaults, locked,
   locked_by, public_gallery_enabled, solve_timeout_seconds, upload_chunk_mb}; the last two are read-only
   (env-only knobs). `PUT` is partial: absent fields are kept, `nova_api_key: null` clears the key, and

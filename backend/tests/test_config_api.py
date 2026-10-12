@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import json
 import logging
+import os
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -11,9 +12,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.config import DATA_DIR_FULL, DATA_DIR_NOT_WRITABLE
-from app.api.errors import CONFIG_SAVED_BUT_UNREADABLE
-from app.config import CONFIG_NOT_JSON, ConfigError
+from app.api.errors import CONFIG_SAVED_BUT_UNREADABLE, config_write_error, write_failure_message
+from app.config import CONFIG_NOT_JSON, CONFIG_UNREADABLE, ConfigError
 from tests.conftest import env_app_client, login
 
 PASSWORD = "config-page-pw1"
@@ -218,8 +218,14 @@ def test_put_rejects_blank_title_with_the_model_rule(
 @pytest.mark.parametrize(
     ("exc", "detail"),
     [
-        (PermissionError("Read-only file system"), DATA_DIR_NOT_WRITABLE),
-        (OSError(errno.ENOSPC, "no space left on device"), DATA_DIR_FULL),
+        (
+            PermissionError("Read-only file system"),
+            write_failure_message("Settings", disk_full=False),
+        ),
+        (
+            OSError(errno.ENOSPC, "no space left on device"),
+            write_failure_message("Settings", disk_full=True),
+        ),
     ],
     ids=["not-writable", "disk-full"],
 )
@@ -390,3 +396,31 @@ def test_public_gallery_flag_pinned_by_the_environment(
             "detail": "public_gallery_enabled is set by ASTROCAPTION_PUBLIC_GALLERY; "
             "unset it to change it here."
         }
+
+
+def test_an_unreadable_config_is_a_500_and_a_corrupt_one_a_409(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A config.json the server cannot read is its fault; one that is there but says something
+    unusable is a state the owner put it in (#47). Health reports both the same way, in the
+    sentence; only the status code of a route that cannot proceed tells them apart."""
+    if os.geteuid() == 0:
+        pytest.skip("root reads a mode-000 file anyway")
+    with owner_client(tmp_path, monkeypatch) as client:
+        path = tmp_path / "data" / "config.json"
+        path.write_text(path.read_text() + "\n")  # a new stamp, so the next read is a real one
+        path.chmod(0)
+        try:
+            assert client.get("/api/health").json()["config_error"] == CONFIG_UNREADABLE
+            resp = client.post("/api/setup", json={"password": "hunter2hunter2"})
+            assert resp.status_code == 500 and resp.json() == {"detail": CONFIG_UNREADABLE}
+        finally:
+            path.chmod(0o600)
+        path.write_text("{nope")
+        assert client.get("/api/health").json()["config_error"] == CONFIG_NOT_JSON
+        resp = client.post("/api/setup", json={"password": "hunter2hunter2"})
+        assert resp.status_code == 409 and resp.json() == {"detail": CONFIG_NOT_JSON}
+        assert str(tmp_path) not in resp.text
+    # The write path draws the same line.
+    assert config_write_error(ConfigError("x", fault=True), "Settings").status_code == 500
+    assert config_write_error(ConfigError("x"), "Settings").status_code == 409

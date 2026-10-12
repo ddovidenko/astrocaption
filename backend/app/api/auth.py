@@ -23,7 +23,7 @@ from ..auth import (
 from ..config import Settings, SettingsSource
 from ..models import LoginRequest, PasswordChangeRequest, SetupRequest
 from .deps import SettingsDep, is_authenticated, require_owner
-from .errors import config_write_guard
+from .errors import config_state_error, config_write_guard
 
 log = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ async def setup(body: SetupRequest, request: Request) -> None:
         # not both write a password hash, each believing it owns the site.
         settings: Settings = request.app.state.settings_source.current()
         if settings.config_error is not None:
-            raise HTTPException(status.HTTP_409_CONFLICT, settings.config_error)
+            raise config_state_error(settings)
         if not settings.setup_required:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Setup has already been completed.")
         refusal = validate_new_password(body.password)
@@ -209,7 +209,7 @@ async def change_password(
     async with lock:
         settings: Settings = source.current()
         if settings.config_error is not None:
-            raise HTTPException(status.HTTP_409_CONFLICT, settings.config_error)
+            raise config_state_error(settings)
         if not settings.auth_ready:
             log.warning("password change refused: config.json no longer holds a usable password")
             raise HTTPException(status.HTTP_409_CONFLICT, NOT_CONFIGURED_MESSAGE)

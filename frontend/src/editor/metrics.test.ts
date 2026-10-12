@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import raw from '../../../tests/fixtures/render/vectors.json'
-import type { FontOut, Label, LeaderMode, ObjectOut, StyleConfig } from '../api'
+import { MAX_UPLOAD_MB, MIN_UPLOAD_MB, type FontOut, type Label, type LeaderMode, type ObjectOut, type StyleConfig } from '../api'
 import type { Circle } from './metrics'
 import {
   ANCHORS,
   MAX_FONT_SIZE,
+  MAX_MARKER_MIN_RADIUS,
   MAX_STROKE_WIDTH,
   MIN_FONT_SIZE,
   anchorBox,
@@ -88,6 +89,9 @@ interface AnchorCase {
 }
 interface Vectors {
   min_font_size: number
+  max_marker_min_radius: number
+  min_upload_mb: number
+  max_upload_mb: number
   max_font_size: number
   max_stroke_width: number
   fonts: FontOut[]
@@ -145,6 +149,10 @@ describe('render vectors', () => {
     expect(vectors.min_font_size).toBe(MIN_FONT_SIZE)
     expect(vectors.max_font_size).toBe(MAX_FONT_SIZE)
     expect(vectors.max_stroke_width).toBe(MAX_STROKE_WIDTH)
+    // The bounds the forms offer (#47): the API's, not a copy that could drift.
+    expect(vectors.max_marker_min_radius).toBe(MAX_MARKER_MIN_RADIUS)
+    expect(vectors.min_upload_mb).toBe(MIN_UPLOAD_MB)
+    expect(vectors.max_upload_mb).toBe(MAX_UPLOAD_MB)
     expect(vectors.fonts.length).toBeGreaterThan(0)
     expect(vectors.labels.length).toBeGreaterThan(0)
   })

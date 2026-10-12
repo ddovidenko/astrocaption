@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react'
-import { api, pageError, type ConfigOut, type FontOut, type HealthOut } from '../api'
+import { MAX_UPLOAD_MB, MIN_UPLOAD_MB, api, pageError, type ConfigOut, type FontOut, type HealthOut } from '../api'
 import StyleForm from '../style/StyleForm'
 import { styleFormFromOverrides, type StyleForm as StyleFormValues } from '../style/styleForm'
 import { buildUpdate } from './configForm'
@@ -121,8 +121,8 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
             <input
               type="number"
               required
-              min={1}
-              max={1024}
+              min={MIN_UPLOAD_MB}
+              max={MAX_UPLOAD_MB}
               value={uploadMb}
               disabled={locked('max_upload_mb')}
               onChange={(e) => edit(setUploadMb, e.target.value)}
