@@ -13,13 +13,10 @@ from ..fonts import list_fonts
 from ..models import ConfigOut, ConfigUpdate, StyleConfig, StyleDefaults
 from ..worker import SolveWorker
 from .deps import SettingsDep, WorkerDep, require_owner
-from .errors import CONFIG_SAVED_BUT_UNREADABLE, config_write_guard, write_failure_message
+from .errors import CONFIG_SAVED_BUT_UNREADABLE, config_write_guard
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["config"], dependencies=[Depends(require_owner)])
-
-DATA_DIR_FULL = write_failure_message("Settings", disk_full=True)
-DATA_DIR_NOT_WRITABLE = write_failure_message("Settings", disk_full=False)
 
 # Fixed built-ins the page shows for unset fields; sizes are derived per image instead.
 # ``StyleDefaults`` lists exactly the non-size fields, so validating the model's defaults

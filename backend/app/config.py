@@ -82,14 +82,18 @@ class ConfigError(ValueError):
     """config.json exists but cannot be used.
 
     ``public`` is the fixed sentence users are shown (SPEC § 5.1 step 7: no server paths,
-    no exception text); ``detail`` carries the reason, for the server log only.
+    no exception text); ``detail`` carries the reason, for the server log only. ``fault`` marks
+    a file the server could not *read* (permissions, I/O) as opposed to one that is there but
+    says something unusable: the API answers the first with a 500 and the second with a 409
+    (#47), since only the second is a state the owner put the file in.
     """
 
-    def __init__(self, public: str, detail: str | None = None) -> None:
+    def __init__(self, public: str, detail: str | None = None, *, fault: bool = False) -> None:
         detail = detail or public
         super().__init__(detail)
         self.public = public
         self.detail = detail
+        self.fault = fault
 
 
 @dataclass(frozen=True)
@@ -109,6 +113,7 @@ class Settings:
     upload_chunk_mb: int = DEFAULT_UPLOAD_CHUNK_MB
     default_style: dict[str, object] = field(default_factory=dict)
     config_error: str | None = None  # why config.json was ignored, if it was
+    config_fault: bool = False  # ... and whether that was a read fault (500) or its content (409)
     password_hash: str | None = field(default=None, repr=False)
     session_secret: str | None = field(default=None, repr=False)
     trust_proxy: bool = False
@@ -164,7 +169,7 @@ def _parse_config(path: Path) -> dict[str, object]:
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
     except OSError as exc:
-        raise ConfigError(CONFIG_UNREADABLE, f"{path}: {exc.strerror or exc}") from exc
+        raise ConfigError(CONFIG_UNREADABLE, f"{path}: {exc.strerror or exc}", fault=True) from exc
     except ValueError as exc:
         raise ConfigError(CONFIG_NOT_JSON, f"{path}: {exc}") from exc
     if not isinstance(loaded, dict):
@@ -289,12 +294,14 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
 
     cfg: dict[str, object] = {}
     config_error: str | None = None
+    config_fault = False
     config_path = data_dir / CONFIG_FILE_NAME
     if config_path.is_file():
         try:
             cfg = _parse_config(config_path)
         except ConfigError as exc:
             config_error = exc.public  # what the API may show; the reason stays in the log
+            config_fault = exc.fault
             log.warning("ignoring config.json: %s", exc.detail)
 
     from_env = {name: _from_env(e, name) for name in LOCKABLE}
@@ -357,6 +364,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         upload_chunk_mb=chunk_mb,
         default_style=default_style,
         config_error=config_error,
+        config_fault=config_fault,
         password_hash=password_hash,
         session_secret=session_secret,
         trust_proxy=e.get("TRUST_PROXY", "").strip().lower() in {"1", "true", "yes"},

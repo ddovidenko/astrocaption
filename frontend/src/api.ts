@@ -190,6 +190,9 @@ export interface FontOut {
  *  here so every password input in the app states the same rule the server will apply. */
 export const MIN_PASSWORD_LENGTH = 8
 export const MAX_PASSWORD_LENGTH = 1024
+/** The upload limit's bounds (models.MIN_UPLOAD_MB / MAX_UPLOAD_MB), pinned by the render vectors. */
+export const MIN_UPLOAD_MB = 1
+export const MAX_UPLOAD_MB = 1024
 
 export interface SetupRequest {
   password: string
