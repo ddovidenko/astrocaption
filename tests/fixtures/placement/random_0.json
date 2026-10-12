@@ -140,8 +140,7 @@
    "h": 90
   }
  ],
- "fixed_boxes": [],
- "fixed_circles": [],
+ "fixed": [],
  "expected": [
   {
    "id": 1,

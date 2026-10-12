@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.placement import Box, Circle, PlacementItem, place_labels
+from app.placement import Box, Circle, FixedItem, PlacementItem, place_labels
 
 OUT = Path(__file__).resolve().parent.parent.parent / "tests" / "fixtures" / "placement"
 
@@ -23,19 +23,17 @@ def _case(
     width: int,
     height: int,
     items: list[PlacementItem],
-    fixed_boxes: list[Box] | None = None,
-    fixed_circles: list[Circle] | None = None,
+    fixed: list[FixedItem] | None = None,
 ) -> None:
-    fb = fixed_boxes or []
-    fc = fixed_circles or []
-    placed = place_labels(width, height, items, fixed_boxes=fb, fixed_circles=fc)
+    fixed = fixed or []
+    placed = place_labels(width, height, items, fixed=fixed)
     doc = {
         "name": name,
         "width": width,
         "height": height,
         "items": [vars(i) for i in items],
-        "fixed_boxes": [vars(b) for b in fb],
-        "fixed_circles": [vars(c) for c in fc],
+        # The fixed items' placements follow the items' in ``expected`` (#107).
+        "fixed": [{"id": f.id, "box": vars(f.box), "circle": vars(f.circle)} for f in fixed],
         "expected": [vars(p) for p in placed],
     }
     OUT.mkdir(parents=True, exist_ok=True)
@@ -73,8 +71,18 @@ def main() -> None:
         3000,
         2000,
         [PlacementItem(1, 1500, 1000, 40, 300, 60), PlacementItem(2, 1500, 1200, 20, 300, 60)],
-        fixed_boxes=[Box(1560, 970, 1900, 1030)],
-        fixed_circles=[Circle(1700, 1100, 90)],
+        fixed=[FixedItem(9, Box(1560, 970, 1900, 1030), Circle(1700, 1100, 90))],
+    )
+    _case(
+        "fixed_collided",  # two pinned labels parked on each other, and one in a clean slot
+        3000,
+        2000,
+        [PlacementItem(1, 1500, 1000, 40, 300, 60)],
+        fixed=[
+            FixedItem(7, Box(1400, 900, 1700, 960), Circle(1300, 930, 10)),
+            FixedItem(8, Box(1405, 905, 1705, 965), Circle(1300, 1050, 10)),
+            FixedItem(9, Box(200, 200, 500, 260), Circle(150, 230, 10)),
+        ],
     )
     _case(
         "huge_marker_centre_label",  # M 31 filling a 6248 × 4176 frame; ring spills past every edge

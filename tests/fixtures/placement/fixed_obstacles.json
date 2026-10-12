@@ -20,19 +20,20 @@
    "h": 60
   }
  ],
- "fixed_boxes": [
+ "fixed": [
   {
-   "left": 1560,
-   "top": 970,
-   "right": 1900,
-   "bottom": 1030
-  }
- ],
- "fixed_circles": [
-  {
-   "x": 1700,
-   "y": 1100,
-   "r": 90
+   "id": 9,
+   "box": {
+    "left": 1560,
+    "top": 970,
+    "right": 1900,
+    "bottom": 1030
+   },
+   "circle": {
+    "x": 1700,
+    "y": 1100,
+    "r": 90
+   }
   }
  ],
  "expected": [
@@ -46,6 +47,12 @@
    "id": 2,
    "x": 1162.0,
    "y": 1170.0,
+   "collided": false
+  },
+  {
+   "id": 9,
+   "x": 1560,
+   "y": 970,
    "collided": false
   }
  ]

@@ -300,8 +300,7 @@
    "h": 81
   }
  ],
- "fixed_boxes": [],
- "fixed_circles": [],
+ "fixed": [],
  "expected": [
   {
    "id": 1,

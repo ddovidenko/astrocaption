@@ -45,7 +45,9 @@ from app.placement import (
     Box,
     Circle,
     anchor_box,
+    box_crosses_ring,
     scale_unit,
+    segment_crosses_box,
     segment_crosses_ring,
 )
 from app.render import (
@@ -219,38 +221,55 @@ def leader_vectors() -> list[dict[str, Any]]:
     box sits behind (nearest point), a leader entirely inside a big ring (clear), a box inside
     the marker (no segment, whatever the rings), a diagonal box whose two facing faces both
     offer candidates (top midpoint), and a box sitting across a big ring's outline, which then
-    does not block (top-left corner)."""
+    does not block (top-left corner). Then the text-box cases (#118): another label's box on
+    the nearest point's path (top-left corner), a box and a ring blocking the nearest point
+    and the top-left corner (bottom-left), a box across every candidate (the nearest point:
+    text blocks only when some candidate clears it), and a box plus a ring where only a
+    ring-clear candidate exists (that candidate, through the text). ``blocked`` is whether
+    the chosen segment still cuts a ring (#119)."""
     width, height = 3000, 2000
     s = scale_unit(width, height)
     pad = PAD_FACTOR * s
     cx, cy = 1500.0, 1000.0
     tall = Box(1600, 850, 1900, 1150)
-    geometries: list[tuple[float, Box, list[Circle]]] = [
-        (18.0, Box(1560, 970, 1900, 1030), []),  # right
-        (18.0, Box(1100, 970, 1440, 1030), []),  # left
-        (18.0, Box(1330, 700, 1670, 760), []),  # above
-        (18.0, Box(1330, 1240, 1670, 1300), []),  # below
-        (18.0, Box(1540, 1040, 1880, 1100), []),  # below-right, nearest point is a corner
-        (130.0, Box(1650, 970, 1990, 1030), []),  # gap 20 < 12·s = 36: auto hides the leader
-        (130.0, Box(1520, 990, 1600, 1010), []),  # inside the marker: no segment
-        (18.0, Box(1400, 950, 1600, 1050), []),  # box contains the centre: no segment
-        (0.0, Box(1500.5, 1000.5, 1700, 1050), []),  # point marker, box a fraction of a pixel away
-        (18.0, Box(1554.0, 985, 1900, 1030), []),  # gap exactly 36 = 12·s: auto does not draw (>)
-        (18.0, tall, [Circle(1550, 1000, 5)]),  # nearest blocked: top-left corner
-        (18.0, tall, [Circle(1550, 1000, 5), Circle(1550, 925, 5)]),  # and that: bottom-left
-        (18.0, tall, [Circle(1550, 1000, 5), Circle(1550, 925, 5), Circle(1550, 1075, 5)]),  # all
-        (18.0, tall, [Circle(1530, 1000, 60)]),  # behind a big ring: nothing clears, nearest
-        (18.0, tall, [Circle(1530, 1000, 500)]),  # entirely inside a big ring: clear
-        (130.0, Box(1520, 990, 1600, 1010), [Circle(1550, 1000, 5)]),  # inside: still no segment
-        (18.0, Box(1600, 1100, 1900, 1160), [Circle(1550, 1050, 5)]),  # diagonal: top midpoint
+    geometries: list[tuple[float, Box, list[Circle], list[Box]]] = [
+        (18.0, Box(1560, 970, 1900, 1030), [], []),  # right
+        (18.0, Box(1100, 970, 1440, 1030), [], []),  # left
+        (18.0, Box(1330, 700, 1670, 760), [], []),  # above
+        (18.0, Box(1330, 1240, 1670, 1300), [], []),  # below
+        (18.0, Box(1540, 1040, 1880, 1100), [], []),  # below-right, nearest point is a corner
+        (130.0, Box(1650, 970, 1990, 1030), [], []),  # gap 20 < 12·s = 36: auto hides the leader
+        (130.0, Box(1520, 990, 1600, 1010), [], []),  # inside the marker: no segment
+        (18.0, Box(1400, 950, 1600, 1050), [], []),  # box contains the centre: no segment
+        (0.0, Box(1500.5, 1000.5, 1700, 1050), [], []),  # point marker, a fraction of a px away
+        (18.0, Box(1554.0, 985, 1900, 1030), [], []),  # gap exactly 36 = 12·s: auto does not draw
+        (18.0, tall, [Circle(1550, 1000, 5)], []),  # nearest blocked: top-left corner
+        (18.0, tall, [Circle(1550, 1000, 5), Circle(1550, 925, 5)], []),  # and that: bottom-left
+        (18.0, tall, [Circle(1550, 1000, 5), Circle(1550, 925, 5), Circle(1550, 1075, 5)], []),
+        (18.0, tall, [Circle(1530, 1000, 60)], []),  # behind a big ring: nothing clears, nearest
+        (18.0, tall, [Circle(1530, 1000, 500)], []),  # entirely inside a big ring: clear
+        (130.0, Box(1520, 990, 1600, 1010), [Circle(1550, 1000, 5)], []),  # inside: no segment
+        (18.0, Box(1600, 1100, 1900, 1160), [Circle(1550, 1050, 5)], []),  # diagonal: top mid
         # The box sits across a big ring's outline (x = 1600): that ring does not block, so the
         # small ring on the nearest point's path sends the leader to the top-left corner.
-        (18.0, tall, [Circle(1550, 1000, 5), Circle(1300, 1000, 300)]),
+        (18.0, tall, [Circle(1550, 1000, 5), Circle(1300, 1000, 300)], []),
+        # #118: another label's text on the nearest point's path.
+        (18.0, tall, [], [Box(1540, 990, 1580, 1010)]),
+        (18.0, tall, [Circle(1550, 1000, 5)], [Box(1540, 900, 1580, 940)]),
+        (18.0, tall, [], [Box(1540, 800, 1580, 1200)]),  # text across every candidate: nearest
+        # The ring blocks the nearest point; the text covers the corners: the top-left corner
+        # (ring-clear) is used although it runs through the text.
+        (
+            18.0,
+            tall,
+            [Circle(1550, 1000, 5)],
+            [Box(1540, 800, 1580, 960), Box(1540, 1040, 1580, 1200)],
+        ),
     ]
     cases: list[dict[str, Any]] = []
-    for r, box, obstacles in geometries:
+    for r, box, obstacles, boxes in geometries:
         seg = leader_segment(cx, cy, r, box)
-        routed = None if seg is None else route_leader(seg, cx, cy, r, box, obstacles, pad)
+        routed = None if seg is None else route_leader(seg, cx, cy, r, box, obstacles, pad, boxes)
         visible = {
             mode: seg is not None and leader_visible(Label(object_id=1, leader=mode), seg[2], s)
             for mode in LEADER_MODES
@@ -264,6 +283,7 @@ def leader_vectors() -> list[dict[str, Any]]:
                 "pad": pad,
                 "box": asdict(box),
                 "obstacles": [asdict(c) for c in obstacles],
+                "boxes": [asdict(b) for b in boxes],
                 "segment": None
                 if seg is None
                 else {
@@ -274,8 +294,9 @@ def leader_vectors() -> list[dict[str, Any]]:
                 "routed": None
                 if routed is None
                 else {
-                    "from": [_r(routed[0][0]), _r(routed[0][1])],
-                    "to": [_r(routed[1][0]), _r(routed[1][1])],
+                    "from": [_r(routed.start[0]), _r(routed.start[1])],
+                    "to": [_r(routed.end[0]), _r(routed.end[1])],
+                    "blocked": routed.blocked,
                 },
                 "visible": visible,
             }
@@ -299,6 +320,65 @@ RING_CROSSING_CASES: list[tuple[tuple[float, float], tuple[float, float], Circle
     ((10, 0), (86, 0), _BIG, False),
     ((50, 3), (50, 3), _SMALL, True),
 ]
+
+
+# ``box_crosses_ring`` exactly on its thresholds (#117), pad 4: a box whose nearest corner sits
+# at r + pad (clear: ``<``) and a hair inside it; one whose farthest corner sits at r − pad
+# (clear: ``>``) and a hair beyond; a box inside a ring smaller than the pad (inner ≤ 0 is skipped).
+_RING = Circle(0, 0, 100)
+BOX_CROSSING_CASES: list[tuple[Box, Circle, bool]] = [
+    (Box(104, 0, 200, 50), _RING, False),  # nearest corner exactly on r + pad
+    (Box(103.5, 0, 200, 50), _RING, True),
+    (Box(-96, 0, 0, 0), _RING, False),  # farthest corner exactly on r − pad
+    (Box(-97, 0, 0, 0), _RING, True),
+    (Box(-1, -1, 1, 1), Circle(0, 0, 3), True),  # pad covers the whole ring: inner ≤ 0
+    (Box(-100, -100, 100, 100), _RING, True),  # straddles the outline
+    (Box(-50, -50, 50, 50), _RING, False),  # inside
+]
+
+
+def box_crossing_vectors() -> list[dict[str, Any]]:
+    cases: list[dict[str, Any]] = []
+    for box, c, crosses in BOX_CROSSING_CASES:
+        if box_crosses_ring(box, c, RING_CROSSING_PAD) != crosses:
+            raise SystemExit(f"box_crosses_ring disagrees with its expected table at {box}")
+        cases.append(
+            {"box": asdict(box), "circle": asdict(c), "pad": RING_CROSSING_PAD, "crosses": crosses}
+        )
+    return cases
+
+
+# ``segment_crosses_box`` (#118), pad 4 around Box(10, 10, 50, 30): through the middle; along
+# the inflated top edge exactly (touching is clear); a hair inside it; a segment ending inside
+# the box; one passing a corner diagonally without entering; one entirely inside.
+_TEXT = Box(10, 10, 50, 30)
+BOX_SEGMENT_CASES: list[tuple[tuple[float, float], tuple[float, float], bool]] = [
+    ((0, 20), (100, 20), True),
+    ((0, 6), (100, 6), False),
+    ((0, 6.5), (100, 6.5), True),
+    ((0, 0), (30, 20), True),
+    ((0, 14), (14, 0), True),  # clips the inflated corner at (6, 6)
+    ((0, 10), (10, 0), False),  # passes outside that corner
+    ((20, 15), (30, 25), True),
+    ((60, 0), (60, 100), False),  # just past the right edge (54)
+]
+
+
+def box_segment_vectors() -> list[dict[str, Any]]:
+    cases: list[dict[str, Any]] = []
+    for a, b, crosses in BOX_SEGMENT_CASES:
+        if segment_crosses_box(a, b, _TEXT, RING_CROSSING_PAD) != crosses:
+            raise SystemExit(f"segment_crosses_box disagrees with its expected table at {a}–{b}")
+        cases.append(
+            {
+                "a": list(a),
+                "b": list(b),
+                "box": asdict(_TEXT),
+                "pad": RING_CROSSING_PAD,
+                "crosses": crosses,
+            }
+        )
+    return cases
 
 
 def ring_crossing_vectors() -> list[dict[str, Any]]:
@@ -361,6 +441,8 @@ def build_vectors(fonts_dir: Path) -> dict[str, Any]:
         "labels": label_vectors(fonts_dir, objects),
         "leaders": leader_vectors(),
         "ring_crossings": ring_crossing_vectors(),
+        "box_crossings": box_crossing_vectors(),
+        "box_segments": box_segment_vectors(),
         "anchors": anchor_vectors(),
     }
 

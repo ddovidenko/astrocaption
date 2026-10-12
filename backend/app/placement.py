@@ -54,6 +54,17 @@ class Placement:
 
 
 @dataclass(frozen=True)
+class FixedItem:
+    """A label the placer must avoid but never moves (a pinned label, or one carried over a
+    re-solve): its text box and its marker ring. It gets a ``Placement`` back like the placed
+    items, with ``collided`` judged against every other final box and ring (#107)."""
+
+    id: int
+    box: Box
+    circle: Circle
+
+
+@dataclass(frozen=True)
 class Box:
     left: float
     top: float
@@ -110,15 +121,42 @@ def box_crosses_ring(box: Box, c: Circle, pad: float) -> bool:
     """True when the circle's outline passes through ``box`` (inflated by ``pad``).
 
     A box entirely inside a large marker (e.g. a star label inside M 42's circle) or
-    entirely outside it is fine; sitting on the drawn ring is not.
+    entirely outside it is fine; sitting on the drawn ring is not. Squared distances only
+    (#117): ``hypot`` is not bit-identical between Python and V8, and a corner exactly on
+    ``r ± pad`` must fall on the same side in both placers.
     """
     nx = min(max(c.x, box.left), box.right)
     ny = min(max(c.y, box.top), box.bottom)
-    nearest = math.hypot(c.x - nx, c.y - ny)
+    dnx, dny = c.x - nx, c.y - ny
+    nearest_sq = dnx * dnx + dny * dny
     fx = box.left if abs(c.x - box.left) > abs(c.x - box.right) else box.right
     fy = box.top if abs(c.y - box.top) > abs(c.y - box.bottom) else box.bottom
-    farthest = math.hypot(c.x - fx, c.y - fy)
-    return nearest < c.r + pad and farthest > c.r - pad
+    dfx, dfy = c.x - fx, c.y - fy
+    farthest_sq = dfx * dfx + dfy * dfy
+    outer, inner = c.r + pad, c.r - pad
+    return nearest_sq < outer * outer and (inner <= 0 or farthest_sq > inner * inner)
+
+
+def segment_crosses_box(
+    a: tuple[float, float], b: tuple[float, float], box: Box, pad: float
+) -> bool:
+    """True when the segment ``a``–``b`` enters ``box`` inflated by ``pad`` (#118): a leader
+    running through another label's text. Products and sums only, like the ring tests: the
+    box is convex, so the segment misses it exactly when a box axis or the segment's own line
+    separates the two. A segment touching the inflated edge counts as clear."""
+    left, top = box.left - pad, box.top - pad
+    right, bottom = box.right + pad, box.bottom + pad
+    (ax, ay), (bx, by) = a, b
+    if max(ax, bx) <= left or min(ax, bx) >= right:
+        return False
+    if max(ay, by) <= top or min(ay, by) >= bottom:
+        return False
+    dx, dy = bx - ax, by - ay
+    sides = [
+        dx * (cy - ay) - dy * (cx - ax)
+        for cx, cy in ((left, top), (right, top), (right, bottom), (left, bottom))
+    ]
+    return not (all(v <= 0 for v in sides) or all(v >= 0 for v in sides))
 
 
 def segment_crosses_ring(
@@ -182,13 +220,15 @@ def place_labels(
     height: float,
     items: Sequence[PlacementItem],
     *,
-    fixed_boxes: Sequence[Box] = (),
-    fixed_circles: Sequence[Circle] = (),
+    fixed: Sequence[FixedItem] = (),
 ) -> list[Placement]:
-    """Place every item; returns placements in the same order as ``items``.
+    """Place every item; returns placements for ``items`` in their order, then one per
+    ``fixed`` item in theirs.
 
-    ``fixed_boxes`` / ``fixed_circles`` are obstacles that are never moved (labels the
-    owner already positioned, and their markers), used when re-solving.
+    ``fixed`` items are obstacles that are never moved (labels the owner pinned or already
+    positioned, and their markers), used by Auto-arrange and when re-solving. A placed item is
+    ``collided`` when the search found no clean slot; a fixed one when, once everything else
+    is laid out around it, its box touches another box or crosses another marker's ring.
     """
     s = scale_unit(width, height)
     gap = GAP_FACTOR * s
@@ -196,8 +236,8 @@ def place_labels(
     step = RING_STEP_FACTOR * s
 
     order = sorted(items, key=lambda it: (-it.radius, it.id))
-    accepted: list[Box] = list(fixed_boxes)
-    markers: list[Circle] = list(fixed_circles)
+    accepted: list[Box] = [f.box for f in fixed]
+    markers: list[Circle] = [f.circle for f in fixed]
     result: dict[int, Placement] = {}
 
     for it in order:
@@ -214,4 +254,16 @@ def place_labels(
         markers.append(Circle(it.x, it.y, it.radius))
         result[it.id] = Placement(it.id, chosen.left, chosen.top, collided)
 
-    return [result[it.id] for it in items]
+    kept = [
+        Placement(f.id, f.box.left, f.box.top, _touches(k, f.box, accepted, markers, pad))
+        for k, f in enumerate(fixed)
+    ]
+    return [result[it.id] for it in items] + kept
+
+
+def _touches(k: int, box: Box, boxes: Sequence[Box], markers: Sequence[Circle], pad: float) -> bool:
+    """Whether ``box`` (the ``k``-th of ``boxes``, whose own ring is ``markers[k]``) touches any
+    *other* box or crosses any other ring: the fixed items' ``collided``."""
+    return any(boxes_overlap(box, o, pad) for i, o in enumerate(boxes) if i != k) or any(
+        box_crosses_ring(box, c, pad) for i, c in enumerate(markers) if i != k
+    )

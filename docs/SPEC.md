@@ -227,9 +227,19 @@ Every enabled object has:
   inside M 42, is fine, as for the placer). Then the first clear endpoint among the edge midpoints
   (top, right, bottom, left) and corners (top-left, top-right, bottom-right, bottom-left) of the box's faces
   that face the marker is used (a far-side endpoint would run the leader across the text), and the closest
-  point again when none is clear. A ring whose outline already runs through the label's own box (the owner
-  dragged it there) does not block that label's leader. Routing never decides whether a leader exists: `auto`
-  looks at the closest point's gap alone. Both renderers apply the rule; `make render-vectors` pins it.
+  point again when none is clear. Other enabled labels' text boxes (inflated by the same `4·s`) count too,
+  below rings (#118): among the closest point and the candidates, in that order, the first that clears every
+  ring *and* every other box wins, else the first that clears the rings, else the closest point. So text alone
+  never reroutes unless some candidate clears it, and a ring is never crossed to spare text. A ring whose
+  outline already runs through the label's own box (the owner dragged it there) does not block that label's
+  leader. Routing never decides whether a leader exists: `auto` looks at the closest point's gap alone. Both
+  renderers apply the rule; `make render-vectors` pins it (the ring, box-ring and segment-box tests exactly on
+  their thresholds too, #117: all three compare squared distances, since `hypot` is not bit-identical between
+  Python and V8). When even the closest point cuts a ring, the leader is drawn there and the editor says so
+  above the canvas (#119), judged on the committed document so it settles on the drop rather than flickering through a
+  drag: "The leader for NGC 1977 crosses another marker; drag the label somewhere with a
+  clear line to it." (counted and the first named when there are several); the export matches the preview, so
+  it is a notice, not an error.
 
 Interactions:
 
@@ -262,7 +272,7 @@ Tabs:
 3. **Layout** — "Auto-arrange" button: flushes any pending save, then runs the collision-avoidance placer on every enabled label that is not pinned (same algorithm as the initial placement); pinned labels (dragged, or pinned from the toolbar) stay where they are and the others are placed around them. "Reset positions" asks for confirmation, unpins every label, then places all of them. Neither touches the document until the placed labels come back; both then mark it dirty for the autosave to pick up. A 409 shows as the toolbar's Reload state, with one line in the tab saying the layout was not arranged; a label dragged while the request was in flight drops the answer rather than undoing the drag.
 4. **Image** — read-only solve facts (nova job link, field centre/size/rotation, pixel scale, image size) and the **Export** button (full resolution, matching the original JPEG's encoding). A line above it reads "Not exported yet", "Exported 3 minutes ago", or "Changes since the last export" — the stored document's content differs from what the export rendered, or a change is still unsaved — with the button emphasised in that last case unless the save is in conflict or failed (#91). Undo and Redo are disabled while a drag or wheel-resize is in progress. *M3 note:* re-solve, publish toggle and delete stay on the image card, not this tab.
 
-The tablist works from the keyboard (arrow keys, Home, End move and select; one tab stop; each panel is focusable). A tab body mounts on its first visit and stays mounted, so an export still rendering on the Image tab or a search typed on the Objects tab survives a switch. While a solve runs, the markers show a `not-allowed` cursor. Editor failure notices each name a next step: a canvas that could not be sized, a preview that failed to load (a 401 says the session has expired), labels that could not be drawn (counted, the first one named, "the export may differ from this preview") and a save the server rejected because the objects changed (Reload, as for a conflict).
+The tablist works from the keyboard (arrow keys, Home, End move and select; one tab stop; each panel is focusable). A tab body mounts on its first visit and stays mounted, so an export still rendering on the Image tab or a search typed on the Objects tab survives a switch. While a solve runs, the markers show a `not-allowed` cursor. Editor failure notices each name a next step: a canvas that could not be sized, a preview that failed to load (a 401 says the session has expired), labels that could not be drawn (counted, the first one named, "the export may differ from this preview"), a leader that could not be routed around a ring (§ 6.2, a notice rather than an error) and a save the server rejected because the objects changed (Reload, as for a conflict).
 
 ### 6.4 Auto-placement algorithm (initial and on demand)
 
@@ -285,7 +295,8 @@ Details fixed by the M1 implementation (`backend/app/placement.py`):
 - Sort ties break on object id ascending. Marker radius used here is `max(catalogue radius, style.marker_min_radius)`.
 - Diagonal anchors put the box corner at `offset / √2` on both axes; "inside the image" is inclusive of the edges.
 - Boxes overlap when their gap is smaller than the padding on any side; a box "crosses a ring" when its nearest point is closer than `r + pad` and its farthest corner farther than `r − pad` from the centre.
-- The placer accepts *fixed* boxes and circles as obstacles it must avoid but never moves; re-solve uses this to keep the owner's layout and place only new objects.
+- The placer accepts *fixed* items (id, text box, marker ring) as obstacles it must avoid but never moves: Auto-arrange's pinned labels, and the labels a re-solve carries over. It returns a placement for them too, after the placed ones, with `collided` judged by its own predicate against every other final box and ring (#107), so a kept label's badge is fresh after everything around it moved; a placed label's `collided` still means its search found no slot. The editor only applies the verdicts of the labels it placed (a drag clears `collided` on its own).
+- Box widths are `ceil` of a measured width on both sides, and the canvas measures within 0.5 px of Pillow (§ 9), so for a string whose width sits within that of an integer the two placers see boxes one pixel apart and can pick different anchors for the same label. This is accepted (#65): the browser's placement (toggling a label on, Reset position) becomes the stored `x, y`, which the server renders as stored and never re-places unless Auto-arrange is asked for; the pixel budget in § 9 already covers the one-pixel box edge at draw time. A measure endpoint would put a round trip in front of every toggle for a difference no one can see.
 - An object whose own circle spills past the frame (M 31 filling the field: radius larger than the distance to every edge) gets no slot outside its ring, so after the normal search fails it is labelled as a point at its centre using the same anchors and rings. Only objects whose ring is fully inside the frame fall through to the `collided` fallback.
 - Text boxes are measured by the caller (Pillow on the server, canvas metrics in the browser); the placer itself has no font dependency. Vectors in `tests/fixtures/placement/` pin the Python output and are regenerated with `make placement-vectors`.
 

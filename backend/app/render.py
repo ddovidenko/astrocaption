@@ -25,7 +25,15 @@ from PIL import Image, ImageDraw, JpegImagePlugin
 
 from .fonts import load_font, resolved_style
 from .models import MIN_FONT_SIZE, Annotations, Label, SolveObject, StyleConfig
-from .placement import PAD_FACTOR, Box, Circle, box_crosses_ring, scale_unit, segment_crosses_ring
+from .placement import (
+    PAD_FACTOR,
+    Box,
+    Circle,
+    box_crosses_ring,
+    scale_unit,
+    segment_crosses_box,
+    segment_crosses_ring,
+)
 from .storage import is_jpeg, to_rgb, write_preview
 
 ALIAS_SCALE = 0.7
@@ -167,6 +175,14 @@ def _facing_candidates(cx: float, cy: float, box: Box) -> list[Point]:
     return [point for visible, point in faces if visible]
 
 
+@dataclass(frozen=True)
+class RoutedLeader:
+    start: Point
+    end: Point
+    #: The segment still cuts another marker's ring: no candidate cleared every ring (#119).
+    blocked: bool
+
+
 def route_leader(
     seg: tuple[Point, Point, float],
     cx: float,
@@ -175,23 +191,32 @@ def route_leader(
     box: Box,
     obstacles: Sequence[Circle],
     pad: float,
-) -> tuple[Point, Point]:
-    """The leader to draw (#14): ``seg`` (the ``leader_segment`` to the nearest point) unless it
-    crosses one of the ``obstacles`` rings, then the first of ``_facing_candidates`` whose
-    segment crosses none, and ``seg`` again when every candidate does. A ring whose outline
-    already runs through ``box`` (the owner dragged the label onto it; M 42's arc through a
-    label near the Trapezium) is not an obstacle: the leader cannot make that worse."""
+    boxes: Sequence[Box] = (),
+) -> RoutedLeader:
+    """The leader to draw (#14, #118). The candidates are ``seg`` (the ``leader_segment`` to the
+    nearest point) and then ``_facing_candidates``, in that order; the first one that clears
+    every ``obstacles`` ring and every other label's text box (``boxes``, inflated by ``pad``)
+    wins, else the first that clears the rings, else ``seg`` itself, which is then ``blocked``.
+    A ring whose outline already runs through ``box`` (the owner dragged the label onto it; M 42's
+    arc through a label near the Trapezium) is not an obstacle: the leader cannot make that
+    worse."""
     obstacles = [c for c in obstacles if not box_crosses_ring(box, c, pad)]
     start, end, _gap = seg
-    if not any(segment_crosses_ring(start, end, c, pad) for c in obstacles):
-        return start, end
+    candidates: list[tuple[Point, Point]] = [(start, end)]
     for px, py in _facing_candidates(cx, cy, box):
         cand = _leader_to(cx, cy, r, px, py)
-        if cand is None:  # cannot happen: the nearest point is already outside the marker
-            continue
-        if not any(segment_crosses_ring(cand[0], cand[1], c, pad) for c in obstacles):
-            return cand[0], cand[1]
-    return start, end
+        if cand is not None:  # None cannot happen: the nearest point is outside the marker
+            candidates.append((cand[0], cand[1]))
+    clear_of_rings = [
+        c for c in candidates if not any(segment_crosses_ring(*c, ring, pad) for ring in obstacles)
+    ]
+    for a, b in clear_of_rings:
+        if not any(segment_crosses_box(a, b, other, pad) for other in boxes):
+            return RoutedLeader(a, b, False)
+    if clear_of_rings:
+        a, b = clear_of_rings[0]
+        return RoutedLeader(a, b, False)
+    return RoutedLeader(start, end, True)
 
 
 def leader_visible(label: Label, gap: float, s: float) -> bool:
@@ -218,6 +243,15 @@ def draw_annotations(
         if label.enabled and (o := by_id.get(label.object_id)) is not None
     }
 
+    # Every box first: a leader routes around the other labels' text as well as their rings.
+    boxes: dict[int, tuple[LabelBox, Box]] = {}
+    for label in ann.labels:
+        obj = by_id.get(label.object_id)
+        if label.enabled and obj is not None:
+            box = measure_label(fonts_dir, style, label, obj)
+            rect = Box(label.x, label.y, label.x + box.width, label.y + box.height)
+            boxes[label.object_id] = (box, rect)
+
     for label in ann.labels:
         obj = by_id.get(label.object_id)
         if not label.enabled or obj is None:
@@ -228,13 +262,13 @@ def draw_annotations(
             outline=style.marker_color,
             width=style.marker_width,
         )
-        box = measure_label(fonts_dir, style, label, obj)
-        rect = Box(label.x, label.y, label.x + box.width, label.y + box.height)
+        box, rect = boxes[label.object_id]
         seg = leader_segment(obj.x, obj.y, r, rect)
         if seg is not None and leader_visible(label, seg[2], s):
             others = [c for oid, c in rings.items() if oid != label.object_id]
-            routed = route_leader(seg, obj.x, obj.y, r, rect, others, pad)
-            draw.line(list(routed), fill=style.leader_color, width=style.marker_width)
+            texts = [b for oid, (_, b) in boxes.items() if oid != label.object_id]
+            routed = route_leader(seg, obj.x, obj.y, r, rect, others, pad, texts)
+            draw.line([routed.start, routed.end], fill=style.leader_color, width=style.marker_width)
         text = label_text(obj, label, style)
         color = label.color or style.text_color
         draw.text(
