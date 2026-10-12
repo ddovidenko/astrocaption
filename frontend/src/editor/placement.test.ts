@@ -2,19 +2,20 @@ import { describe, expect, it } from 'vitest'
 import collision from '../../../tests/fixtures/placement/collision_forced.json'
 import edge from '../../../tests/fixtures/placement/edge_left_fallback.json'
 import fixed from '../../../tests/fixtures/placement/fixed_obstacles.json'
+import fixedCollided from '../../../tests/fixtures/placement/fixed_collided.json'
 import huge from '../../../tests/fixtures/placement/huge_marker_centre_label.json'
 import random0 from '../../../tests/fixtures/placement/random_0.json'
 import random1 from '../../../tests/fixtures/placement/random_1.json'
 import random2 from '../../../tests/fixtures/placement/random_2.json'
 import single from '../../../tests/fixtures/placement/single_right.json'
 import stacked from '../../../tests/fixtures/placement/stacked_same_position.json'
-import type { Box, Circle } from './metrics'
 import {
   PAD_FACTOR,
   boxesOverlap,
   placeLabels,
   placeNewLabel,
   placeNewLabels,
+  type FixedItem,
   type Placement,
   type PlacementItem,
 } from './placement'
@@ -27,16 +28,21 @@ interface Vector {
   width: number
   height: number
   items: PlacementItem[]
-  fixed_boxes: Box[]
-  fixed_circles: Circle[]
+  fixed: FixedItem[]
   expected: Placement[]
 }
-const VECTORS = [collision, edge, fixed, huge, random0, random1, random2, single, stacked] as unknown as Vector[]
+const VECTORS = [collision, edge, fixed, fixedCollided, huge, random0, random1, random2, single, stacked] as unknown as Vector[]
 
 describe('placeLabels', () => {
+  it('judges the fixed items too (#107)', () => {
+    // The fixed items' placements follow the placed ones; two parked on each other are flagged.
+    const v = fixedCollided
+    expect(v.expected.map((p) => p.id)).toEqual([1, 7, 8, 9])
+    expect(v.expected.map((p) => p.collided)).toEqual([false, true, true, false])
+  })
   for (const v of VECTORS) {
     it(`reproduces ${v.name}`, () => {
-      const got = placeLabels(v.width, v.height, v.items, v.fixed_boxes, v.fixed_circles)
+      const got = placeLabels(v.width, v.height, v.items, v.fixed)
       expect(got.length).toBe(v.expected.length)
       got.forEach((p, i) => {
         const want = v.expected[i]!

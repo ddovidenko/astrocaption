@@ -35,6 +35,13 @@ export function drawErrorNotice(count: number, firstName: string, firstMessage: 
   return `${head}: ${firstMessage}. The export may differ from this preview.`
 }
 
+/** A leader drawn through another marker's ring because no endpoint on the label's facing sides
+ *  cleared every ring (#119): the export matches, so the owner is told rather than warned. */
+export function blockedLeaderNotice(count: number, firstName: string): string {
+  const head = count === 1 ? `The leader for ${firstName} crosses another marker` : `${count} leaders cross other markers (first: ${firstName})`
+  return `${head}; drag the label somewhere with a clear line to it.`
+}
+
 /** Whether a save's failure means the document no longer matches the server's objects. The
  *  server's three object-id sentences all start with `labels:` (see `images.py`, the constants
  *  above `_check_version`); its other 422s — a bad font file, a malformed body — are ordinary

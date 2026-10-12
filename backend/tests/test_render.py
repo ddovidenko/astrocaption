@@ -12,6 +12,7 @@ from app.models import Annotations, Label, SolveObject
 from app.placement import PAD_FACTOR, Box, Circle, scale_unit, segment_crosses_ring
 from app.render import (
     ALIAS_SCALE,
+    RoutedLeader,
     label_text,
     leader_segment,
     line_height,
@@ -91,7 +92,7 @@ def routed_to(box: Box, obstacles: list[Circle]) -> tuple[float, float]:
     """Where a leader from a marker of radius 10 at the origin ends on ``box``, pad 4."""
     seg = leader_segment(0, 0, 10, box)
     assert seg is not None
-    return route_leader(seg, 0, 0, 10, box, obstacles, 4)[1]
+    return route_leader(seg, 0, 0, 10, box, obstacles, 4).end
 
 
 def test_route_leader_avoids_another_ring() -> None:
@@ -102,14 +103,16 @@ def test_route_leader_avoids_another_ring() -> None:
     # with the box, so only the left face faces it, and its top corner is the first clear one.
     seg = leader_segment(0, 0, 10, box)
     assert seg is not None
-    (x1, y1), (x2, y2) = route_leader(seg, 0, 0, 10, box, [Circle(50, 0, 5)], 4)
-    assert (x2, y2) == (100, -60)
+    routed = route_leader(seg, 0, 0, 10, box, [Circle(50, 0, 5)], 4)
+    (x1, y1), (x2, y2) = routed.start, routed.end
+    assert (x2, y2) == (100, -60) and not routed.blocked
     dist = (100**2 + 60**2) ** 0.5
     assert abs(x1 - 100 / dist * 10) < 1e-9 and abs(y1 - (-60) / dist * 10) < 1e-9
     # That corner's path blocked too: the bottom corner.
     assert routed_to(box, [Circle(50, 0, 5), Circle(50, -30, 5)]) == (100, 60)
-    # Nothing clears: the nearest point is used.
+    # Nothing clears: the nearest point is used, and the leader reports itself blocked (#119).
     assert routed_to(box, [Circle(30, 0, 60)]) == (100, 0)
+    assert route_leader(seg, 0, 0, 10, box, [Circle(30, 0, 60)], 4).blocked
     # Entirely inside a big ring: the nearest point stays.
     assert routed_to(box, [Circle(30, 0, 500)]) == (100, 0)
 
@@ -128,6 +131,31 @@ def test_route_leader_ignores_a_ring_the_box_sits_across() -> None:
     # A big ring the box lies entirely inside is not straddled and still blocks.
     assert routed_to(box, [Circle(150, 0, 100)]) == (100, 0)
     assert routed_to(box, [Circle(50, 0, 5), Circle(150, 0, 100)]) == (100, 0)
+
+
+def test_route_leader_avoids_another_labels_text() -> None:
+    """#118: other labels' boxes are obstacles too, below rings: a candidate clear of both wins,
+    else one clear of the rings, else the nearest point."""
+    box = Box(100, -60, 200, 60)
+    seg = leader_segment(0, 0, 10, box)
+    assert seg is not None
+
+    def route(rings: list[Circle], texts: list[Box]) -> RoutedLeader:
+        assert seg is not None
+        return route_leader(seg, 0, 0, 10, box, rings, 4, texts)
+
+    # Text on the nearest point's path: the top-left corner.
+    assert route([], [Box(40, -10, 60, 10)]).end == (100, -60)
+    # Text and a ring: the ring blocks the nearest point, the text the top corner: bottom-left.
+    assert route([Circle(50, 0, 5)], [Box(40, -50, 60, -30)]).end == (100, 60)
+    # Text across every candidate: nearest point, not blocked (text never blocks on its own).
+    assert route([], [Box(40, -100, 60, 100)]) == RoutedLeader(seg[0], seg[1], False)
+    # The ring blocks the nearest point and text covers both corners: the first ring-clear
+    # candidate (top-left) is used although it crosses the text.
+    assert route([Circle(50, 0, 5)], [Box(40, -100, 60, -20), Box(40, 20, 60, 100)]).end == (
+        100,
+        -60,
+    )
 
 
 def test_route_leader_never_crosses_the_label_itself() -> None:
@@ -243,9 +271,12 @@ def test_leader_routes_around_another_marker(tmp_path: Path) -> None:
     naive = leader_segment(1620, 550, r, rect)
     assert naive is not None and naive[1] == (rect.right, rect.top)
     routed = route_leader(naive, 1620, 550, r, rect, [marker_ring(OBJECTS[0], style)], PAD)
-    assert routed[1] == (rect.right, rect.bottom)
+    assert routed.end == (rect.right, rect.bottom)
     with Image.open(out) as img:
-        for (x1, y1), (x2, y2), drawn in ((*routed, True), (naive[0], naive[1], False)):
+        for (x1, y1), (x2, y2), drawn in (
+            (routed.start, routed.end, True),
+            (naive[0], naive[1], False),
+        ):
             px = img.getpixel((round(x1 + 0.8 * (x2 - x1)), round(y1 + 0.8 * (y2 - y1))))
             assert isinstance(px, tuple) and close(px, LEADER_RGB) == drawn
 
@@ -264,7 +295,7 @@ def test_auto_leader_is_decided_on_the_nearest_gap(tmp_path: Path) -> None:
     naive = leader_segment(1620, 550, r, rect)
     assert naive is not None and naive[2] < 12 * S
     routed = route_leader(naive, 1620, 550, r, rect, [marker_ring(bystander, style)], PAD)
-    assert routed[1] != naive[1]
+    assert routed.end != naive[1]
     objects = [*OBJECTS, bystander]
     for mode, drawn in (("auto", False), ("on", True)):
         label = Label(object_id=2, x=1470.0, y=434.0, leader=mode)  # type: ignore[arg-type]
@@ -273,7 +304,7 @@ def test_auto_leader_is_decided_on_the_nearest_gap(tmp_path: Path) -> None:
         out = tmp_path / f"leader-{mode}.jpg"
         render_annotated(original, objects, ann, FONTS_DIR, out)
         with Image.open(out) as img:
-            (x1, y1), (x2, y2) = routed
+            (x1, y1), (x2, y2) = routed.start, routed.end
             px = img.getpixel((round(x1 + 0.5 * (x2 - x1)), round(y1 + 0.5 * (y2 - y1))))
             assert isinstance(px, tuple) and close(px, LEADER_RGB) == drawn
 

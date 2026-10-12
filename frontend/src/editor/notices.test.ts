@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../api'
-import { drawErrorNotice, isStaleDocumentError, previewErrorSentence, probeStatus } from './notices'
+import { blockedLeaderNotice, drawErrorNotice, isStaleDocumentError, previewErrorSentence, probeStatus } from './notices'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -49,5 +49,16 @@ describe('isStaleDocumentError', () => {
     )
     expect(isStaleDocumentError(new ApiError(409, 'This image was changed elsewhere.'))).toBe(false)
     expect(isStaleDocumentError(new ApiError(500, 'boom'))).toBe(false)
+  })
+})
+
+describe('blockedLeaderNotice', () => {
+  it('counts, names the first label and says what to do', () => {
+    expect(blockedLeaderNotice(1, 'NGC 1977')).toBe(
+      'The leader for NGC 1977 crosses another marker; drag the label somewhere with a clear line to it.',
+    )
+    expect(blockedLeaderNotice(3, 'NGC 1977')).toBe(
+      '3 leaders cross other markers (first: NGC 1977); drag the label somewhere with a clear line to it.',
+    )
   })
 })

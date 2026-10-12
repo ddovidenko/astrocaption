@@ -11,6 +11,8 @@ from app.placement import (
     PAD_FACTOR,
     Box,
     Circle,
+    FixedItem,
+    Placement,
     PlacementItem,
     anchor_box,
     box_crosses_ring,
@@ -18,6 +20,13 @@ from app.placement import (
     boxes_overlap,
     place_labels,
     scale_unit,
+    segment_crosses_box,
+)
+from scripts.make_render_vectors import (
+    _TEXT,
+    BOX_CROSSING_CASES,
+    BOX_SEGMENT_CASES,
+    RING_CROSSING_PAD,
 )
 
 VECTORS = Path(__file__).resolve().parent.parent.parent / "tests" / "fixtures" / "placement"
@@ -74,11 +83,41 @@ def test_fixed_obstacles_are_avoided() -> None:
     w, h = 3000, 2000
     item = PlacementItem(1, 1500, 1000, 40, 300, 60)
     blocker = Box(1540, 900, 2000, 1100)  # occupies the "right" slot
-    [p] = place_labels(w, h, [item], fixed_boxes=[blocker])
+    p, kept = place_labels(w, h, [item], fixed=[FixedItem(9, blocker, Circle(1700, 1000, 5))])
     assert not boxes_overlap(
         Box(p.x, p.y, p.x + 300, p.y + 60), blocker, PAD_FACTOR * scale_unit(w, h)
     )
     assert not p.collided
+    # The fixed item comes back too, at its own position; the item's own ring (r 40 + pad 12
+    # reaches x = 1552) runs through the blocker's left edge, so it is flagged (#107).
+    assert kept == Placement(9, blocker.left, blocker.top, True)
+
+
+def test_fixed_items_are_judged_against_each_other_and_the_placed() -> None:
+    """#107: a fixed item's ``collided`` is the placer's own predicate: another box within the
+    pad, or another marker's ring through it; never its own ring."""
+    w, h = 3000, 2000
+    a = FixedItem(7, Box(1400, 900, 1700, 960), Circle(1300, 930, 10))
+    b = FixedItem(8, Box(1405, 905, 1705, 965), Circle(1300, 1050, 10))
+    clean = FixedItem(9, Box(200, 200, 500, 260), Circle(150, 230, 10))
+    on_own_ring = FixedItem(10, Box(2500, 1500, 2800, 1560), Circle(2500, 1500, 40))
+    out = place_labels(w, h, [], fixed=[a, b, clean, on_own_ring])
+    assert [p.collided for p in out] == [True, True, False, False]
+    # A placed label that ends up against a fixed one flags the fixed one as well: the forced
+    # fallback slot ("right" at ring 0) of an item whose every slot is taken.
+    crowd = PlacementItem(1, 350, 230, 10, 2990, 60)  # wider than any slot but the fallback
+    placed, kept = place_labels(w, h, [crowd], fixed=[clean])
+    assert placed.collided and kept.collided
+
+
+def test_box_crosses_ring_on_its_thresholds() -> None:
+    for box, c, crosses in BOX_CROSSING_CASES:
+        assert box_crosses_ring(box, c, RING_CROSSING_PAD) == crosses, box
+
+
+def test_segment_crosses_box_table() -> None:
+    for a, b, crosses in BOX_SEGMENT_CASES:
+        assert segment_crosses_box(a, b, _TEXT, RING_CROSSING_PAD) == crosses, (a, b)
 
 
 def test_ring_semantics() -> None:
@@ -132,13 +171,8 @@ def test_anchor_geometry_is_symmetric() -> None:
 def test_shared_vectors(vector: Path) -> None:
     doc = json.loads(vector.read_text(encoding="utf-8"))
     items = [PlacementItem(**it) for it in doc["items"]]
-    placed = place_labels(
-        doc["width"],
-        doc["height"],
-        items,
-        fixed_boxes=[Box(**b) for b in doc["fixed_boxes"]],
-        fixed_circles=[Circle(**c) for c in doc["fixed_circles"]],
-    )
+    fixed = [FixedItem(f["id"], Box(**f["box"]), Circle(**f["circle"])) for f in doc["fixed"]]
+    placed = place_labels(doc["width"], doc["height"], items, fixed=fixed)
     assert len(placed) == len(doc["expected"])
     for got, want in zip(placed, doc["expected"], strict=True):
         assert got.id == want["id"]

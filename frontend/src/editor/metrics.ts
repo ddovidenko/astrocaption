@@ -184,13 +184,46 @@ export interface LeaderSegment {
  *  A box entirely inside a large marker (e.g. a star label inside M 42's circle) or entirely
  *  outside it is fine; sitting on the drawn ring is not. */
 export function boxCrossesRing(box: Box, c: Circle, pad: number): boolean {
+  // Squared distances only (#117): Math.hypot and Python's hypot are not bit-identical, and a
+  // corner exactly on r ± pad must fall on the same side in both placers.
   const nx = Math.min(Math.max(c.x, box.left), box.right)
   const ny = Math.min(Math.max(c.y, box.top), box.bottom)
-  const nearest = Math.hypot(c.x - nx, c.y - ny)
+  const dnx = c.x - nx
+  const dny = c.y - ny
+  const nearestSq = dnx * dnx + dny * dny
   const fx = Math.abs(c.x - box.left) > Math.abs(c.x - box.right) ? box.left : box.right
   const fy = Math.abs(c.y - box.top) > Math.abs(c.y - box.bottom) ? box.top : box.bottom
-  const farthest = Math.hypot(c.x - fx, c.y - fy)
-  return nearest < c.r + pad && farthest > c.r - pad
+  const dfx = c.x - fx
+  const dfy = c.y - fy
+  const farthestSq = dfx * dfx + dfy * dfy
+  const outer = c.r + pad
+  const inner = c.r - pad
+  return nearestSq < outer * outer && (inner <= 0 || farthestSq > inner * inner)
+}
+
+/** True when the segment a–b enters `box` inflated by `pad` (#118): a leader running through
+ *  another label's text. Mirrors placement.segment_crosses_box: products and sums only. The box
+ *  is convex, so the segment misses it exactly when a box axis or the segment's own line
+ *  separates the two; touching the inflated edge is clear. */
+export function segmentCrossesBox(a: [number, number], b: [number, number], box: Box, pad: number): boolean {
+  const left = box.left - pad
+  const top = box.top - pad
+  const right = box.right + pad
+  const bottom = box.bottom + pad
+  const [ax, ay] = a
+  const [bx, by] = b
+  if (Math.max(ax, bx) <= left || Math.min(ax, bx) >= right) return false
+  if (Math.max(ay, by) <= top || Math.min(ay, by) >= bottom) return false
+  const dx = bx - ax
+  const dy = by - ay
+  const corners: [number, number][] = [
+    [left, top],
+    [right, top],
+    [right, bottom],
+    [left, bottom],
+  ]
+  const sides = corners.map(([cx, cy]) => dx * (cy - ay) - dy * (cx - ax))
+  return !(sides.every((v) => v <= 0) || sides.every((v) => v >= 0))
 }
 
 /** Whether the segment a–b cuts the ring's outline (inflated by `pad`). The counterpart of
@@ -260,12 +293,15 @@ function facingCandidates(cx: number, cy: number, box: Box): [number, number][] 
 export interface RoutedLeader {
   from: [number, number]
   to: [number, number]
+  /** The segment still cuts another marker's ring: no candidate cleared every ring (#119). */
+  blocked: boolean
 }
 
-/** The leader to draw (#14): `seg` (the `leaderSegment` to the nearest point) unless it crosses
- *  one of the `obstacles` rings, then the first of `facingCandidates` whose segment crosses
- *  none, and `seg` again when every candidate does; a ring whose outline runs through the box
- *  itself never blocks. Mirrors render.route_leader. */
+/** The leader to draw (#14, #118). The candidates are `seg` (the `leaderSegment` to the nearest
+ *  point) and then `facingCandidates`, in that order; the first one that clears every `obstacles`
+ *  ring and every other label's text box (`boxes`, inflated by `pad`) wins, else the first that
+ *  clears the rings, else `seg` itself, which is then `blocked`. A ring whose outline runs through
+ *  the box itself never blocks. Mirrors render.route_leader. */
 export function routeLeader(
   seg: LeaderSegment,
   cx: number,
@@ -274,20 +310,24 @@ export function routeLeader(
   box: Box,
   allObstacles: readonly Circle[],
   pad: number,
+  boxes: readonly Box[] = [],
 ): RoutedLeader {
   // A ring whose outline already runs through the box (the owner dragged the label onto it;
   // M 42's arc through a label near the Trapezium) is not an obstacle: the leader cannot make
   // that worse.
   const obstacles = allObstacles.filter((c) => !boxCrossesRing(box, c, pad))
-  const crosses = (from: [number, number], to: [number, number]) =>
-    obstacles.some((c) => segmentCrossesRing(from, to, c, pad))
-  if (!crosses(seg.from, seg.to)) return { from: seg.from, to: seg.to }
+  const candidates: [[number, number], [number, number]][] = [[seg.from, seg.to]]
   for (const [px, py] of facingCandidates(cx, cy, box)) {
     const cand = leaderTo(cx, cy, r, px, py)
-    if (cand === null) continue // cannot happen: the nearest point is already outside the marker
-    if (!crosses(cand.from, cand.to)) return { from: cand.from, to: cand.to }
+    if (cand !== null) candidates.push([cand.from, cand.to]) // null cannot happen: the nearest point is outside the marker
   }
-  return { from: seg.from, to: seg.to }
+  const clearOfRings = candidates.filter(([from, to]) => !obstacles.some((c) => segmentCrossesRing(from, to, c, pad)))
+  for (const [from, to] of clearOfRings) {
+    if (!boxes.some((other) => segmentCrossesBox(from, to, other, pad))) return { from, to, blocked: false }
+  }
+  const first = clearOfRings[0]
+  if (first) return { from: first[0], to: first[1], blocked: false }
+  return { from: seg.from, to: seg.to, blocked: true }
 }
 
 export function leaderVisible(label: Label, gap: number, s: number): boolean {

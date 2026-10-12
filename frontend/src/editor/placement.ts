@@ -44,6 +44,15 @@ export interface Placement {
   collided: boolean
 }
 
+/** A label the placer must avoid but never moves (a pinned label, or one carried over a
+ *  re-solve): its text box and its marker ring. It gets a `Placement` back like the placed items,
+ *  with `collided` judged against every other final box and ring (#107). */
+export interface FixedItem {
+  id: number
+  box: Box
+  circle: Circle
+}
+
 export function boxesOverlap(a: Box, b: Box, pad: number): boolean {
   return a.left < b.right + pad && b.left < a.right + pad && a.top < b.bottom + pad && b.top < a.bottom + pad
 }
@@ -85,21 +94,15 @@ function search(
  *
  *  `fixedBoxes` / `fixedCircles` are obstacles that are never moved (labels the owner already
  *  positioned, and their markers), used when re-solving. */
-export function placeLabels(
-  width: number,
-  height: number,
-  items: PlacementItem[],
-  fixedBoxes: Box[] = [],
-  fixedCircles: Circle[] = [],
-): Placement[] {
+export function placeLabels(width: number, height: number, items: PlacementItem[], fixed: FixedItem[] = []): Placement[] {
   const s = scaleUnit(width, height)
   const gap = GAP_FACTOR * s
   const pad = PAD_FACTOR * s
   const step = RING_STEP_FACTOR * s
 
   const order = [...items].sort((a, b) => b.radius - a.radius || a.id - b.id)
-  const accepted: Box[] = [...fixedBoxes]
-  const markers: Circle[] = [...fixedCircles]
+  const accepted: Box[] = fixed.map((f) => f.box)
+  const markers: Circle[] = fixed.map((f) => f.circle)
   const result = new Map<number, Placement>()
 
   for (const it of order) {
@@ -119,12 +122,21 @@ export function placeLabels(
     result.set(it.id, { id: it.id, x: chosen.left, y: chosen.top, collided })
   }
 
-  return items.map((it) => result.get(it.id)!)
+  const kept = fixed.map((f, k) => ({ id: f.id, x: f.box.left, y: f.box.top, collided: touches(k, f.box, accepted, markers, pad) }))
+  return [...items.map((it) => result.get(it.id)!), ...kept]
+}
+
+/** Whether `box` (the k-th of `boxes`, whose own ring is `markers[k]`) touches any *other* box or
+ *  crosses any other ring: the fixed items' `collided`. */
+function touches(k: number, box: Box, boxes: Box[], markers: Circle[], pad: number): boolean {
+  return (
+    boxes.some((o, i) => i !== k && boxesOverlap(box, o, pad)) || markers.some((c, i) => i !== k && boxCrossesRing(box, c, pad))
+  )
 }
 
 /** A placed label as the obstacle the next placement must avoid: its text box and its marker. */
-function obstacle(x: number, y: number, w: number, h: number, c: Circle): { box: Box; circle: Circle } {
-  return { box: { left: x, top: y, right: x + w, bottom: y + h }, circle: c }
+function obstacle(id: number, x: number, y: number, w: number, h: number, c: Circle): FixedItem {
+  return { id, box: { left: x, top: y, right: x + w, bottom: y + h }, circle: c }
 }
 
 /** Places the labels for `ids`, in that order, each against every other enabled label's box and
@@ -141,18 +153,13 @@ export function placeNewLabels(
   const { image, style } = state
   if (!image || !style) return out
   const wanted = new Set(ids)
-  const fixedBoxes: Box[] = []
-  const fixedCircles: Circle[] = []
-  const block = (o: { box: Box; circle: Circle }) => {
-    fixedBoxes.push(o.box)
-    fixedCircles.push(o.circle)
-  }
+  const fixed: FixedItem[] = []
   for (const other of enabledLabels(state)) {
     if (wanted.has(other.object_id)) continue
     const o = state.objects.get(other.object_id)
     if (!o) continue
     const b = measureLabel(measure, style, other, o)
-    block(obstacle(other.x, other.y, b.width, b.height, markerRing(o, style)))
+    fixed.push(obstacle(other.object_id, other.x, other.y, b.width, b.height, markerRing(o, style)))
   }
   for (const id of ids) {
     const obj = state.objects.get(id)
@@ -160,16 +167,12 @@ export function placeNewLabels(
     if (!obj || !label) continue
     const box = measureLabel(measure, style, label, obj)
     const circle = markerRing(obj, style)
-    const [p] = placeLabels(
-      image.width,
-      image.height,
-      [{ id, x: obj.x, y: obj.y, radius: circle.r, w: box.width, h: box.height }],
-      fixedBoxes,
-      fixedCircles,
-    )
+    // Only the placed item's verdict is used: the fixed ones' come back too but the editor
+    // never rewrites a label it did not place (a drag clears `collided` on its own).
+    const [p] = placeLabels(image.width, image.height, [{ id, x: obj.x, y: obj.y, radius: circle.r, w: box.width, h: box.height }], fixed)
     if (!p) continue
     out.set(id, { x: p.x, y: p.y, collided: p.collided })
-    block(obstacle(p.x, p.y, box.width, box.height, circle))
+    fixed.push(obstacle(id, p.x, p.y, box.width, box.height, circle))
   }
   return out
 }

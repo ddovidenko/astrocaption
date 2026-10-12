@@ -1,0 +1,85 @@
+{
+ "name": "fixed_collided",
+ "width": 3000,
+ "height": 2000,
+ "items": [
+  {
+   "id": 1,
+   "x": 1500,
+   "y": 1000,
+   "radius": 40,
+   "w": 300,
+   "h": 60
+  }
+ ],
+ "fixed": [
+  {
+   "id": 7,
+   "box": {
+    "left": 1400,
+    "top": 900,
+    "right": 1700,
+    "bottom": 960
+   },
+   "circle": {
+    "x": 1300,
+    "y": 930,
+    "r": 10
+   }
+  },
+  {
+   "id": 8,
+   "box": {
+    "left": 1405,
+    "top": 905,
+    "right": 1705,
+    "bottom": 965
+   },
+   "circle": {
+    "x": 1300,
+    "y": 1050,
+    "r": 10
+   }
+  },
+  {
+   "id": 9,
+   "box": {
+    "left": 200,
+    "top": 200,
+    "right": 500,
+    "bottom": 260
+   },
+   "circle": {
+    "x": 150,
+    "y": 230,
+    "r": 10
+   }
+  }
+ ],
+ "expected": [
+  {
+   "id": 1,
+   "x": 1350.0,
+   "y": 1058.0,
+   "collided": false
+  },
+  {
+   "id": 7,
+   "x": 1400,
+   "y": 900,
+   "collided": true
+  },
+  {
+   "id": 8,
+   "x": 1405,
+   "y": 905,
+   "collided": true
+  },
+  {
+   "id": 9,
+   "x": 200,
+   "y": 200,
+   "collided": false
+  }
+ ]
+}

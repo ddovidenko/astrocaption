@@ -12,7 +12,9 @@ import {
   fontShorthand,
   labelText,
   leaderSegment,
+  boxCrossesRing,
   routeLeader,
+  segmentCrossesBox,
   segmentCrossesRing,
   leaderVisible,
   markerRadius,
@@ -50,14 +52,28 @@ interface LeaderCase {
   pad: number
   box: Box
   obstacles: Circle[]
+  boxes: Box[]
   segment: { from: [number, number]; to: [number, number]; gap: number } | null
-  routed: { from: [number, number]; to: [number, number] } | null
+  routed: { from: [number, number]; to: [number, number]; blocked: boolean } | null
   visible: Record<LeaderMode, boolean>
 }
 interface RingCrossingCase {
   a: [number, number]
   b: [number, number]
   circle: Circle
+  pad: number
+  crosses: boolean
+}
+interface BoxCrossingCase {
+  box: Box
+  circle: Circle
+  pad: number
+  crosses: boolean
+}
+interface BoxSegmentCase {
+  a: [number, number]
+  b: [number, number]
+  box: Box
   pad: number
   crosses: boolean
 }
@@ -79,6 +95,8 @@ interface Vectors {
   labels: LabelCase[]
   leaders: LeaderCase[]
   ring_crossings: RingCrossingCase[]
+  box_crossings: BoxCrossingCase[]
+  box_segments: BoxSegmentCase[]
   anchors: AnchorCase[]
 }
 
@@ -223,9 +241,10 @@ describe('render vectors', () => {
         expectPoint(seg!.from, c.segment.from)
         expectPoint(seg!.to, c.segment.to)
         expect(Math.abs(seg!.gap - c.segment.gap)).toBeLessThanOrEqual(EPS)
-        const routed = routeLeader(seg!, c.cx, c.cy, c.r, c.box, c.obstacles, c.pad)
+        const routed = routeLeader(seg!, c.cx, c.cy, c.r, c.box, c.obstacles, c.pad, c.boxes)
         expectPoint(routed.from, c.routed!.from)
         expectPoint(routed.to, c.routed!.to)
+        expect(routed.blocked, JSON.stringify(c.box)).toBe(c.routed!.blocked)
       }
       for (const mode of ['auto', 'on', 'off'] as const) {
         const drawn = seg !== null && leaderVisible(label(mode), seg.gap, c.s)
@@ -237,6 +256,12 @@ describe('render vectors', () => {
   it('covers the routing cases', () => {
     const routed = vectors.leaders.filter((c) => c.obstacles.length > 0)
     expect(routed.length).toBeGreaterThanOrEqual(7)
+    // #118: text boxes reroute, and one case shows text giving way to a ring-clear candidate.
+    const texts = vectors.leaders.filter((c) => c.boxes.length > 0)
+    expect(texts.length).toBeGreaterThanOrEqual(4)
+    expect(texts.some((c) => c.routed && c.segment && c.routed.to[1] !== c.segment.to[1])).toBe(true)
+    // #119: at least one case reports itself blocked.
+    expect(vectors.leaders.some((c) => c.routed?.blocked)).toBe(true)
     // At least one case reroutes and at least one falls back, so a broken port cannot pass.
     expect(routed.some((c) => c.routed && c.segment && c.routed.to[1] !== c.segment.to[1])).toBe(true)
     expect(routed.some((c) => c.routed && c.segment && c.routed.to[1] === c.segment.to[1])).toBe(true)
@@ -246,6 +271,17 @@ describe('render vectors', () => {
     expect(vectors.ring_crossings.length).toBeGreaterThanOrEqual(8)
     for (const c of vectors.ring_crossings) {
       expect(segmentCrossesRing(c.a, c.b, c.circle, c.pad), JSON.stringify(c)).toBe(c.crosses)
+    }
+  })
+
+  it('reproduces every box crossing on its thresholds (#117) and every box segment (#118)', () => {
+    expect(vectors.box_crossings.length).toBeGreaterThanOrEqual(7)
+    for (const c of vectors.box_crossings) {
+      expect(boxCrossesRing(c.box, c.circle, c.pad), JSON.stringify(c)).toBe(c.crosses)
+    }
+    expect(vectors.box_segments.length).toBeGreaterThanOrEqual(8)
+    for (const c of vectors.box_segments) {
+      expect(segmentCrossesBox(c.a, c.b, c.box, c.pad), JSON.stringify(c)).toBe(c.crosses)
     }
   })
 

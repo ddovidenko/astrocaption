@@ -9,7 +9,7 @@ import { LabelTextShape } from './LabelTextShape'
 import { disableAll, getMeasurer, isEditable, tryToggleWithPlacement } from './editing'
 import { primaryName } from './names'
 import { PAD_FACTOR } from './placement'
-import { CANVAS_SIZE_ERROR, drawErrorNotice, previewErrorSentence, probeStatus } from './notices'
+import { CANVAS_SIZE_ERROR, blockedLeaderNotice, drawErrorNotice, previewErrorSentence, probeStatus } from './notices'
 import {
   clampFontSize,
   labelText,
@@ -28,7 +28,7 @@ import {
   type RoutedLeader,
   type TextMeasurer,
 } from './metrics'
-import { enabledLabels, enabledObjectIds, fontFor, useEditor } from './store'
+import { enabledLabels, enabledObjectIds, fontFor, hasLivePreview, useEditor } from './store'
 import { useTaggedDraft } from './taggedDraft'
 import { toScreen, zoomAt } from './view'
 
@@ -81,7 +81,7 @@ Konva.dragButtons = [0]
 
 /** Every enabled object's ring, keyed by object id: the obstacles a leader routes around (#14).
  *  Its identity only changes with the enabled set, the objects or the style, never on a drag
- *  frame, so it can key the entry cache. */
+ *  frame. */
 type Rings = ReadonlyMap<number, Ring>
 
 interface Measured {
@@ -95,10 +95,6 @@ interface Measured {
  *  measured again 60 times a second. A hit is only reused while the style and the object behind
  *  it are the same objects; the maps are weak, so a replaced label or style needs no eviction. */
 const measureCache = new WeakMap<StyleConfig, WeakMap<Label, Measured>>()
-
-/** The drawn entries, keyed further by the rings: toggling a label changes every other label's
- *  routed leader but not its measurement, so only this layer is dropped then. */
-const entryCache = new WeakMap<StyleConfig, WeakMap<Rings, WeakMap<Label, Entry>>>()
 
 function cached<K extends object, V>(map: WeakMap<K, V>, key: K, make: () => V): V {
   let value = map.get(key)
@@ -118,34 +114,34 @@ function measuredFor(style: StyleConfig, label: Label, obj: ObjectOut, measure: 
   return measured
 }
 
-function entryFor(
+/** Every enabled label's drawn numbers. The measurements come from the cache; the leaders are
+ *  routed afresh each time, since any label's move can change another's route: a leader avoids
+ *  the other labels' text boxes as well as their rings (#118). */
+function entriesFor(
   style: StyleConfig,
   rings: Rings,
-  label: Label,
-  obj: ObjectOut,
-  measure: TextMeasurer,
+  measured: { label: Label; obj: ObjectOut; box: LabelBox; text: LabelLines }[],
   unit: number,
-): Entry {
-  const byLabel = cached(
-    cached(entryCache, style, () => new WeakMap<Rings, WeakMap<Label, Entry>>()),
-    rings,
-    () => new WeakMap<Label, Entry>(),
-  )
-  const hit = byLabel.get(label)
-  if (hit && hit.obj === obj) return hit
-  const { box, text } = measuredFor(style, label, obj, measure)
-  const r = markerRadius(obj, style)
-  const rect = { left: label.x, top: label.y, right: label.x + box.width, bottom: label.y + box.height }
-  const seg = leaderSegment(obj.x, obj.y, r, rect)
-  let leader: RoutedLeader | null = null
-  if (seg !== null && leaderVisible(label, seg.gap, unit)) {
-    const others: Ring[] = []
-    for (const [id, ring] of rings) if (id !== label.object_id) others.push(ring)
-    leader = routeLeader(seg, obj.x, obj.y, r, rect, others, PAD_FACTOR * unit)
-  }
-  const entry: Entry = { label, obj, box, text, leader }
-  byLabel.set(label, entry)
-  return entry
+): Entry[] {
+  const pad = PAD_FACTOR * unit
+  const rects = measured.map(({ label, box }) => ({
+    id: label.object_id,
+    rect: { left: label.x, top: label.y, right: label.x + box.width, bottom: label.y + box.height } as Box,
+  }))
+  return measured.map(({ label, obj, box, text }, i) => {
+    const r = markerRadius(obj, style)
+    const rect = rects[i]!.rect
+    const seg = leaderSegment(obj.x, obj.y, r, rect)
+    let leader: RoutedLeader | null = null
+    if (seg !== null && leaderVisible(label, seg.gap, unit)) {
+      const others: Ring[] = []
+      for (const [id, ring] of rings) if (id !== label.object_id) others.push(ring)
+      const texts: Box[] = []
+      for (const other of rects) if (other.id !== label.object_id) texts.push(other.rect)
+      leader = routeLeader(seg, obj.x, obj.y, r, rect, others, pad, texts)
+    }
+    return { label, obj, box, text, leader }
+  })
 }
 
 interface EntryProps {
@@ -428,7 +424,7 @@ export default function EditorCanvas() {
   // 4. Every layout number for the enabled labels, recomputed only when the document changes.
   const { entries, orphans } = useMemo<{ entries: Entry[]; orphans: number }>(() => {
     if (!image || !style) return { entries: [], orphans: 0 }
-    const out: Entry[] = []
+    const measured: { label: Label; obj: ObjectOut; box: LabelBox; text: LabelLines }[] = []
     let orphans = 0
     const unit = scaleUnit(image.width, image.height)
     for (const label of labels) {
@@ -438,9 +434,9 @@ export default function EditorCanvas() {
         orphans++
         continue
       }
-      out.push(entryFor(style, rings, label, obj, measure, unit))
+      measured.push({ label, ...measuredFor(style, label, obj, measure) })
     }
-    return { entries: out, orphans }
+    return { entries: entriesFor(style, rings, measured, unit), orphans }
   }, [image, style, rings, labels, objects, measure])
 
   // Every label whose draw threw, in failure order; the notice counts them and names the first.
@@ -817,6 +813,21 @@ export default function EditorCanvas() {
     }
   }, [])
 
+  // The blocked-leader notice (#119) follows the committed document, not the drag preview: the
+  // verdict can flip every frame while a label skims a neighbour, and a notice popping in and out
+  // above the canvas also resizes the stage under the pointer. It settles on the drop. Adjusted
+  // during render like `editingId` below (lint refuses `set-state-in-effect`).
+  const livePreview = useEditor(hasLivePreview)
+  const settledBlockedNotice = useMemo<string | null | undefined>(() => {
+    if (livePreview || !style) return undefined // keep what is showing
+    const blocked = entries.filter((e) => e.leader?.blocked)
+    if (blocked.length === 0) return null
+    const first = blocked[0]!.obj
+    return blockedLeaderNotice(blocked.length, primaryName(first.catalog_names, style.name_preference))
+  }, [livePreview, entries, style])
+  const [blockedNotice, setBlockedNotice] = useState<string | null>(null)
+  if (settledBlockedNotice !== undefined && settledBlockedNotice !== blockedNotice) setBlockedNotice(settledBlockedNotice)
+
   if (!image || !style || !font) return null
 
   const hovered = hoveredId === null ? null : (objects.get(hoveredId) ?? null)
@@ -847,6 +858,7 @@ export default function EditorCanvas() {
       error: false,
     })
   }
+  if (blockedNotice) notices.push({ text: blockedNotice, error: false })
 
   return (
     <>
