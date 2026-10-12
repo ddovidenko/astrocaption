@@ -507,6 +507,34 @@ describe('selection and per-label editing', () => {
     expect(useEditor.getState().selectedIds.size).toBe(0)
   })
 
+  it('select keeps the set identity when the selection is already what was asked (#106)', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const empty = useEditor.getState().selectedIds
+    useEditor.getState().select(null)
+    expect(useEditor.getState().selectedIds).toBe(empty)
+    useEditor.getState().select(1)
+    const one = useEditor.getState().selectedIds
+    useEditor.getState().select(1)
+    expect(useEditor.getState().selectedIds).toBe(one)
+    useEditor.getState().toggleObject(2, { x: 100, y: 100 })
+    useEditor.getState().toggleSelect(2)
+    useEditor.getState().select(1) // narrowing a group to one is a change
+    expect(useEditor.getState().selectedIds).not.toBe(one)
+    expect([...useEditor.getState().selectedIds]).toEqual([1])
+  })
+
+  it('toggleSelect ignores an unknown or disabled id, and still removes a selected one (#106)', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    useEditor.getState().toggleSelect(2) // disabled in the test document
+    useEditor.getState().toggleSelect(999)
+    expect(useEditor.getState().selectedIds.size).toBe(0)
+    useEditor.getState().select(2)
+    useEditor.getState().toggleSelect(2)
+    expect(useEditor.getState().selectedIds.size).toBe(0)
+  })
+
   it('a drag commit pins the moved label', () => {
     const s = useEditor.getState()
     s.load(doc)
@@ -526,7 +554,7 @@ describe('selection and per-label editing', () => {
     useEditor.getState().moveLabel(1, one.x + 5, one.y + 7, false)
     // The preview frame already carries the pin, so commitPreview and Konva's dragend commit the
     // same label whichever lands first.
-    expect(useEditor.getState().labels.get(2)).toMatchObject({ x: 105, y: 107, pinned: true })
+    expect(useEditor.getState().labels.get(2)).toMatchObject({ x: 105, y: 107, pinned: true, collided: false })
     useEditor.getState().moveLabel(1, one.x + 10, one.y + 14)
     expect(useEditor.getState().labels.get(1)).toMatchObject({ x: one.x + 10, y: one.y + 14, pinned: true })
     expect(useEditor.getState().labels.get(2)).toMatchObject({ x: 110, y: 114, pinned: true })
@@ -543,6 +571,38 @@ describe('selection and per-label editing', () => {
     const one = useEditor.getState().labels.get(1)!
     useEditor.getState().moveLabel(1, one.x + 5, one.y)
     expect(useEditor.getState().labels.get(2)).toMatchObject({ x: 100, y: 100 })
+  })
+
+  it('a preview frame that changes nothing keeps the labels map identity (#106)', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    const before = useEditor.getState().labels
+    const size = before.get(1)!.font_size
+    useEditor.getState().updateLabels([1], { font_size: size }, false)
+    expect(useEditor.getState().labels).toBe(before)
+    expect(hasLivePreview(useEditor.getState())).toBe(false)
+  })
+
+  it('commitPreview before any document is loaded is a no-op (#106)', () => {
+    const before = useEditor.getState()
+    useEditor.getState().commitPreview()
+    const after = useEditor.getState()
+    expect(after.labels).toBe(before.labels)
+    expect(after.undo).toBe(before.undo)
+    expect(after.committed).toBeNull()
+  })
+
+  it('a committed map that lost an entry diverges from the committed document (#106)', () => {
+    const s = useEditor.getState()
+    s.load(doc)
+    // No action drops a label, so shrink the map by hand and run the commit path on it: the
+    // divergence scan must see the missing entry, not only changed ones.
+    const labels = new Map(useEditor.getState().labels)
+    labels.delete(2)
+    useEditor.setState({ labels })
+    useEditor.getState().updateLabels([1], {})
+    expect(useEditor.getState().undo).toHaveLength(1)
+    expect(useEditor.getState().committed!.labels.size).toBe(1)
   })
 
   it('updateLabels patches every id as one commit and skips a patch that changes nothing', () => {

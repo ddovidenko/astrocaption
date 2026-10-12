@@ -190,6 +190,7 @@ function commitLabels(s: EditorState, labels: Map<number, Label>, commit = true)
 /** Whether any label in `labels` differs field-wise from `base` (a preview map that came back to
  *  its starting values is a new Map, but diverges in nothing). */
 function diverges(labels: Map<number, Label>, base: Map<number, Label>): boolean {
+  if (labels.size !== base.size) return true // an entry dropped (unreachable today; #106)
   for (const [id, label] of labels) {
     const was = base.get(id)
     if (!was || (label !== was && !shallow(label, was))) return true
@@ -277,11 +278,22 @@ export const useEditor = create<EditorState>()((set) => ({
     })
   },
   setView: (view) => set({ view }),
-  select: (id) => set({ selectedIds: id === null ? new Set() : new Set([id]) }),
+  select: (id) =>
+    set((s) => {
+      // Already so (Escape on an empty selection, a press on the one selected label): keep the
+      // set's identity, so nothing subscribed to it re-renders (#106).
+      if (id === null ? s.selectedIds.size === 0 : s.selectedIds.size === 1 && s.selectedIds.has(id)) return {}
+      return { selectedIds: id === null ? new Set() : new Set([id]) }
+    }),
   toggleSelect: (id) =>
     set((s) => {
       const next = new Set(s.selectedIds)
-      if (!next.delete(id)) next.add(id)
+      // Only a drawn label can join the selection; an unknown or disabled id is ignored here
+      // rather than pruned by the next document change (#106).
+      if (!next.delete(id)) {
+        if (s.labels.get(id)?.enabled !== true) return {}
+        next.add(id)
+      }
       return { selectedIds: next }
     }),
   hover: (hoveredId) => set({ hoveredId }),
