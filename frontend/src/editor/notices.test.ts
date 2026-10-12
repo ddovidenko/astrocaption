@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError } from '../api'
-import { blockedLeaderNotice, drawErrorNotice, isStaleDocumentError, previewErrorSentence, probeStatus } from './notices'
+import { blockedLeaderNotice, drawErrorNotice, previewErrorSentence, probeStatus } from './notices'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -32,23 +31,6 @@ describe('drawErrorNotice', () => {
     expect(drawErrorNotice(3, 'M 42', 'x')).toBe(
       '3 labels could not be drawn (first: M 42): x. The export may differ from this preview.',
     )
-  })
-})
-
-describe('isStaleDocumentError', () => {
-  it('is a 422 whose sentence is one of the server\'s object-id ones', () => {
-    expect(isStaleDocumentError(new ApiError(422, 'labels: every label must name one of this image\'s objects.'))).toBe(
-      true,
-    )
-  })
-
-  it('is not the other validation failures, whatever their status', () => {
-    expect(isStaleDocumentError(new ApiError(422, 'style.font_file is not a bundled font.'))).toBe(false)
-    expect(isStaleDocumentError(new ApiError(400, 'labels: every label must name one of this image\'s objects.'))).toBe(
-      false,
-    )
-    expect(isStaleDocumentError(new ApiError(409, 'This image was changed elsewhere.'))).toBe(false)
-    expect(isStaleDocumentError(new ApiError(500, 'boom'))).toBe(false)
   })
 })
 

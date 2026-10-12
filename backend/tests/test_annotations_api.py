@@ -16,9 +16,7 @@ from app.models import AnnotationsUpdate
 from tests.conftest import FakeSolver, login, make_client, make_settings, upload, wait_for_status
 
 CONFLICT = "This image was changed elsewhere. Reload to continue editing."
-OBJECTS_DUPLICATE = "labels: each of this image's objects may appear only once."
-OBJECTS_UNKNOWN = "labels: every label must name one of this image's objects."
-OBJECTS_MISSING = "labels: the document must list every one of this image's objects."
+OBJECTS_CHANGED = "This image's objects changed; reload the editor."
 
 
 def solved_image(
@@ -94,13 +92,13 @@ def test_put_validates_objects_font_and_colours_without_echoing(
 
     unknown = {**ann, "labels": ann["labels"] + [{"object_id": 999_999}]}
     resp = client.put(url, json=unknown)
-    assert resp.status_code == 422 and "999999" not in resp.text
-    assert resp.json()["detail"] == OBJECTS_UNKNOWN
+    assert resp.status_code == 409 and "999999" not in resp.text
+    assert resp.json()["detail"] == OBJECTS_CHANGED
 
     duplicate = {**ann, "labels": ann["labels"] + [ann["labels"][0]]}
     resp = client.put(url, json=duplicate)
-    assert resp.status_code == 422
-    assert resp.json()["detail"] == OBJECTS_DUPLICATE
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == OBJECTS_CHANGED
 
     bad_font = {**ann, "style": {**ann["style"], "font_file": "Comic-Sans.ttf"}}
     resp = client.put(url, json=bad_font)
@@ -129,8 +127,8 @@ def test_put_rejects_a_duplicate_object_id(client: TestClient, sample_jpeg: Path
     dup_id = ann["labels"][0]["object_id"]
     doc = {**ann, "labels": ann["labels"] + [ann["labels"][0]]}
     resp = client.put(url, json=doc)
-    assert resp.status_code == 422
-    assert resp.json()["detail"] == OBJECTS_DUPLICATE
+    assert resp.status_code == 409  # stale, like a version mismatch (#115)
+    assert resp.json()["detail"] == OBJECTS_CHANGED
     assert str(dup_id) not in resp.text
     assert client.get(url).json() == ann
 
@@ -141,8 +139,8 @@ def test_put_rejects_an_unknown_object_id(client: TestClient, sample_jpeg: Path)
     unknown_id = max(o["id"] for o in objects) + 1
     doc = {**ann, "labels": ann["labels"] + [{"object_id": unknown_id}]}
     resp = client.put(url, json=doc)
-    assert resp.status_code == 422
-    assert resp.json()["detail"] == OBJECTS_UNKNOWN
+    assert resp.status_code == 409  # stale, like a version mismatch (#115)
+    assert resp.json()["detail"] == OBJECTS_CHANGED
     assert str(unknown_id) not in resp.text
     assert client.get(url).json() == ann
 
@@ -153,8 +151,8 @@ def test_put_rejects_a_document_missing_an_object(client: TestClient, sample_jpe
     dropped_id = ann["labels"][0]["object_id"]
     doc = {**ann, "labels": ann["labels"][1:]}
     resp = client.put(url, json=doc)
-    assert resp.status_code == 422
-    assert resp.json()["detail"] == OBJECTS_MISSING
+    assert resp.status_code == 409  # stale, like a version mismatch (#115)
+    assert resp.json()["detail"] == OBJECTS_CHANGED
     assert str(dropped_id) not in resp.text
     assert client.get(url).json() == ann
 
@@ -215,7 +213,7 @@ def test_autoarrange_validates_like_put(client: TestClient, sample_jpeg: Path) -
     image_id, ann, _ = solved_image(client, sample_jpeg)
     url = f"/api/images/{image_id}/autoarrange"
     resp = client.post(url, json={**ann, "labels": ann["labels"] + [{"object_id": 999_999}]})
-    assert resp.status_code == 422 and resp.json()["detail"] == OBJECTS_UNKNOWN
+    assert resp.status_code == 409 and resp.json()["detail"] == OBJECTS_CHANGED
     resp = client.post(url, json={**ann, "style": {**ann["style"], "font_file": "Nope.ttf"}})
     assert resp.status_code == 422 and "Nope" not in resp.text
     assert client.post("/api/images/nope/autoarrange", json=ann).status_code == 404

@@ -255,8 +255,9 @@ The four tabs below; **Style** arrived with milestone 4. Edits
 are held locally and flushed to `PUT annotations` on a debounce (autosave); the toolbar's status
 reads `Saving…` while a save is in flight, `Saved` once it lands, and `Unsaved changes` for an edit
 still waiting out the debounce. A failed save reads the server's sentence, or "The last change
-could not be saved." when there is none, with a Retry button; a 409 from someone else's more recent
-save reads "This image was changed elsewhere. Reload to continue editing." with a Reload button —
+could not be saved." when there is none, with a Retry button; a 409 reads the server's sentence with a Reload
+button ("This image was changed elsewhere. Reload to continue editing." after someone else's more recent save,
+"This image's objects changed; reload the editor." when the document names objects a re-solve replaced, § 8) —
 editing itself stays live, only saving stops (design § 5). Closing or reloading the tab prompts for
 confirmation while the document is dirty, saving or in error; a conflict does not prompt, because
 those edits cannot be saved at all and Reload is the documented way out. Leaving the editor inside
@@ -402,7 +403,9 @@ Owner (cookie session):
 - `GET /images/{id}/objects` — each object carries `kind` (galaxy / nebula / cluster / star / other, computed from nova's type and OpenNGC at read time) beside `catalog_names` and `primary_name`.
 - `GET/PUT /images/{id}/annotations`. `PUT` is the editor's autosave (debounced 500 ms): body = {style, labels,
   version as loaded}; `labels` must list every one of the image's objects exactly once (disable a label, never drop
-  it), `style.font_file` must be bundled, colours are `#RRGGBB`, else a plain 422. Stored as `version + 1` with a
+  it), else 409 `This image's objects changed; reload the editor.` (#115: a stale document, like a version mismatch;
+  which check failed is logged, not told); `style.font_file` must be bundled and colours are `#RRGGBB`, else a plain
+  422. Stored as `version + 1` with a
   fresh `updated_at`, and the stored document is the response. If the stored version differs from the submitted one:
   409 `This image was changed elsewhere. Reload to continue editing.` and nothing is written (a compare-and-swap in
   the database, so two editors cannot both win). Both verbs are 404 before the first solve. While a solve is running
@@ -415,7 +418,7 @@ Owner (cookie session):
   is a server-log warning naming the field, never the value. The next autosave stores the repaired document.
   `font_fallback`: the stored `font_file` when the served style's font was replaced by the default, else null
 - `GET /images/{id}/default-style` → StyleConfig
-- `POST /images/{id}/autoarrange` {…document…, reset: bool = false} → the same document with every enabled, unpinned label re-placed by the placer (§ 6.4; pinned labels are fixed obstacles), same version, not stored; `reset: true` unpins every label first. The editor applies it and autosaves. Validated like `PUT`, including the version check (409). `reset` is refused by `PUT`.
+- `POST /images/{id}/autoarrange` {…document…, reset: bool = false} → the same document with every enabled, unpinned label re-placed by the placer (§ 6.4; pinned labels are fixed obstacles), same version, not stored; `reset: true` unpins every label first. The editor applies it and autosaves. Validated like `PUT`, including the version and object-id checks (409). `reset` is refused by `PUT`.
 - `POST /images/{id}/export` {quality: int|null, scale} → {export_url, annotated_preview_url, width, height, bytes, exported_at, encoding};
   `quality: null` (the default) reuses the source JPEG's quantisation tables (§ 5.4). Gated like `PUT /annotations`:
   404 before the first solve, 409 `The image is still being solved; try again when it is done.` while a solve is

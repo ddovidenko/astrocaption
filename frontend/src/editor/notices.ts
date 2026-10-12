@@ -2,14 +2,7 @@
 // tested without a browser. Every sentence names a next step; none carries server paths or raw
 // exception text.
 
-import type { ApiError } from '../api'
-
 export const CANVAS_SIZE_ERROR = 'The editor could not size its canvas. Reload the page, or widen the window.'
-
-/** A save refused with one of the server's `labels:` sentences: the document no longer matches
- *  the server's objects (a re-solve landed between load and save). Shown in the conflict state
- *  — Reload, since a Retry can never succeed. */
-export const STALE_DOCUMENT_MESSAGE = "This image's objects changed; reload the editor."
 
 export function previewErrorSentence(status: number | null): string {
   if (status === 401) return 'Your session has expired. Log in again.'
@@ -42,10 +35,3 @@ export function blockedLeaderNotice(count: number, firstName: string): string {
   return `${head}; drag the label somewhere with a clear line to it.`
 }
 
-/** Whether a save's failure means the document no longer matches the server's objects. The
- *  server's three object-id sentences all start with `labels:` (see `images.py`, the constants
- *  above `_check_version`); its other 422s — a bad font file, a malformed body — are ordinary
- *  errors a Retry can still fix. */
-export function isStaleDocumentError(err: ApiError): boolean {
-  return err.status === 422 && err.message.startsWith('labels:')
-}
