@@ -96,10 +96,13 @@ contract above), `placement.ts` (the TypeScript port of the auto-placer, SPEC §
 same vectors as `backend/app/placement.py`), `editing.ts` (whether the document is editable, the
 shared measuring context, and `toggleWithPlacement`), `autosave.ts` (debounces document changes
 into `PUT annotations`, tracks the toolbar's save state, and exposes `flushSave`/`retrySave` for
-actions that must not race a pending save), `LabelTextShape.tsx` (the Konva text node for a label)
-and `EditorCanvas.tsx` (the Konva stage: preview image, markers, leaders, labels, hover ring and
-tooltip, wheel zoom about the cursor, drag/middle-mouse/space pan, `F` fit and `1` 100 %, click to
-toggle or select a label, left-drag to move one), mounted by `EditorPage.tsx` at `/images/:id`
+actions that must not race a pending save), `LabelTextShape.tsx` (the Konva text node for a label),
+`canvasGestures.ts` (the gesture layer, #108: the keyboard shortcuts, wheel zoom about the cursor or
+wheel-resize under a held label, drag/middle-mouse/space pan, press and click to select, and the
+exits that commit a preview when the button comes up anywhere; its keyboard half is unit-tested,
+the pointer half by the Playwright gesture specs) and `EditorCanvas.tsx` (the Konva stage: preview
+image, markers, leaders, labels, hover ring and tooltip, click to toggle a label, left-drag to move
+one, double-click to rename), mounted by `EditorPage.tsx` at `/images/:id`
 alongside `SidePanel.tsx` (the Objects/Layout/Image tabs, SPEC § 6.3). The canvas exposes
 `window.__astrocaptionEditor = { stage, imageWidth, labelCount, labelPositions(), renderAt(scale) }`
 — published only once the preview bitmap has loaded — so `frontend/e2e/parity.spec.ts` can force a
