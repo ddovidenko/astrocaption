@@ -26,6 +26,16 @@ describe('LabelTextEditor', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('the blur that follows an Enter commit does not commit again (#106)', () => {
+    const onClose = vi.fn()
+    render(<LabelTextEditor id={1} x={1552} y={970} width={120} fontSize={24} onClose={onClose} />)
+    fireEvent.change(input(), { target: { value: 'Great Nebula' } })
+    fireEvent.keyDown(input(), { key: 'Enter' })
+    fireEvent.blur(input())
+    expect(useEditor.getState().undo).toHaveLength(1)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('a blank commits null (back to the catalogue name)', () => {
     useEditor.getState().updateLabels([1], { text_override: 'Old' })
     render(<LabelTextEditor id={1} x={1552} y={970} width={120} fontSize={24} onClose={() => {}} />)
