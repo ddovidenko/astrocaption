@@ -36,6 +36,19 @@ from .worker import SolveWorker
 
 log = logging.getLogger(__name__)
 
+# Every API router, in one place: ``create_app`` includes them, and ``tests/test_auth_api.py``
+# walks the same tuple to prove each non-public route demands a session (#40).
+API_ROUTERS = (
+    health.router,
+    auth.router,
+    config.router,
+    docs.router,
+    fonts.router,
+    gallery.router,
+    images.router,
+    uploads.router,
+)
+
 # python:*-slim images ship no /etc/mime.types; make sure fonts get a real content type.
 mimetypes.add_type("font/ttf", ".ttf")
 
@@ -122,14 +135,8 @@ def create_app(
     app.add_exception_handler(RequestValidationError, plain_validation_error)  # type: ignore[arg-type]
     app.add_exception_handler(FontNotFoundError, font_not_found_error)  # type: ignore[arg-type]
 
-    app.include_router(health.router)
-    app.include_router(auth.router)
-    app.include_router(config.router)
-    app.include_router(docs.router)
-    app.include_router(fonts.router)
-    app.include_router(gallery.router)
-    app.include_router(images.router)
-    app.include_router(uploads.router)
+    for router in API_ROUTERS:
+        app.include_router(router)
 
     if cfg.fonts_dir.is_dir():
         app.mount("/fonts", StaticFiles(directory=cfg.fonts_dir), name="fonts")
