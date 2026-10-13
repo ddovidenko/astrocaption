@@ -98,7 +98,11 @@ async def get_gallery_item(image_id: str, settings: SettingsDep, db: DbDep) -> G
     return gallery_item(_visible(settings, db, image_id))
 
 
+# GET and HEAD, like the owner's file route: a link checker or a crawler probing a gallery URL
+# gets 200 rather than 405 (#137). FileResponse serves a HEAD as headers only; the second route
+# keeps the OpenAPI operation ids distinct.
 @router.get("/{image_id}/files/{kind}")
+@router.head("/{image_id}/files/{kind}", include_in_schema=False)
 async def gallery_file(image_id: str, kind: str, settings: SettingsDep, db: DbDep) -> FileResponse:
     rec = _visible(settings, db, image_id)
     if kind not in PUBLIC_FILE_KINDS:
