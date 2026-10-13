@@ -10,7 +10,7 @@ NPM       := npm --prefix frontend
 # shim that answers success for any unit, which would refuse `make install` in every Codespace.
 DEV_UNIT_ACTIVE := [ -d /run/systemd/system ] && systemctl is-active --quiet astrocaption-dev
 
-.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors render-vectors names-vectors names-catalog fonts record-fixtures favicons e2e-fixture e2e clean
+.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors render-vectors names-vectors names-catalog objects-catalog fonts record-fixtures favicons e2e-fixture e2e clean
 
 help:
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -122,6 +122,9 @@ names-vectors: $(VENV)/.installed ## Regenerate tests/fixtures/names/vectors.jso
 
 names-catalog: $(VENV)/.installed ## Rebuild backend/app/catalog/names.json from OpenNGC (network)
 	cd backend && .venv/bin/python scripts/build_names_catalog.py
+
+objects-catalog: $(VENV)/.installed ## Rebuild backend/app/catalog/objects.json from five CDS VizieR tables (network)
+	cd backend && .venv/bin/python scripts/build_objects_catalog.py
 
 check-version: $(VENV)/.installed ## Check that TAG matches the version files (incl. the lockfile): make check-version TAG=v0.1.0
 	@test -n "$(TAG)" || { echo "usage: make check-version TAG=v0.1.0"; exit 2; }
