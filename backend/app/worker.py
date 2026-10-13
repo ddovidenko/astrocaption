@@ -45,11 +45,12 @@ UNEXPECTED_MESSAGE = (
 
 def lookup_catalog(
     image_id: str, wcs_text: str, solve_scale: float, existing: list[SolveObject]
-) -> list[SolveObject]:
+) -> list[SolveObject] | None:
     """``existing`` plus the bundled catalogue's objects in this field (SPEC § 5.2 step 4),
-    merged by name then position. The catalogue is an add-on: a header the projection cannot
-    read is logged as a warning, anything else it raises goes to the log with its traceback,
-    and either way the objects stay as they were, so the image is still solved."""
+    merged by name then position, or None when the lookup failed. The catalogue is an add-on:
+    a header the projection cannot read is logged as a warning, anything else it raises goes to
+    the log with its traceback, and either way the caller keeps the objects it had and leaves
+    the row unstamped, so the image is still solved and the backfill may try again."""
     try:
         wcs = Wcs.from_text(wcs_text)
         hits = objects_from_catalog(wcs, solve_scale, objects_catalog())
@@ -57,10 +58,10 @@ def lookup_catalog(
         return merge_objects(existing, hits, next_id=next_id)
     except WcsError as exc:
         log.warning("image %s: catalogue lookup skipped: %s", image_id, exc.detail)
-        return existing
+        return None
     except Exception:
         log.exception("image %s: catalogue lookup failed; keeping nova's objects", image_id)
-        return existing
+        return None
 
 
 class ImageGoneError(Exception):
@@ -350,8 +351,9 @@ class SolveWorker:
 
         raw = annotations if isinstance(annotations, list) else []
         new_objects = objects_from_nova(raw, scale)
-        if wcs_text:
-            new_objects = lookup_catalog(rec.id, wcs_text, scale, new_objects)
+        looked_up = lookup_catalog(rec.id, wcs_text, scale, new_objects) if wcs_text else None
+        if looked_up is not None:
+            new_objects = looked_up
         previous = self.db.get_annotations(rec.id)
         fonts: Path = settings.fonts_dir
         if previous is None:
@@ -373,6 +375,6 @@ class SolveWorker:
                 "solve_failure": None,
                 "wcs_text": wcs_text or None,
                 "calibration": calibration,
-                "objects_catalog": objects_catalog().version if wcs_text else None,
+                "objects_catalog": objects_catalog().version if looked_up is not None else None,
             },
         )

@@ -38,6 +38,8 @@ def _backfill_one(db: Database, settings: Settings, rec: ImageRecord, version: s
         return 0
     old_objects = db.get_objects(rec.id)
     merged = lookup_catalog(rec.id, rec.wcs_text, rec.solve_scale, old_objects)
+    if merged is None:
+        return 0  # logged by the lookup; unstamped, so the next start tries again
     added = len(merged) - len(old_objects)
     if added == 0:
         # Names a hit would only have appended to existing objects are not applied here: they

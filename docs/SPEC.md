@@ -117,7 +117,7 @@ No multi-user, no roles, no invites in v1.
    keep distinct objects apart: a group designation (Arp 270 is the pair NGC 3395/3396) is carried as a name
    but never joins objects, and dark nebulae (Barnard, LDN) never join by position (B 168 sits inside the
    Cocoon and keeps its own label). The catalogue is an add-on: a header the projection cannot read, or any
-   failure of the lookup, is logged and the image keeps nova's objects alone. The row records the catalogue
+   failure of the lookup, is logged and the image keeps nova's objects alone, unstamped. The row records the catalogue
    version it was looked up against (`objects_catalog`); at startup, before requests are served, images whose
    stamp is behind the shipped version are looked up once more, additively: existing labels keep their
    position, state and overrides (the re-solve rematch), only new objects are placed, and their export then

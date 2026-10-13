@@ -531,6 +531,7 @@ def test_an_unreadable_wcs_leaves_novas_objects_alone(
     assert "catalogue lookup skipped" in caplog.text and rec.id in caplog.text
     got = db.get_image(rec.id)
     assert got is not None and got.solve_status == SolveStatus.SOLVED
+    assert got.objects_catalog is None  # not stamped: the backfill may try again
 
 
 def test_a_failing_projection_leaves_novas_objects_alone(
@@ -553,3 +554,4 @@ def test_a_failing_projection_leaves_novas_objects_alone(
     assert "boom" in caplog.text
     got = db.get_image(rec.id)
     assert got is not None and got.solve_status == SolveStatus.SOLVED
+    assert got.objects_catalog is None  # not stamped: the backfill may try again

@@ -125,7 +125,7 @@ def test_backfill_skips_an_image_whose_lookup_fails_and_finishes_the_rest(
 
     def flaky(
         image_id: str, wcs_text: str, scale: float, existing: list[SolveObject]
-    ) -> list[SolveObject]:
+    ) -> list[SolveObject] | None:
         if image_id == "bad":
             raise ZeroDivisionError("float division by zero")
         return real(image_id, wcs_text, scale, existing)
@@ -154,7 +154,7 @@ def test_backfill_leaves_a_document_alone_when_only_names_would_change(
 
     def names_only(
         image_id: str, wcs_text: str, scale: float, existing: list[SolveObject]
-    ) -> list[SolveObject]:
+    ) -> list[SolveObject] | None:
         first, *rest = existing
         return [
             first.model_copy(update={"catalog_names": [*first.catalog_names, "Sh2-999"]}),
@@ -169,3 +169,17 @@ def test_backfill_leaves_a_document_alone_when_only_names_would_change(
     assert ann is not None and ann.version == 3
     got = db.get_image("img-1")
     assert got is not None and got.objects_catalog == objects_catalog().version
+
+
+def test_backfill_leaves_an_image_with_an_unreadable_header_unstamped(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    db = Database(settings.db_path)
+    solved_without_catalogue(settings, db)
+    db.update_image("img-1", {"wcs_text": "not a header"})
+    with caplog.at_level(logging.WARNING, logger="app.worker"):
+        report = run(db, settings)
+    assert (report.visited, report.changed, report.added) == (1, 0, 0)
+    got = db.get_image("img-1")
+    assert got is not None and got.objects_catalog is None
+    assert "catalogue lookup skipped" in caplog.text and "img-1" in caplog.text
