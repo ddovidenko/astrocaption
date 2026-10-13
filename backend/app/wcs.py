@@ -9,8 +9,11 @@ oracle test in tests/test_wcs.py pins this against nova's positions to a hundred
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
+
+from .catalog import unit_vector
 
 CARD = 80
 _SIP_KEY = re.compile(r"^(A|B|AP|BP)_(\d+)_(\d+)$")
@@ -109,3 +112,64 @@ class Wcs:
             ap=polys["AP"],
             bp=polys["BP"],
         )
+
+    # -- projection ---------------------------------------------------------------
+
+    def plate_scale_deg(self) -> float:
+        """Degrees per solve-copy pixel: the CD matrix's scale."""
+        a, b, c, d = self.cd
+        return math.sqrt(abs(a * d - b * c))
+
+    @staticmethod
+    def _sip(poly: dict[tuple[int, int], float], u: float, v: float) -> float:
+        return sum(coef * u**p * v**q for (p, q), coef in poly.items())
+
+    def sky_to_pixel(self, ra: float, dec: float) -> tuple[float, float] | None:
+        """Solve-copy pixel of a J2000 position, or None when the point is not in front of the
+        tangent plane (the far hemisphere, or on the horizon of the projection)."""
+        ra0, dec0 = (math.radians(v) for v in self.crval)
+        r, d = math.radians(ra), math.radians(dec)
+        cos_c = math.sin(dec0) * math.sin(d) + math.cos(dec0) * math.cos(d) * math.cos(r - ra0)
+        if cos_c <= 1e-9:
+            return None
+        xi = math.degrees(math.cos(d) * math.sin(r - ra0) / cos_c)
+        eta = math.degrees(
+            (math.cos(dec0) * math.sin(d) - math.sin(dec0) * math.cos(d) * math.cos(r - ra0))
+            / cos_c
+        )
+        a, b, c, dd = self.cd
+        det = a * dd - b * c
+        u = (dd * xi - b * eta) / det
+        v = (-c * xi + a * eta) / det
+        # The inverse SIP polynomials are evaluated once, on the undistorted offsets.
+        du, dv = self._sip(self.ap, u, v), self._sip(self.bp, u, v)
+        return self.crpix[0] + u + du, self.crpix[1] + v + dv
+
+    def pixel_to_sky(self, x: float, y: float) -> tuple[float, float]:
+        """J2000 degrees of a solve-copy pixel; RA in [0, 360)."""
+        u, v = x - self.crpix[0], y - self.crpix[1]
+        fu, fv = u + self._sip(self.a, u, v), v + self._sip(self.b, u, v)
+        a, b, c, d = self.cd
+        xi, eta = math.radians(a * fu + b * fv), math.radians(c * fu + d * fv)
+        ra0, dec0 = (math.radians(w) for w in self.crval)
+        denom = math.cos(dec0) - eta * math.sin(dec0)
+        ra = ra0 + math.atan2(xi, denom)
+        dec = math.atan2((math.sin(dec0) + eta * math.cos(dec0)) * math.cos(ra - ra0), denom)
+        return math.degrees(ra) % 360.0, math.degrees(dec)
+
+    def field(self) -> tuple[tuple[float, float, float], float]:
+        """Unit vector of the frame centre and the angular radius (degrees) that covers the four
+        corners: the pre-filter for a catalogue lookup."""
+        centre = unit_vector(*self.pixel_to_sky((self.width + 1) / 2, (self.height + 1) / 2))
+        radius = 0.0
+        corners = (
+            (1.0, 1.0),
+            (float(self.width), 1.0),
+            (1.0, float(self.height)),
+            (float(self.width), float(self.height)),
+        )
+        for x, y in corners:
+            corner = unit_vector(*self.pixel_to_sky(x, y))
+            dot = max(-1.0, min(1.0, sum(p * q for p, q in zip(centre, corner, strict=True))))
+            radius = max(radius, math.degrees(math.acos(dot)))
+        return centre, radius
