@@ -1,4 +1,4 @@
-"""Refuse a release tag that disagrees with the three version files.
+"""Refuse a release tag that disagrees with the version files.
 
 The release workflow (.github/workflows/release.yml) runs this before building anything, so the
 image tag and the version reported by /api/health cannot drift apart. Versions are bumped by hand
@@ -29,36 +29,92 @@ INIT_RE = re.compile(r'^__version__\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
 PYPROJECT = "backend/pyproject.toml"
 INIT = "backend/app/__init__.py"
 PACKAGE_JSON = "frontend/package.json"
+PACKAGE_LOCK = "frontend/package-lock.json"
+# npm keeps the lockfile's two copies of the version in step with package.json
+# (`npm version --no-git-tag-version`); a hand edit of package.json does not (#162).
+LOCK_TOP = f"{PACKAGE_LOCK} (version)"
+LOCK_ROOT = f'{PACKAGE_LOCK} (packages[""].version)'
+LOCATIONS = (PYPROJECT, INIT, PACKAGE_JSON, LOCK_TOP, LOCK_ROOT)
 
 
-def _read_pyproject(path: Path) -> str | None:
-    with path.open("rb") as fh:
-        data = tomllib.load(fh)
+class VersionFileError(Exception):
+    """A version file that is missing or does not parse; the message names the file."""
+
+
+def _text(root: Path, rel: str) -> str:
+    try:
+        return (root / rel).read_text()
+    except OSError as exc:
+        raise VersionFileError(f"{rel}: cannot be read ({exc.strerror or exc})") from exc
+    except UnicodeDecodeError as exc:
+        raise VersionFileError(f"{rel}: cannot be read (not UTF-8 text)") from exc
+
+
+def _read_pyproject(root: Path) -> dict[str, str | None]:
+    try:
+        data = tomllib.loads(_text(root, PYPROJECT))
+    except tomllib.TOMLDecodeError as exc:
+        raise VersionFileError(f"{PYPROJECT}: not valid TOML ({exc})") from exc
     project = data.get("project")
-    if not isinstance(project, dict):
-        return None
-    version = project.get("version")
-    return version if isinstance(version, str) else None
+    version = project.get("version") if isinstance(project, dict) else None
+    return {PYPROJECT: version if isinstance(version, str) else None}
 
 
-def _read_init(path: Path) -> str | None:
-    match = INIT_RE.search(path.read_text())
-    return match.group(1) if match else None
+def _read_init(root: Path) -> dict[str, str | None]:
+    match = INIT_RE.search(_text(root, INIT))
+    return {INIT: match.group(1) if match else None}
 
 
-def _read_package_json(path: Path) -> str | None:
-    version = json.loads(path.read_text()).get("version")
-    return version if isinstance(version, str) else None
+def _json(root: Path, rel: str) -> dict[str, object]:
+    try:
+        data = json.loads(_text(root, rel))
+    except json.JSONDecodeError as exc:
+        raise VersionFileError(f"{rel}: not valid JSON ({exc})") from exc
+    return data if isinstance(data, dict) else {}
+
+
+def _read_package_json(root: Path) -> dict[str, str | None]:
+    version = _json(root, PACKAGE_JSON).get("version")
+    return {PACKAGE_JSON: version if isinstance(version, str) else None}
+
+
+def _read_package_lock(root: Path) -> dict[str, str | None]:
+    data = _json(root, PACKAGE_LOCK)
+    packages = data.get("packages")
+    own = packages.get("") if isinstance(packages, dict) else None
+    top = data.get("version")
+    nested = own.get("version") if isinstance(own, dict) else None
+    return {
+        LOCK_TOP: top if isinstance(top, str) else None,
+        LOCK_ROOT: nested if isinstance(nested, str) else None,
+    }
+
+
+READERS = (_read_pyproject, _read_init, _read_package_json, _read_package_lock)
+
+
+def _collect(root: Path) -> tuple[dict[str, str], list[str]]:
+    """Version per location, plus one problem per file that could not be read or parsed."""
+    found: dict[str, str] = {}
+    problems: list[str] = []
+    for reader in READERS:
+        try:
+            versions_in_file = reader(root)
+        except VersionFileError as exc:
+            problems.append(str(exc))
+            continue
+        for label, version in versions_in_file.items():
+            if version is not None:
+                found[label] = version
+    return found, problems
 
 
 def versions(root: Path = REPO_ROOT) -> dict[str, str]:
-    """Version string per file; a file whose version field is missing is left out."""
-    readers = {PYPROJECT: _read_pyproject, INIT: _read_init, PACKAGE_JSON: _read_package_json}
-    found: dict[str, str] = {}
-    for rel, reader in readers.items():
-        version = reader(root / rel)
-        if version is not None:
-            found[rel] = version
+    """Version string per location; a location whose field is missing is left out, and a
+    file that cannot be read raises ``VersionFileError`` (``check`` turns that into a problem)."""
+    found, problems = _collect(root)
+    if problems:
+        raise VersionFileError("; ".join(problems))
     return found
 
 
@@ -68,11 +124,12 @@ def check(tag: str, root: Path = REPO_ROOT) -> list[str]:
     if match is None:
         return [f"tag {tag!r} is not v<major>.<minor>.<patch>[-<prerelease>]"]
     wanted = match.group(1)
-    found = versions(root)
-    problems = [
-        f"{rel}: no version field found"
-        for rel in (PYPROJECT, INIT, PACKAGE_JSON)
-        if rel not in found
+    found, problems = _collect(root)
+    unreadable = {problem.split(":", 1)[0] for problem in problems}
+    problems += [
+        f"{label}: no version field found"
+        for label in LOCATIONS
+        if label not in found and label.split(" (", 1)[0] not in unreadable
     ]
     problems += [
         f"{rel}: version is {have} but the tag says {wanted}"
@@ -89,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     problems = check(args.tag, args.root)
     for problem in problems:
-        print(problem)
+        print(problem, file=sys.stderr)
     if not problems:
         print(f"{args.tag}: versions agree")
     return 1 if problems else 0

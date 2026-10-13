@@ -1,4 +1,4 @@
-"""The release workflow refuses a tag that disagrees with the three version files."""
+"""The release workflow refuses a tag that disagrees with the version files."""
 
 from __future__ import annotations
 
@@ -7,10 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from scripts.check_release_version import check, main, versions
+from scripts.check_release_version import VersionFileError, check, main, versions
 
 
-def write_tree(root: Path, *, pyproject: str, init: str, package: str) -> None:
+def write_tree(
+    root: Path, *, pyproject: str, init: str, package: str, lock: tuple[str, str] | None = None
+) -> None:
+    """``lock`` is the lockfile's (top-level, packages[""]) pair; by default both follow package."""
     (root / "backend" / "app").mkdir(parents=True)
     (root / "frontend").mkdir()
     (root / "backend" / "pyproject.toml").write_text(
@@ -20,14 +23,20 @@ def write_tree(root: Path, *, pyproject: str, init: str, package: str) -> None:
     (root / "frontend" / "package.json").write_text(
         json.dumps({"name": "astrocaption", "version": package}) + "\n"
     )
+    top, nested = lock or (package, package)
+    (root / "frontend" / "package-lock.json").write_text(
+        json.dumps({"name": "astrocaption", "version": top, "packages": {"": {"version": nested}}})
+    )
 
 
-def test_versions_reads_all_three_files(tmp_path: Path) -> None:
+def test_versions_reads_every_location(tmp_path: Path) -> None:
     write_tree(tmp_path, pyproject="0.1.0", init="0.1.0", package="0.1.0")
     assert versions(tmp_path) == {
         "backend/pyproject.toml": "0.1.0",
         "backend/app/__init__.py": "0.1.0",
         "frontend/package.json": "0.1.0",
+        "frontend/package-lock.json (version)": "0.1.0",
+        'frontend/package-lock.json (packages[""].version)': "0.1.0",
     }
 
 
@@ -42,7 +51,7 @@ def test_check_accepts_a_matching_prerelease_tag(tmp_path: Path) -> None:
 
 
 def test_check_reports_each_mismatching_file(tmp_path: Path) -> None:
-    write_tree(tmp_path, pyproject="0.1.0", init="0.1.0", package="0.0.9")
+    write_tree(tmp_path, pyproject="0.1.0", init="0.1.0", package="0.0.9", lock=("0.1.0", "0.1.0"))
     problems = check("v0.1.0", tmp_path)
     assert len(problems) == 1
     assert "frontend/package.json" in problems[0]
@@ -78,17 +87,59 @@ def test_check_reports_missing_version_field(tmp_path: Path) -> None:
     assert any("backend/app/__init__.py" in p for p in problems)
 
 
+def test_check_reports_each_lockfile_field(tmp_path: Path) -> None:
+    """A hand-edited package.json leaves the lockfile behind; both of its fields are named."""
+    write_tree(tmp_path, pyproject="0.2.0", init="0.2.0", package="0.2.0", lock=("0.1.0", "0.2.0"))
+    problems = check("v0.2.0", tmp_path)
+    assert problems == [
+        "frontend/package-lock.json (version): version is 0.1.0 but the tag says 0.2.0"
+    ]
+    (tmp_path / "frontend" / "package-lock.json").write_text(
+        json.dumps({"version": "0.2.0", "packages": {"": {"version": "0.1.0"}}})
+    )
+    problems = check("v0.2.0", tmp_path)
+    assert problems == [
+        'frontend/package-lock.json (packages[""].version): version is 0.1.0 but the tag says 0.2.0'
+    ]
+
+
+def test_check_names_a_missing_file_instead_of_raising(tmp_path: Path) -> None:
+    write_tree(tmp_path, pyproject="0.1.0", init="0.1.0", package="0.1.0")
+    (tmp_path / "frontend" / "package-lock.json").unlink()
+    problems = check("v0.1.0", tmp_path)
+    assert len(problems) == 1 and problems[0].startswith(
+        "frontend/package-lock.json: cannot be read"
+    )
+    with pytest.raises(VersionFileError):
+        versions(tmp_path)
+
+
+def test_check_names_a_file_that_does_not_parse(tmp_path: Path) -> None:
+    write_tree(tmp_path, pyproject="0.1.0", init="0.1.0", package="0.1.0")
+    (tmp_path / "backend" / "pyproject.toml").write_text("[project\nversion = ")
+    (tmp_path / "frontend" / "package.json").write_text("{nope")
+    problems = check("v0.1.0", tmp_path)
+    assert [p.split(" (")[0] for p in problems] == [
+        "backend/pyproject.toml: not valid TOML",
+        "frontend/package.json: not valid JSON",
+    ]
+
+
 def test_main_exit_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     write_tree(tmp_path, pyproject="0.1.0", init="0.1.0", package="0.2.0")
     assert main(["v0.1.0", "--root", str(tmp_path)]) == 1
-    out = capsys.readouterr().out
-    assert "frontend/package.json" in out
+    captured = capsys.readouterr()
+    assert "frontend/package.json" in captured.err and captured.out == ""  # problems go to stderr
     (tmp_path / "frontend" / "package.json").write_text(json.dumps({"version": "0.1.0"}))
+    (tmp_path / "frontend" / "package-lock.json").write_text(
+        json.dumps({"version": "0.1.0", "packages": {"": {"version": "0.1.0"}}})
+    )
     assert main(["v0.1.0", "--root", str(tmp_path)]) == 0
+    assert capsys.readouterr().out.strip() == "v0.1.0: versions agree"
 
 
 def test_repo_versions_agree() -> None:
-    """The real tree: all three files carry one version, so a tag can match them."""
+    """The real tree: every location carries one version, so a tag can match them."""
     root = Path(__file__).resolve().parents[2]
     found = set(versions(root).values())
     assert len(found) == 1, found

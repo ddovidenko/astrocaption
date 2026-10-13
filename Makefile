@@ -123,7 +123,7 @@ names-vectors: $(VENV)/.installed ## Regenerate tests/fixtures/names/vectors.jso
 names-catalog: $(VENV)/.installed ## Rebuild backend/app/catalog/names.json from OpenNGC (network)
 	cd backend && .venv/bin/python scripts/build_names_catalog.py
 
-check-version: $(VENV)/.installed ## Check that TAG matches the three version files: make check-version TAG=v0.1.0
+check-version: $(VENV)/.installed ## Check that TAG matches the version files (incl. the lockfile): make check-version TAG=v0.1.0
 	@test -n "$(TAG)" || { echo "usage: make check-version TAG=v0.1.0"; exit 2; }
 	cd backend && .venv/bin/python scripts/check_release_version.py "$(TAG)"
 

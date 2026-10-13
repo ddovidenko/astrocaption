@@ -32,7 +32,7 @@ make placement-vectors   # regenerate tests/fixtures/placement/*.json from the P
 make render-vectors      # regenerate tests/fixtures/render/vectors.json from render.py (text boxes, ascents, leaders, anchors)
 make names-vectors       # regenerate tests/fixtures/names/vectors.json from models.py (name ranking + alias line)
 make names-catalog       # rebuild backend/app/catalog/names.json from OpenNGC (network)
-make check-version TAG=v0.1.0   # the release workflow's tag guard: TAG must equal the version in pyproject, app/__init__.py and package.json
+make check-version TAG=v0.1.0   # the release workflow's tag guard: TAG must equal the version in pyproject, app/__init__.py, package.json and its lockfile
 make fonts               # refresh fonts/*.ttf + LICENSES from Google Fonts (network); family list in backend/scripts/fetch_fonts.py
 make favicons            # regenerate frontend/public/ icons from frontend/icon/icon-source.png
 make record-fixtures IMAGE=path.jpg [OUT=dir]   # record nova fixtures from a real solve into backend/tests/fixtures/nova/ or OUT (network, needs the key)
@@ -100,8 +100,8 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
   Cutting a release: in a `chore: release vX.Y.Z` PR bump `backend/pyproject.toml` and `backend/app/__init__.py`
   by hand and `frontend/package.json` (plus its lockfile) with `npm --prefix frontend version X.Y.Z --no-git-tag-version`;
   merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`; `release.yml` does the rest. Dry-run with a `-rcN` tag first:
-  the files must carry `X.Y.Z-rcN` for that tag, then a second chore PR bumps them to `X.Y.Z`. Never re-run an old tag's
-  workflow after a newer stable release has shipped: every stable tag re-points `latest`.
+  the files must carry `X.Y.Z-rcN` for that tag, then a second chore PR bumps them to `X.Y.Z`. Don't re-run an old tag's
+  workflow after a newer release has shipped: `latest` is guarded against it, `X.Y` is not (docs/RELEASING.md).
   `gh pr edit` and `gh pr update-branch` fail silently on this repo (GitHub's retired classic-projects API); change a
   PR body with `gh api -X PATCH repos/:owner/:repo/pulls/<n> -F body=@file`, and bring a PR that fell behind `main`
   (branch protection requires up-to-date branches) back with a local `git rebase origin/main` and

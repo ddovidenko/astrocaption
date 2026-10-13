@@ -8,6 +8,7 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -21,6 +22,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -34,6 +36,7 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 30   # a hung container or browser would otherwise hold the runner for 6 h
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
@@ -60,14 +63,15 @@ jobs:
       - name: install Chromium for Playwright
         run: cd frontend && npx playwright install --with-deps --only-shell chromium
       - name: boot the image and run the browser smoke test against it
+        timeout-minutes: 15   # the suite takes about 2 min; a stuck page must not wait for the job limit
         run: |
           docker run -d --name ac -p 8000:8000 \
             --add-host=host.docker.internal:host-gateway \
             -e NOVA_BASE_URL=http://host.docker.internal:8901 -e NOVA_API_KEY=fixture \
             --env-file frontend/e2e/app.env \
             astrocaption:ci
-          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/api/health && break; sleep 1; done
-          curl -fsS http://127.0.0.1:8000/api/health
+          for i in $(seq 1 30); do curl -fsS --max-time 5 http://127.0.0.1:8000/api/health && break; sleep 1; done
+          curl -fsS --max-time 5 http://127.0.0.1:8000/api/health
           FAKE_NOVA_HOST=0.0.0.0 E2E_BASE_URL=http://127.0.0.1:8000 E2E_DEV_PROXY=1 CI=1 npm --prefix frontend run e2e
       - name: container log
         if: failure()
