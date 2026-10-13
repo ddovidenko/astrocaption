@@ -16,14 +16,16 @@ import math
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from .catalog import objects_catalog
 from .config import DEFAULT_POLL_SECONDS, DEFAULT_SOLVE_TIMEOUT_SECONDS, Settings, SettingsSource
 from .db import Database
 from .layout import build_default_annotations, rematch_annotations
-from .models import Calibration, ImageRecord, SolveFailureKind, SolveStatus
-from .objects import objects_from_nova
+from .models import Calibration, ImageRecord, SolveFailureKind, SolveObject, SolveStatus
+from .objects import merge_objects, objects_from_catalog, objects_from_nova
 from .solver import JobState, Solver, SolveRequest, SolverError, TransientSolverError
 from .solver.nova import status_url
 from .storage import delete_image_files, image_dir, make_solve_copy
+from .wcs import Wcs, WcsError
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +41,22 @@ UNEXPECTED_MESSAGE = (
     "Something went wrong on this server while solving; details are in the server log."
     " Use Re-solve to try again."
 )
+
+
+def lookup_catalog(
+    image_id: str, wcs_text: str, solve_scale: float, existing: list[SolveObject]
+) -> list[SolveObject]:
+    """``existing`` plus the bundled catalogue's objects in this field (SPEC § 5.2 step 4),
+    merged by name then position. A header the projection cannot read is logged and the
+    objects stay as they were: the image is still solved."""
+    try:
+        wcs = Wcs.from_text(wcs_text)
+    except WcsError as exc:
+        log.warning("image %s: catalogue lookup skipped: %s", image_id, exc.detail)
+        return existing
+    hits = objects_from_catalog(wcs, solve_scale, objects_catalog())
+    next_id = max((o.id for o in existing), default=0) + 1
+    return merge_objects(existing, hits, next_id=next_id)
 
 
 class ImageGoneError(Exception):
@@ -328,6 +346,8 @@ class SolveWorker:
 
         raw = annotations if isinstance(annotations, list) else []
         new_objects = objects_from_nova(raw, scale)
+        if wcs_text:
+            new_objects = lookup_catalog(rec.id, wcs_text, scale, new_objects)
         previous = self.db.get_annotations(rec.id)
         fonts: Path = settings.fonts_dir
         if previous is None:
@@ -349,5 +369,6 @@ class SolveWorker:
                 "solve_failure": None,
                 "wcs_text": wcs_text or None,
                 "calibration": calibration,
+                "objects_catalog": objects_catalog().version if wcs_text else None,
             },
         )

@@ -61,16 +61,19 @@ def test_successful_solve_stores_everything(settings: Settings) -> None:
     assert len(json.loads((directory / "nova_annotations.json").read_text())) == 20
 
     objects = db.get_objects(rec.id)
-    assert len(objects) == 20
+    # nova's twenty come first with ids 1..20; the local catalogue's hits follow (#17).
+    assert [o.id for o in objects[:20]] == list(range(1, 21))
+    assert all(o.type in ("ngc", "ic", "bright") for o in objects[:20])
+    assert len(objects) > 20
     ann = db.get_annotations(rec.id)
     assert ann is not None and ann.version == 1
-    assert len(ann.labels) == 20
-    enabled = {
-        o.primary_name
-        for o in objects
-        if any(l.enabled and l.object_id == o.id for l in ann.labels)
-    }
-    assert enabled == ENABLED_BY_DEFAULT
+    assert len(ann.labels) == len(objects)
+    enabled_ids = {l.object_id for l in ann.labels if l.enabled}
+    # nova's objects follow the default-enabled rule exactly as before #17...
+    assert {o.primary_name for o in objects[:20] if o.id in enabled_ids} == ENABLED_BY_DEFAULT
+    # ...and a catalogue object is drawn only when its radius clears the same threshold.
+    for o in objects[20:]:
+        assert (o.id in enabled_ids) == (o.radius >= 0.004 * rec.width), o.primary_name
     assert ann.style.font_size == 36  # 12 * (3000 / 1000)
     assert not any(l.collided for l in ann.labels if l.enabled)
 
@@ -487,3 +490,44 @@ def test_default_style_is_read_live(tmp_path: Path) -> None:
     asyncio.run(worker.process(rec.id))
     ann = db.get_annotations(rec.id)
     assert ann is not None and ann.style.name_preference == "ngc_ic"
+
+
+# --- the local catalogue (#17) ---------------------------------------------------------------
+
+CATALOGUE_TYPES = ("sharpless", "lbn", "barnard", "ldn", "pgc")
+
+
+def test_a_solve_adds_catalogue_objects_and_stamps_the_row(settings: Settings) -> None:
+    from app.catalog import objects_catalog
+
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    asyncio.run(make_worker(settings, db, FakeSolver()).process(rec.id))
+    objects = db.get_objects(rec.id)
+    nova_ids = [o.id for o in objects if o.type in ("ngc", "ic", "bright")]
+    assert nova_ids == list(range(1, 21))  # nova's twenty keep ids 1..20 exactly as before
+    looked_up = [o for o in objects if o.type in CATALOGUE_TYPES]
+    assert looked_up, "the Orion field should gain catalogue objects"
+    assert all(o.id > 20 for o in looked_up)
+    names = {n for o in objects for n in o.catalog_names}
+    assert "Sh2-279" in names  # the Running Man's Sharpless number, nova never returns it
+    got = db.get_image(rec.id)
+    assert got is not None and got.objects_catalog == objects_catalog().version
+    ann = db.get_annotations(rec.id)
+    assert ann is not None and len(ann.labels) == len(objects)
+
+
+def test_an_unreadable_wcs_leaves_novas_objects_alone(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    base = nova_result()
+    broken = FakeSolver(SolveResult(base.annotations, "not a header", base.calibration))
+    with caplog.at_level(logging.WARNING, logger="app.worker"):
+        asyncio.run(make_worker(settings, db, broken).process(rec.id))
+    objects = db.get_objects(rec.id)
+    assert len(objects) == 20 and {o.type for o in objects} <= {"ngc", "ic", "bright"}
+    assert "catalogue lookup skipped" in caplog.text and rec.id in caplog.text
+    got = db.get_image(rec.id)
+    assert got is not None and got.solve_status == SolveStatus.SOLVED

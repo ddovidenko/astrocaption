@@ -308,7 +308,7 @@ def test_narrow_field_hides_hd_stars_but_lists_them(tmp_path: Path) -> None:
         image_id = upload(client, pelican)["id"]
         solved = wait_for_status(client, image_id, {"solved", "failed"})
         assert solved["solve_status"] == "solved", solved["solve_error"]
-        assert solved["object_count"] == 8
+        assert solved["object_count"] > 8  # nova's eight plus the local catalogue's hits (#17)
         assert solved["calibration"]["radius"] == pytest.approx(0.9965, abs=1e-3)
 
         objects = client.get(f"/api/images/{image_id}/objects").json()
@@ -321,7 +321,9 @@ def test_narrow_field_hides_hd_stars_but_lists_them(tmp_path: Path) -> None:
 
         labels = client.get(f"/api/images/{image_id}/annotations").json()["labels"]
         enabled = {lab["object_id"] for lab in labels if lab["enabled"]}
-        assert enabled == {o["id"] for o in objects if o["type"] != "hd"}
+        nova_types = {"ngc", "ic", "bright", "hd"}
+        assert enabled >= {o["id"] for o in objects if o["type"] in nova_types - {"hd"}}
+        assert enabled.isdisjoint({o["id"] for o in objects if o["type"] == "hd"})
 
 
 def test_solve_objects_annotations_and_export(
@@ -331,15 +333,17 @@ def test_solve_objects_annotations_and_export(
     image_id = body["id"]
     solved = wait_for_status(client, image_id, {"solved", "failed"})
     assert solved["solve_status"] == "solved", solved["solve_error"]
-    assert solved["object_count"] == 20
+    assert solved["object_count"] > 20  # nova's twenty plus the local catalogue's hits (#17)
     assert solved["nova_status_url"] == "https://nova.example.test/status/12345678"
     assert solved["nova_job_log_url"] == "https://nova.example.test/joblog/7654321"
     assert solved["calibration"]["ra"] == load_fixture("job_info.json")["calibration"]["ra"]
 
     objects = client.get(f"/api/images/{image_id}/objects").json()
-    assert len(objects) == 20
+    assert [o["id"] for o in objects[:20]] == list(range(1, 21))  # nova's first, as before
+    assert len(objects) > 20
     m42 = objects[0]
-    assert (m42["primary_name"], m42["catalog_names"]) == (
+    # The catalogue lookup appends its own names (Sh2-281) after these five (#17).
+    assert (m42["primary_name"], m42["catalog_names"][:5]) == (
         "M 42",
         ["NGC 1976", "M 42", "LBN 974", "Great Orion Nebula", "Orion Nebula"],
     )
@@ -350,9 +354,10 @@ def test_solve_objects_annotations_and_export(
 
     ann = client.get(f"/api/images/{image_id}/annotations").json()
     assert ann["image_id"] == image_id and ann["version"] == 1
-    # 8 bright stars + 9 objects with a known radius above 0.4 % of the width + IC 427 and
-    # IC 428, which nova reports with radius 0 ("no size known", #9)
-    assert sum(lab["enabled"] for lab in ann["labels"]) == 19
+    # Of nova's twenty (ids 1..20): 8 bright stars + 9 objects with a known radius above 0.4 %
+    # of the width + IC 427 and IC 428, which nova reports with radius 0 ("no size known", #9).
+    # The catalogue's hits (ids above 20) follow the same radius rule (#17).
+    assert sum(lab["enabled"] for lab in ann["labels"] if lab["object_id"] <= 20) == 19
     assert ann["style"]["font_file"] == "Inter-Regular.ttf"
 
     original = settings.data_dir / "uploads" / image_id / "original.jpg"
