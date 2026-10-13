@@ -16,7 +16,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from ..catalog import kind_for
 from ..config import Settings, SettingsSource
 from ..db import PAGE_LIMIT, Database, UnknownCursor, hash_of
 from ..fonts import list_fonts, resolved_style
@@ -30,7 +29,6 @@ from ..models import (
     ImageOut,
     ImageRecord,
     NamePreference,
-    ObjectKind,
     ObjectOut,
     Page,
     PublishRequest,
@@ -40,6 +38,7 @@ from ..models import (
     StyleConfig,
     utcnow_iso,
 )
+from ..objects import kind_of
 from ..render import render_annotated
 from ..solver.nova import job_log_url, status_url
 from ..storage import (
@@ -427,15 +426,12 @@ async def list_objects(image_id: str, db: DbDep) -> list[ObjectOut]:
 
 
 def _object_out(o: SolveObject, preference: NamePreference) -> ObjectOut:
-    kind: ObjectKind = (
-        "star" if o.type in ("bright", "hd") else (kind_for(o.catalog_names) or "other")
-    )
     return ObjectOut(
         id=o.id,
         catalog_names=o.catalog_names,
         primary_name=o.primary_name_for(preference),
         type=o.type,
-        kind=kind,
+        kind=kind_of(o),
         x=o.x,
         y=o.y,
         radius=o.radius,

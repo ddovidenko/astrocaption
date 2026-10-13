@@ -27,7 +27,7 @@ from app.db import Database
 from app.fonts import FontNotFoundError, load_font
 from app.layout import SIZE_RELATIVE
 from app.main import create_app, font_not_found_error
-from app.models import MAX_FONT_SIZE, MIN_FONT_SIZE, SolveStatus, StyleConfig
+from app.models import MAX_FONT_SIZE, MIN_FONT_SIZE, SolveObject, SolveStatus, StyleConfig
 from tests.conftest import (
     ENV_ISOLATED,
     FONTS_DIR,
@@ -898,3 +898,17 @@ def test_the_worker_gets_the_solve_knobs_from_the_settings(tmp_path: Path) -> No
     settings = make_settings(tmp_path, solve_timeout_seconds=8.0, solve_poll_seconds=0.5)
     app = create_app(settings, solver_factory=lambda: None)
     assert app.state.worker.timeout == 8.0 and app.state.worker.poll_interval == 0.5
+
+
+def test_object_kind_follows_the_catalogue_source() -> None:
+    """Looked-up objects (#17) report the kind of their source; nova's keep the names-table rule."""
+    from app.api.images import _object_out
+
+    def out(names: list[str], type_: str) -> str:
+        obj = SolveObject(id=1, catalog_names=names, type=type_, x=0, y=0, radius=1)
+        return _object_out(obj, "popular").kind
+
+    assert out(["PGC 5"], "pgc") == "galaxy"
+    assert out(["B 33"], "barnard") == "nebula"
+    assert out(["ι Ori"], "bright") == "star"
+    assert out(["NGC 1976", "M 42"], "ngc") == "nebula"
