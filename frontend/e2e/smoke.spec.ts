@@ -146,12 +146,29 @@ test('first run: setup, sign in, solve, export, edit, config, sign out', async (
     await expect(page.getByLabel('Current password')).toHaveValue('')
     await expect(page.getByText('Password changed.')).toBeVisible()
   }
-  await changePassword(PASSWORD, `${PASSWORD}-2`)
-  // Still signed in on the same page: the nav (and the Config link in it) renders only when
-  // /api/health says authenticated, so the re-issued cookie really was accepted.
-  await expect(page).toHaveURL(/\/config$/)
-  await expect(page.getByRole('link', { name: 'Config' })).toBeVisible()
-  await changePassword(`${PASSWORD}-2`, PASSWORD)
+  // Which password is live right now, so a run that dies between the two changes can still
+  // put the original back (#82): a reused data dir would otherwise be left on the temporary
+  // password and every later run would fail to sign in, cascading into the sign-in cooldown.
+  // The restore goes through page.request (it shares the browser's cookie) and only when
+  // needed: a change attempt with the wrong current password counts as a sign-in failure.
+  let live = PASSWORD
+  try {
+    await changePassword(PASSWORD, `${PASSWORD}-2`)
+    live = `${PASSWORD}-2`
+    // Still signed in on the same page: the nav (and the Config link in it) renders only when
+    // /api/health says authenticated, so the re-issued cookie really was accepted.
+    await expect(page).toHaveURL(/\/config$/)
+    await expect(page.getByRole('link', { name: 'Config' })).toBeVisible()
+    await changePassword(`${PASSWORD}-2`, PASSWORD)
+    live = PASSWORD
+  } finally {
+    if (live !== PASSWORD) {
+      const restored = await page.request.post('/api/password', {
+        data: { current_password: live, new_password: PASSWORD },
+      })
+      expect(restored.status(), 'the password could not be restored out of band').toBe(204)
+    }
+  }
 
   await page.getByRole('button', { name: 'Log out' }).click()
   await expect(page).toHaveURL(/\/login$/)
