@@ -7,8 +7,16 @@ import pytest
 from pydantic import ValidationError
 
 from app import catalog
-from app.catalog import enrich_names, kind_for, normalise
+from app.catalog import (
+    CatalogObject,
+    ObjectsCatalog,
+    enrich_names,
+    kind_for,
+    normalise,
+    unit_vector,
+)
 from app.models import (
+    MAX_LABELS,
     SolveObject,
     StyleConfig,
     StyleOverrides,
@@ -16,8 +24,9 @@ from app.models import (
     name_category,
     primary_name,
 )
-from app.objects import objects_from_nova, split_names
-from tests.conftest import NOVA_NARROW_FIXTURES, load_fixture
+from app.objects import kind_of, merge_objects, objects_from_catalog, objects_from_nova, split_names
+from app.wcs import Wcs
+from tests.conftest import NOVA_FIXTURES, NOVA_NARROW_FIXTURES, load_fixture
 
 
 def test_primary_name_prefers_messier() -> None:
@@ -255,3 +264,111 @@ def test_kind_for_rejects_an_unknown_kind_in_the_bundled_table(
         catalog._data.cache_clear()
         catalog._kinds.cache_clear()
         catalog._index.cache_clear()
+
+
+# --- the local catalogue: hits through the WCS, merged into nova's objects (#17) -------------
+
+
+def cat_obj(
+    names: tuple[str, ...], ra: float, dec: float, radius_arcmin: float, type_: str
+) -> CatalogObject:
+    return CatalogObject(names, ra, dec, radius_arcmin, type_, unit_vector(ra, dec))
+
+
+def test_objects_from_catalog_projects_scales_and_skips_what_is_outside() -> None:
+    wcs = Wcs.from_text((NOVA_FIXTURES / "wcs.fits").read_text(encoding="ascii"))
+    catalog = ObjectsCatalog(
+        "t",
+        (
+            cat_obj(("Sh2-279",), 83.85, -4.85, 10.0, "sharpless"),  # in the Orion field
+            cat_obj(("PGC 1",), 10.0, 10.0, 1.0, "pgc"),  # far away
+            cat_obj(("B 33",), 85.2458, -2.4583, 3.0, "barnard"),  # Horsehead: outside this frame
+        ),
+    )
+    hits = objects_from_catalog(wcs, 2.0, catalog)
+    assert [h.catalog_names[0] for h in hits] == ["Sh2-279"]
+    hit = hits[0]
+    assert hit.type == "sharpless" and hit.id == 0
+    unscaled = wcs.sky_to_pixel(83.85, -4.85)
+    assert unscaled is not None
+    assert (hit.x, hit.y) == pytest.approx((unscaled[0] * 2.0, unscaled[1] * 2.0))
+    assert hit.radius == pytest.approx(10.0 / 60 / wcs.plate_scale_deg() * 2.0)
+
+
+def nova_obj(
+    id_: int, names: list[str], type_: str, x: float, y: float, radius: float
+) -> SolveObject:
+    return SolveObject(id=id_, catalog_names=names, type=type_, x=x, y=y, radius=radius)
+
+
+def test_kind_of_uses_the_source_for_catalogue_objects_and_names_for_novas() -> None:
+    assert kind_of(nova_obj(1, ["PGC 5"], "pgc", 0, 0, 1)) == "galaxy"
+    assert kind_of(nova_obj(1, ["LDN 1"], "ldn", 0, 0, 1)) == "nebula"
+    assert kind_of(nova_obj(1, ["ι Ori"], "bright", 0, 0, 0)) == "star"
+    assert kind_of(nova_obj(1, ["NGC 1976", "M 42"], "ngc", 0, 0, 1)) == "nebula"
+    assert kind_of(nova_obj(1, ["XYZ 1"], "ngc", 0, 0, 1)) == "other"
+
+
+def test_merge_by_name_appends_names_and_keeps_novas_position() -> None:
+    existing = [nova_obj(1, ["NGC 6334", "Cat's Paw Nebula"], "ngc", 100.0, 100.0, 50.0)]
+    hits = [nova_obj(0, ["Sh2-8", "NGC 6334", "LBN 7"], "sharpless", 103.0, 99.0, 80.0)]
+    merged = merge_objects(existing, hits, next_id=2)
+    assert len(merged) == 1
+    assert merged[0].id == 1
+    assert (merged[0].x, merged[0].y, merged[0].radius) == (100.0, 100.0, 50.0)
+    assert merged[0].catalog_names == ["NGC 6334", "Cat's Paw Nebula", "Sh2-8", "LBN 7"]
+    assert merged[0].type == "ngc"
+    assert existing[0].catalog_names == ["NGC 6334", "Cat's Paw Nebula"]  # the input is untouched
+
+
+def test_merge_by_position_only_within_half_the_smaller_radius_and_same_kind() -> None:
+    nebula = nova_obj(1, ["NGC 1977"], "ngc", 1000.0, 1000.0, 60.0)
+    star = nova_obj(2, ["ι Ori"], "bright", 2000.0, 2000.0, 0.0)
+    close = nova_obj(0, ["Sh2-279"], "sharpless", 1010.0, 1005.0, 40.0)  # 11 px < 20 (half of 40)
+    far = nova_obj(0, ["LBN 974"], "lbn", 1030.0, 1000.0, 40.0)  # 30 px > 20
+    on_the_star = nova_obj(0, ["LDN 9"], "ldn", 2000.0, 2000.0, 30.0)  # same spot, other kind
+    merged = merge_objects([nebula, star], [close, far, on_the_star], next_id=3)
+    by_first = {o.catalog_names[0]: o for o in merged}
+    assert by_first["NGC 1977"].catalog_names == ["NGC 1977", "Sh2-279"]
+    assert "LBN 974" in by_first and "LDN 9" in by_first
+    assert by_first["ι Ori"].catalog_names == ["ι Ori"]
+
+
+def test_merge_appends_hits_after_existing_ids_by_radius_then_name() -> None:
+    existing = [
+        nova_obj(1, ["NGC 1"], "ngc", 0.0, 0.0, 10.0),
+        nova_obj(2, ["NGC 2"], "ngc", 500.0, 500.0, 5.0),
+    ]
+    hits = [
+        nova_obj(0, ["PGC 3"], "pgc", 900.0, 900.0, 2.0),
+        nova_obj(0, ["B 10"], "barnard", 800.0, 800.0, 9.0),
+        nova_obj(0, ["B 2"], "barnard", 700.0, 700.0, 9.0),
+    ]
+    merged = merge_objects(existing, hits, next_id=7)
+    assert [(o.id, o.catalog_names[0]) for o in merged] == [
+        (1, "NGC 1"),
+        (2, "NGC 2"),
+        (7, "B 10"),
+        (8, "B 2"),
+        (9, "PGC 3"),
+    ]
+
+
+def test_merge_caps_the_document_dropping_the_smallest_hits() -> None:
+    existing = [
+        nova_obj(i, [f"NGC {i}"], "ngc", float(i), 0.0, 1.0) for i in range(1, MAX_LABELS - 1)
+    ]
+    hits = [nova_obj(0, [f"PGC {i}"], "pgc", 10_000.0 + i, 0.0, float(i)) for i in range(1, 6)]
+    merged = merge_objects(existing, hits, next_id=MAX_LABELS)
+    assert len(merged) == MAX_LABELS
+    assert [o.catalog_names[0] for o in merged[-2:]] == ["PGC 5", "PGC 4"]
+
+
+def test_a_hit_matching_two_existing_objects_by_name_joins_the_first() -> None:
+    existing = [
+        nova_obj(1, ["NGC 10"], "ngc", 0.0, 0.0, 1.0),
+        nova_obj(2, ["IC 10"], "ic", 50.0, 50.0, 1.0),
+    ]
+    hits = [nova_obj(0, ["PGC 1", "NGC 10", "IC 10"], "pgc", 1.0, 1.0, 1.0)]
+    merged = merge_objects(existing, hits, next_id=3)
+    assert [o.catalog_names for o in merged] == [["NGC 10", "PGC 1"], ["IC 10"]]
