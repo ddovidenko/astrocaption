@@ -184,6 +184,39 @@ export async function putAnnotations(page: Page, imageId: string, doc: Annotatio
   return (await res.json()) as Annotations
 }
 
+/** Runs `body` with a snapshot of the image's annotations and, whatever happens in it, puts the
+ *  style and labels back to that snapshot (#116). The specs share one data dir, so a spec that
+ *  fails halfway through flipping the style would otherwise hand the flipped value to every spec
+ *  after it, and one failure would read as several. The restore re-reads the current version
+ *  first, so it cannot 409, and is skipped when nothing differs. Catch-and-rethrow rather than
+ *  `finally`: a throw in `finally` is what `no-unsafe-finally` forbids. A restore that fails on
+ *  its own is the failure; one that fails after the body already threw is only logged, so the
+ *  report shows the original failure. */
+export async function withAnnotationsRestored(
+  page: Page,
+  imageId: string,
+  body: (before: Annotations) => Promise<void>,
+): Promise<void> {
+  const before = await fetchAnnotations(page, imageId)
+  let failed: unknown = null
+  try {
+    await body(before)
+  } catch (e) {
+    failed = e
+  }
+  try {
+    const now = await fetchAnnotations(page, imageId)
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+    if (!same(now.style, before.style) || !same(now.labels, before.labels)) {
+      await putAnnotations(page, imageId, { style: before.style, labels: before.labels, version: now.version })
+    }
+  } catch (e) {
+    if (!failed) throw e
+    console.error(`[restore] annotations of ${imageId} not restored: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  if (failed) throw failed
+}
+
 /** Exports the image (default quality and scale) and returns the annotated preview's absolute URL. */
 export async function exportImage(page: Page, imageId: string): Promise<string> {
   const res = await page.request.post(`/api/images/${imageId}/export`, { data: {} })
