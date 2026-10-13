@@ -75,3 +75,17 @@ def test_build_drops_a_lowercase_leading_article_from_common_names() -> None:
     # "The…" at the start of a word stays.
     assert ["NGC 7000", "North America Nebula", "Theta Nebula"] in groups
     assert ["NGC 1999", "Keyhole"] in groups
+
+
+def test_build_capitalises_omega_nebula_and_leaves_bayer_letters_alone() -> None:
+    # OpenNGC writes M 17's common name as "omega Nebula" (#152). A lowercase first word is
+    # otherwise a Bayer letter before its constellation, which is right as it is.
+    rows = [
+        row("NGC6618", "Cl+N", M="017", **{"Common names": "Swan Nebula,omega Nebula"}),
+        row("NGC3372", "HII", **{"Common names": "eta Car Nebula"}),
+        row("NGC4755", "OCl", **{"Common names": "kappa Crucis Cluster,Jewel Box"}),
+    ]
+    groups, _ = build(rows)
+    assert ["NGC 6618", "M 17", "Swan Nebula", "Omega Nebula"] in groups
+    assert ["NGC 3372", "eta Car Nebula"] in groups
+    assert ["NGC 4755", "kappa Crucis Cluster", "Jewel Box"] in groups

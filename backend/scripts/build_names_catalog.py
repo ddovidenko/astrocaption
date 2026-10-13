@@ -71,6 +71,11 @@ KEEP_PREFIXES = {
 }
 NAME_RE = re.compile(r"^([A-Za-z]+)0*(\d+)(.*)$")
 
+# Common names OpenNGC spells in a way a label should not (#152). Only the odd one out goes here:
+# a lowercase first word is normally a Bayer letter before its constellation ("eta Car Nebula",
+# "h Persei Cluster", "kappa Crucis Cluster") and must stay as it is.
+COMMON_NAME_FIXES = {"omega Nebula": "Omega Nebula"}
+
 # OpenNGC's Type column folded into the editor's four buckets (spec § C "Objects tab"). Types not
 # listed (stars, associations, novae, non-existent and duplicate entries) get no entry: the API
 # reports them as "other".
@@ -147,7 +152,7 @@ def build(rows: list[dict[str, str]]) -> tuple[list[list[str]], dict[str, str]]:
             # label's first word (#147).
             common = common.strip().removeprefix("the ")
             if common:
-                names.append(common)
+                names.append(COMMON_NAME_FIXES.get(common, common))
         deduped: list[str] = []
         for n in names:
             if n not in deduped:
