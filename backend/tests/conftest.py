@@ -137,8 +137,8 @@ def make_client(settings: Settings, solver_factory: Callable[[], Solver | None])
     return TestClient(app)
 
 
-def login(client: TestClient, password: str = TEST_PASSWORD) -> None:
-    resp = client.post("/api/login", json={"password": password})
+def login(client: TestClient, password: str = TEST_PASSWORD, *, path: str = "/api/login") -> None:
+    resp = client.post(path, json={"password": password})
     assert resp.status_code == 204, resp.text
 
 

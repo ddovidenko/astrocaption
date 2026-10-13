@@ -103,7 +103,11 @@ class UploadGuard:
         self._source = settings_source
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and scope["method"] == "POST" and scope["path"] == router.prefix:
+        if (
+            scope["type"] == "http"
+            and scope["method"] == "POST"
+            and _route_path(scope) == router.prefix
+        ):
             settings = self._source.current()
             if not is_authenticated(Request(scope), settings):
                 await unauthorized_response()(scope, receive, send)
@@ -119,6 +123,14 @@ class UploadGuard:
                 await response(scope, receive, send)
                 return
         await self._app(scope, receive, send)
+
+
+def _route_path(scope: Scope) -> str:
+    """The path the router sees: ASGI's ``path`` includes ``root_path``, routing strips it
+    (a sub-path deployment, ``uvicorn --root-path /astro``, #40)."""
+    path: str = scope["path"]
+    root: str = scope.get("root_path", "")
+    return path.removeprefix(root) if root else path
 
 
 def _declared_length(scope: Scope) -> int | None:

@@ -130,6 +130,13 @@ def test_update_config_serialises_two_writers(tmp_path: Path) -> None:
     assert json.loads(path.read_text()) == {"a": 9, "b": 9}
 
 
+def test_update_config_creates_a_missing_data_dir(tmp_path: Path) -> None:
+    """First-run setup on a fresh volume: config.json's directory may not exist yet."""
+    path = tmp_path / "data" / "nested" / "config.json"
+    update_config(path, {"site_title": "One"})
+    assert json.loads(path.read_text()) == {"site_title": "One"}
+
+
 def test_update_config_ignores_a_leftover_lock_file(tmp_path: Path) -> None:
     """A lock file from a killed run is just a handle; it must not block or corrupt a write."""
     path = tmp_path / "config.json"

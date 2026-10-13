@@ -12,7 +12,11 @@ import SetupPage from './pages/SetupPage'
 
 export default function App() {
   const [health, setHealth] = useState<HealthOut | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  // Two banners with two owners (#40): `healthError` belongs to refreshHealth, which clears it
+  // on the next good read, and `actionError` to logout. The images page re-reads health every
+  // 3 s, so a shared message would lose a sign-out failure within one tick.
+  const [healthError, setHealthError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const navigate = useNavigate()
   const { pathname } = useLocation()
 
@@ -22,28 +26,28 @@ export default function App() {
     try {
       const fresh = await api.health()
       setHealth(fresh)
-      setError(null)
+      setHealthError(null)
       return fresh
     } catch (err) {
-      setError(describeError(err))
+      setHealthError(describeError(err))
       return null
     }
   }, [])
 
   useEffect(() => {
-    // Inlined rather than `void refreshHealth()`: react-hooks/set-state-in-effect forbids
-    // calling a setState-wrapping function directly in an effect body.
+    // Inlined rather than `void refreshHealth()`: react-hooks/set-state-in-effect flags the
+    // call even though its setState sits behind an await (re-checked for #40).
     let cancelled = false
     api
       .health()
       .then((h) => {
         if (!cancelled) {
           setHealth(h)
-          setError(null)
+          setHealthError(null)
         }
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(describeError(err))
+        if (!cancelled) setHealthError(describeError(err))
       })
     return () => {
       cancelled = true
@@ -68,15 +72,17 @@ export default function App() {
     try {
       await api.logout()
     } catch (err) {
-      setError(`Could not sign out: ${describeError(err)}. You are still signed in.`)
+      setActionError(`Could not sign out: ${describeError(err)}. You are still signed in.`)
       return
     }
     const fresh = await refreshHealth()
     if (fresh && !fresh.authenticated) {
+      setActionError(null)
       navigate('/login', { replace: true })
     } else if (fresh) {
-      setError('Could not sign out: the browser kept the session cookie. You are still signed in.')
+      setActionError('Could not sign out: the browser kept the session cookie. You are still signed in.')
     }
+    // fresh === null: the health banner already says why the read failed.
   }
 
   return (
@@ -106,9 +112,9 @@ export default function App() {
         )}
       </header>
       <main className={pathname.startsWith('/images/') ? 'editor-main' : undefined}>
-        {error && (
+        {(actionError ?? healthError) && (
           <p className="error">
-            {error}{' '}
+            {actionError ?? healthError}{' '}
             {!health && (
               <button className="secondary" onClick={() => void refreshHealth()}>
                 Try again

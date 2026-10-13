@@ -4,16 +4,13 @@ import json
 import logging
 import os
 import re
-from collections.abc import Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from starlette.routing import BaseRoute
 
 from app.api.auth import (
     PASSWORD_CHANGED_BUT_UNREADABLE,
@@ -29,7 +26,8 @@ from app.auth import (
     validate_new_password,
     verify_password,
 )
-from app.config import Settings, SettingsSource, update_config
+from app.config import CONFIG_NOT_JSON, Settings, SettingsSource, update_config
+from app.main import API_ROUTERS
 from tests.conftest import TEST_PASSWORD, env_app_client, login
 
 # Routes that must stay reachable while logged out: health for the Docker healthcheck,
@@ -46,36 +44,28 @@ PUBLIC_API_ROUTES = {
 }
 
 
-def _flatten_routes(routes: Iterable[BaseRoute]) -> Iterator[BaseRoute]:
-    """FastAPI wraps ``include_router`` results in an internal router-of-routers; unwrap it."""
-    for route in routes:
-        original_router = getattr(route, "original_router", None)
-        if original_router is not None:
-            yield from _flatten_routes(original_router.routes)
-        else:
-            yield route
-
-
-def owner_routes(app: FastAPI) -> list[tuple[str, str]]:
-    """Every (method, path) under ``/api`` except the public allowlist, derived from the
-    live app so a newly added route is covered automatically instead of relying on a
-    hand-maintained list."""
+def owner_routes() -> list[tuple[str, str]]:
+    """Every (method, path) under ``/api`` except the public allowlist, read from the same
+    router tuple ``create_app`` includes (``API_ROUTERS``), so a newly added route is covered
+    automatically instead of relying on a hand-maintained list. Each router's own ``routes``
+    already carry its prefix, which is what keeps this off FastAPI's internals (#40)."""
     found: list[tuple[str, str]] = []
-    for route in _flatten_routes(app.routes):
-        path = getattr(route, "path", None)
-        methods = getattr(route, "methods", None)
-        if not path or not methods or not path.startswith("/api/"):
-            continue
-        if path in PUBLIC_API_ROUTES:
-            continue
-        concrete_path = re.sub(r"\{[^/}]+\}", "x", path)
-        for method in sorted(methods - {"HEAD"}):
-            found.append((method, concrete_path))
+    for router in API_ROUTERS:
+        for route in router.routes:
+            path = getattr(route, "path", None)
+            methods = getattr(route, "methods", None)
+            if not path or not methods or not path.startswith("/api/"):
+                continue
+            if path in PUBLIC_API_ROUTES:
+                continue
+            concrete_path = re.sub(r"\{[^/}]+\}", "x", path)
+            for method in sorted(methods - {"HEAD"}):
+                found.append((method, concrete_path))
     return found
 
 
 def test_owner_routes_need_a_session(anon_client: TestClient) -> None:
-    routes = owner_routes(anon_client.app)  # type: ignore[arg-type]
+    routes = owner_routes()
     assert routes  # the derivation itself must find something, or this test proves nothing
     assert ("GET", "/api/docs") in routes
     assert ("GET", "/api/openapi.json") in routes
@@ -280,6 +270,27 @@ def test_setup_reports_a_data_directory_it_cannot_write(
         "The server log says why."
     }
     assert str(data_dir) not in resp.text  # the server path stays in the log
+
+
+def test_headless_setup_leaves_a_corrupt_config_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A config.json that does not parse is the owner's to fix: the variable must neither
+    overwrite it nor land in the log."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "config.json").write_text("{oops")
+    with (
+        caplog.at_level(logging.ERROR, logger="app.main"),
+        env_app_client(tmp_path, monkeypatch, ASTROCAPTION_PASSWORD="from-the-env") as client,
+    ):
+        health = client.get("/api/health").json()
+        assert health["config_error"] == CONFIG_NOT_JSON
+        # The variable did not become the password.
+        assert client.post("/api/login", json={"password": "from-the-env"}).status_code == 401
+    assert (data_dir / "config.json").read_text() == "{oops"
+    assert "ASTROCAPTION_PASSWORD ignored" in caplog.text and "cannot be read" in caplog.text
+    assert "from-the-env" not in caplog.text and str(data_dir) not in caplog.text
 
 
 def test_headless_setup_ignores_a_short_password(

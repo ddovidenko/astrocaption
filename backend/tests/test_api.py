@@ -238,6 +238,29 @@ def test_anonymous_oversized_upload_is_a_401_not_a_413(
     assert client.post("/api/images", content=b"x", headers=headers).status_code == 413
 
 
+def test_upload_guard_sees_through_a_root_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under ``uvicorn --root-path /astro`` the ASGI path arrives prefixed; the guard must
+    still refuse an anonymous upload before the body is spooled (#40)."""
+    settings = make_settings(tmp_path, max_upload_mb=1)
+
+    def body_was_read(*args: object) -> int:
+        raise AssertionError("an anonymous upload body was spooled behind a root_path")
+
+    monkeypatch.setattr("app.api.images._copy_limited", body_was_read)
+    app = create_app(settings, solver_factory=lambda: None, poll_interval=0.01, solve_timeout=10)
+    headers = {
+        "content-length": str(50 * 1024 * 1024),
+        "content-type": "multipart/form-data; boundary=astrocaption",
+    }
+    with TestClient(app, root_path="/astro") as client:
+        resp = client.post("/astro/api/images", content=b"x", headers=headers)
+        assert resp.status_code == 401 and resp.json() == {"detail": "Sign in to continue."}
+        login(client, path="/astro/api/login")
+        assert client.post("/astro/api/images", content=b"x", headers=headers).status_code == 413
+
+
 def test_upload_too_large_without_content_length_is_refused_after_the_cap(
     tmp_path: Path,
 ) -> None:
