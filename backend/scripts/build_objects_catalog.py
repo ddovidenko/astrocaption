@@ -66,6 +66,13 @@ def parse_tsv(text: str) -> list[dict[str, str]]:
     return rows
 
 
+def _number(row: dict[str, str], column: str) -> int | None:
+    """The row's catalogue number, or None for the few unnumbered entries (nothing to call
+    them, so no object)."""
+    text = row.get(column, "").strip()
+    return int(text) if text.isdigit() else None
+
+
 def _position(row: dict[str, str]) -> tuple[float, float]:
     return float(row["_RAJ2000"]), float(row["_DEJ2000"])
 
@@ -86,8 +93,11 @@ def rows_from_sharpless(rows: Iterable[dict[str, str]]) -> list[Row]:
     out = []
     for r in rows:
         ra, dec = _position(r)
+        n = _number(r, "Sh2")
+        if n is None:
+            continue
         radius = _radius_from_diameter(r["Diam"])
-        out.append(_row([f"Sh2-{int(r['Sh2'])}"], ra, dec, radius, "sharpless"))
+        out.append(_row([f"Sh2-{n}"], ra, dec, radius, "sharpless"))
     return out
 
 
@@ -95,6 +105,8 @@ def rows_from_barnard(rows: Iterable[dict[str, str]]) -> list[Row]:
     out = []
     for r in rows:
         ra, dec = _position(r)
+        if not r["Barn"].strip():
+            continue
         radius = _radius_from_diameter(r["Diam"])
         out.append(_row([f"B {r['Barn'].strip()}"], ra, dec, radius, "barnard"))
     return out
@@ -109,7 +121,10 @@ def rows_from_ldn(rows: Iterable[dict[str, str]]) -> list[Row]:
         except ValueError:
             area = 0.0
         radius = math.sqrt(area / math.pi) * 60 if area > 0 else DEFAULT_RADIUS_ARCMIN
-        out.append(_row([f"LDN {int(r['LDN'])}"], ra, dec, radius, "ldn"))
+        n = _number(r, "LDN")
+        if n is None:
+            continue
+        out.append(_row([f"LDN {n}"], ra, dec, radius, "ldn"))
     return out
 
 
@@ -120,7 +135,10 @@ def rows_from_lbn(rows: Iterable[dict[str, str]]) -> list[Row]:
         diameters = [float(d) for d in (r["Diam1"], r["Diam2"]) if d]
         largest = max(diameters) if diameters else 0.0
         radius = largest / 2 if largest > 0 else DEFAULT_RADIUS_ARCMIN
-        names = [f"LBN {int(r['Seq'])}"]
+        n = _number(r, "Seq")
+        if n is None:
+            continue
+        names = [f"LBN {n}"]
         m = _LBN_SHARPLESS.match(r.get("Name", ""))
         if m:
             names.append(f"Sh2-{int(m.group(1))}")
@@ -133,7 +151,10 @@ def rows_from_pgc(rows: Iterable[dict[str, str]]) -> list[Row]:
     for r in rows:
         ra, dec = _position(r)
         radius = 10 ** float(r["logD25"]) * 0.1 / 2
-        names = [f"PGC {int(r['PGC'])}"]
+        n = _number(r, "PGC")
+        if n is None:
+            continue
+        names = [f"PGC {n}"]
         for token in r.get("ANames", "").split():
             m = _CROSS.match(token)
             if m and m.group(1).upper() in KEEP_CROSS:

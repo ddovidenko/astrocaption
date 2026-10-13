@@ -186,6 +186,12 @@ def test_ldn_area_becomes_the_radius_of_a_disc_of_that_area() -> None:
     assert ldn1622["radius_arcmin"] == pytest.approx(math.sqrt(0.785 / math.pi) * 60, rel=1e-6)
 
 
+def test_a_row_without_a_catalogue_number_is_skipped() -> None:
+    """VizieR's LDN table carries a few unnumbered entries: nothing to call them, so no row."""
+    rows = rows_from_ldn(parse_tsv(LDN_TSV + "160.3093\t+60.3220\t\t  0.169\n"))
+    assert [r["names"] for r in rows] == [["LDN 1"], ["LDN 1622"]]
+
+
 def test_lbn_rows_keep_the_larger_diameter_and_carry_the_sharpless_cross_id() -> None:
     rows = rows_from_lbn(parse_tsv(LBN_TSV))
     assert rows[1]["names"] == ["LBN 974", "Sh2-279"] and rows[1]["radius_arcmin"] == 30.0
@@ -219,3 +225,21 @@ def test_build_folds_an_lbn_row_into_its_sharpless_row_and_dedupes_same_names() 
     assert [first_name(r) for r in rows].count("B 33") == 1
     assert by_first["B 33"]["radius_arcmin"] == 3.0
     assert {r["type"] for r in rows} == {"sharpless", "barnard", "ldn", "lbn", "pgc"}
+
+
+# --- the shipped file -----------------------------------------------------------------------
+
+from app.catalog import objects_catalog
+
+
+def test_the_shipped_catalogue_loads_and_carries_the_landmarks() -> None:
+    cat = objects_catalog()
+    assert cat.version
+    assert len(cat.objects) > 20_000
+    names = {n for o in cat.objects for n in o.names}
+    for landmark in ("Sh2-279", "B 33", "LDN 1622", "LBN 974", "PGC 68029", "NGC 7814"):
+        assert landmark in names, landmark
+    # Sh2-8, the Cat's Paw around NGC 6334: present as a Sharpless row.
+    sh2_8 = next(o for o in cat.objects if "Sh2-8" in o.names)
+    assert sh2_8.type == "sharpless"
+    assert all(o.radius_arcmin > 0 for o in cat.objects)

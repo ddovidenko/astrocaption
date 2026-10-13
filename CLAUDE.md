@@ -32,6 +32,7 @@ make placement-vectors   # regenerate tests/fixtures/placement/*.json from the P
 make render-vectors      # regenerate tests/fixtures/render/vectors.json from render.py (text boxes, ascents, leaders, anchors)
 make names-vectors       # regenerate tests/fixtures/names/vectors.json from models.py (name ranking + alias line)
 make names-catalog       # rebuild backend/app/catalog/names.json from OpenNGC (network)
+make objects-catalog     # rebuild backend/app/catalog/objects.json (Sharpless/Barnard/LDN/LBN/PGC) from VizieR (network)
 make check-version TAG=v0.1.0   # the release workflow's tag guard: TAG must equal the version in pyproject, app/__init__.py, package.json and its lockfile
 make fonts               # refresh fonts/*.ttf + LICENSES from Google Fonts (network); family list in backend/scripts/fetch_fonts.py
 make favicons            # regenerate frontend/public/ icons from frontend/icon/icon-source.png
