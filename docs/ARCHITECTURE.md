@@ -12,6 +12,7 @@ frontend/src/App.tsx ──fetch──▶ /api/images ...           (backend/app
                                      │ storage.make_solve_copy   solve.jpg (≤ 3000 px)
                                      │ solver.nova.NovaSolver    submit / poll / fetch
                                      │ objects.objects_from_nova  scale ×solve_scale, catalog.enrich_names
+                                     │ objects.objects_from_catalog + merge_objects  (wcs.Wcs: TAN+SIP, catalog/objects.json)
                                      │ layout.build_default_annotations
                                      │      ├ render.measure_label   (Pillow text metrics)
                                      │      └ placement.place_labels (pure geometry, SPEC § 6.4)
@@ -33,7 +34,9 @@ frontend/src/App.tsx ──fetch──▶ /api/images ...           (backend/app
 | `app/solver/` | `Solver` protocol (`submit` / `poll_submission` / `poll_job` / `fetch_result`) and the nova client. |
 | `app/worker.py` | Serialised solve queue; persists nova ids so a solve resumes after restart. |
 | `app/objects.py` | nova annotations → objects in original pixels; splits star names; stable ids. |
-| `app/catalog/` | OpenNGC-derived `names.json` (CC BY-SA 4.0) adding Messier/Caldwell/common names to NGC/IC designations, and OpenNGC's object types, folded into the kind (galaxy / nebula / cluster) that `ObjectOut.kind` reports. |
+| `app/catalog/` | OpenNGC-derived `names.json` (CC BY-SA 4.0) adding Messier/Caldwell/common names to NGC/IC designations, and OpenNGC's object types, folded into the kind (galaxy / nebula / cluster) that `ObjectOut.kind` reports. `objects.json` (CDS tables, `CDS-ATTRIBUTION.md`): Sharpless, Barnard, LDN, LBN, PGC ≥ 1′ with positions and sizes, looked up through the WCS. |
+| `app/wcs.py` | The stored WCS header parsed; TAN+SIP projection both ways, stdlib only. |
+| `app/catalog_backfill.py` | Startup: looks the local catalogue up for images stamped with an older catalogue version; additive. |
 | `app/placement.py` | Deterministic auto-placer. Shared vectors in `tests/fixtures/placement/`. |
 | `app/layout.py` | Default style per image size, enabled rule, placement glue, re-solve rematch. |
 | `app/render.py` | Pillow text metrics and the export renderer. Its layout rules are the parity contract for the canvas. |
