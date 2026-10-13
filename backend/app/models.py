@@ -471,6 +471,9 @@ class ImageRecord(BaseModel):
     exported_at: str | None = None
     #: ``content_hash`` of the annotations document the last export rendered (#91).
     exported_hash: str | None = None
+    #: Version of objects.json the stored objects were looked up against; NULL before the local
+    #: catalogue existed. The startup backfill brings stale rows up to the shipped version (#17).
+    objects_catalog: str | None = None
 
     @property
     def busy(self) -> bool:

@@ -27,6 +27,7 @@ def test_migration_from_v1_adds_hints_column(tmp_path: Path) -> None:
         conn.execute("ALTER TABLE images DROP COLUMN solve_hints_json")
         conn.execute("ALTER TABLE images DROP COLUMN solve_failure")
         conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
+        conn.execute("ALTER TABLE images DROP COLUMN objects_catalog")  # added by 6
         conn.execute("PRAGMA user_version = 1")
     db.init()
     with db.connect() as conn:
@@ -44,6 +45,7 @@ def test_migration_from_v2_adds_the_failure_kind_column(tmp_path: Path) -> None:
     with db.connect() as conn:  # rewind to the version-2 shape
         conn.execute("ALTER TABLE images DROP COLUMN solve_failure")
         conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
+        conn.execute("ALTER TABLE images DROP COLUMN objects_catalog")  # added by 6
         conn.execute("PRAGMA user_version = 2")
     db.init()
     with db.connect() as conn:
@@ -60,6 +62,7 @@ def test_migration_from_v3_adds_the_exported_hash_column(tmp_path: Path) -> None
     db.init()
     with db.connect() as conn:  # rewind to the version-3 shape
         conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
+        conn.execute("ALTER TABLE images DROP COLUMN objects_catalog")  # added by 6
         conn.execute("PRAGMA user_version = 3")
     db.init()
     with db.connect() as conn:
@@ -78,6 +81,7 @@ def test_migration_from_v4_swaps_the_exported_version_column_for_the_hash(tmp_pa
     with db.connect() as conn:  # rewind to the version-4 shape
         conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
         conn.execute("ALTER TABLE images ADD COLUMN exported_version INTEGER")
+        conn.execute("ALTER TABLE images DROP COLUMN objects_catalog")  # added by 6
         conn.execute("PRAGMA user_version = 4")
     db.init()
     with db.connect() as conn:
@@ -480,3 +484,46 @@ def test_store_solve_result_for_a_deleted_image_writes_nothing(
     assert "store_solve_result: no row with id img-1" in caplog.text
     assert db.get_objects(rec.id) == []
     assert db.get_annotations(rec.id) is None
+
+
+def test_migration_from_v5_adds_the_objects_catalog_stamp(tmp_path: Path) -> None:
+    """Images solved before the local catalogue existed read NULL: the startup backfill looks
+    them up once (#17)."""
+    db = Database(tmp_path / "x.sqlite")
+    db.init()
+    with db.connect() as conn:  # rewind to the version-5 shape
+        conn.execute("ALTER TABLE images DROP COLUMN objects_catalog")
+        conn.execute("PRAGMA user_version = 5")
+    db.init()
+    with db.connect() as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(images)")}
+        assert "objects_catalog" in columns
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    db.init()  # idempotent
+
+
+def test_images_for_catalog_backfill_picks_solved_rows_with_a_wcs_and_a_stale_stamp(
+    tmp_path: Path,
+) -> None:
+    from app.models import SolveStatus
+    from tests.conftest import make_settings, seed_image
+
+    settings = make_settings(tmp_path)
+    db = Database(settings.db_path)
+    stale = seed_image(settings, db, "stale")
+    fresh = seed_image(settings, db, "fresh")
+    no_wcs = seed_image(settings, db, "no-wcs")
+    unsolved = seed_image(settings, db, "unsolved")
+    db.update_image(
+        stale.id,
+        {"solve_status": SolveStatus.SOLVED, "wcs_text": "SIMPLE", "objects_catalog": "2025-01-01"},
+    )
+    db.update_image(
+        fresh.id,
+        {"solve_status": SolveStatus.SOLVED, "wcs_text": "SIMPLE", "objects_catalog": "2026-10-13"},
+    )
+    db.update_image(no_wcs.id, {"solve_status": SolveStatus.SOLVED})
+    assert unsolved.solve_status == SolveStatus.PENDING
+    assert [r.id for r in db.images_for_catalog_backfill("2026-10-13")] == ["stale"]
+    db.update_image(stale.id, {"objects_catalog": None})
+    assert [r.id for r in db.images_for_catalog_backfill("2026-10-13")] == ["stale"]
