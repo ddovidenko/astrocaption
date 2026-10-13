@@ -175,7 +175,8 @@ after once a month wants.
 
 The first start after upgrading to a release that ships a newer bundled object catalogue looks up
 every solved image once more (a few seconds per hundred images, before the server answers) and adds
-the new objects beside the existing labels; those images then show their export as out of date.
+the new objects beside the existing labels; those images then show their export as out of date. An image
+the lookup cannot handle is logged and left as it was; the server starts regardless.
 
 The package is public: pulling needs no GitHub account or `docker login`. If you run a fork,
 its first release pushes a *private* package (GHCR starts every new package that way); make it

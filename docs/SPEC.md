@@ -113,12 +113,17 @@ No multi-user, no roles, no invites in v1.
    recorded fixtures pin it to nova's own pixels within 0.5 px). Every row whose centre lands in the solve copy
    is a hit. A hit sharing a name with a nova object joins it (names appended; nova's position and radius
    stay), as does a hit of the same kind within half the smaller radius of a nova object's centre; the rest
-   are appended after nova's ids, by descending radius then name, capped at 5 000 labels. A header the
-   projection cannot read is logged and the image keeps nova's objects alone. The row records the catalogue
+   are appended after nova's ids, by descending radius then name, capped at 5 000 labels. Two exceptions
+   keep distinct objects apart: a group designation (Arp 270 is the pair NGC 3395/3396) is carried as a name
+   but never joins objects, and dark nebulae (Barnard, LDN) never join by position (B 168 sits inside the
+   Cocoon and keeps its own label). The catalogue is an add-on: a header the projection cannot read, or any
+   failure of the lookup, is logged and the image keeps nova's objects alone. The row records the catalogue
    version it was looked up against (`objects_catalog`); at startup, before requests are served, images whose
    stamp is behind the shipped version are looked up once more, additively: existing labels keep their
    position, state and overrides (the re-solve rematch), only new objects are placed, and their export then
-   reads as out of date. Never contacts nova.
+   reads as out of date. A lookup that would only add names to existing objects is not applied by the
+   backfill (the text would change while the export still read as current); an image whose lookup fails is
+   logged, left as it was and unstamped, and the server still starts. Never contacts nova.
 5. Owner lands in the editor with all objects present but **only objects above a size
    threshold enabled** (default: radius ≥ 0.4 % of image width, plus all named bright stars, plus
    non-stellar objects nova returns with radius 0: there the radius means "no size known", not
@@ -339,7 +344,7 @@ images
   objects_catalog text? (objects.json version the objects were looked up against; NULL before #17)
   updated_at
 
-objects (per image, from nova; immutable after solve)
+objects (per image, from nova and the local catalogue; rewritten only by a re-solve and the startup backfill)
   id            local int
   image_id
   catalog_names json  ["NGC 1976","M 42","Orion Nebula"]

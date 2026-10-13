@@ -372,3 +372,27 @@ def test_a_hit_matching_two_existing_objects_by_name_joins_the_first() -> None:
     hits = [nova_obj(0, ["PGC 1", "NGC 10", "IC 10"], "pgc", 1.0, 1.0, 1.0)]
     merged = merge_objects(existing, hits, next_id=3)
     assert [o.catalog_names for o in merged] == [["NGC 10", "PGC 1"], ["IC 10"]]
+
+
+def test_merge_never_joins_through_a_group_designation() -> None:
+    """Arp 270 is the pair NGC 3395/3396: the second galaxy must not fold into the first through
+    the group number the first hit appended."""
+    existing = [nova_obj(1, ["NGC 3395"], "ngc", 100.0, 100.0, 30.0)]
+    hits = [
+        nova_obj(0, ["PGC 32424", "NGC 3395", "Arp 270"], "pgc", 101.0, 100.0, 25.0),
+        nova_obj(0, ["PGC 32434", "NGC 3396", "Arp 270"], "pgc", 400.0, 400.0, 20.0),
+    ]
+    merged = merge_objects(existing, hits, next_id=2)
+    assert [o.catalog_names[0] for o in merged] == ["NGC 3395", "PGC 32434"]
+    assert merged[0].catalog_names == ["NGC 3395", "PGC 32424", "Arp 270"]
+    assert merged[1].catalog_names == ["PGC 32434", "NGC 3396", "Arp 270"]
+
+
+def test_a_dark_nebula_is_never_folded_into_a_bright_one_by_position() -> None:
+    """B 168 sits inside the Cocoon's radius and is labelled on its own by every atlas."""
+    cocoon = nova_obj(1, ["IC 5146"], "ic", 1000.0, 1000.0, 120.0)
+    b168 = nova_obj(0, ["B 168"], "barnard", 1010.0, 1000.0, 100.0)  # 10 px, well inside 50
+    ldn = nova_obj(0, ["LDN 1055"], "ldn", 1005.0, 1000.0, 90.0)
+    merged = merge_objects([cocoon], [b168, ldn], next_id=2)
+    assert [o.catalog_names[0] for o in merged] == ["IC 5146", "B 168", "LDN 1055"]
+    assert merged[0].catalog_names == ["IC 5146"]

@@ -12,6 +12,15 @@ from .wcs import Wcs
 
 STAR_TYPES = frozenset({"bright", "hd"})
 
+#: Catalogue sources that list dark nebulae. nova's nebulae are bright ones, and a dark cloud
+#: sitting inside a bright nebula (B 168 in the Cocoon) is a separate object with its own label,
+#: so these never join an existing object by position.
+DARK_SOURCES = frozenset({"barnard", "ldn"})
+
+#: Designations that name a group of objects (Arp 270 is the pair NGC 3395/3396). They are
+#: carried as names but never used to decide that two objects are the same one.
+GROUP_DESIGNATIONS = frozenset({"arp", "hcg"})
+
 NAME_SEPARATOR = " / "  # nova joins Bayer and Flamsteed designations: "ι Ori / 44 Ori"
 
 
@@ -112,8 +121,16 @@ def objects_from_catalog(
     return hits
 
 
+def _join_key(name: str) -> str | None:
+    """The normalised name, or None for a group designation, which identifies nothing by itself."""
+    key = normalise(name)
+    return None if key.split(" ", 1)[0] in GROUP_DESIGNATIONS else key
+
+
 def _joins_by_position(obj: SolveObject, hit: SolveObject) -> bool:
     if obj.radius <= 0 or hit.radius <= 0 or kind_of(obj) != kind_of(hit):
+        return False
+    if obj.type in DARK_SOURCES or hit.type in DARK_SOURCES:
         return False
     return math.hypot(obj.x - hit.x, obj.y - hit.y) <= min(obj.radius, hit.radius) / 2
 
@@ -121,30 +138,34 @@ def _joins_by_position(obj: SolveObject, hit: SolveObject) -> bool:
 def merge_objects(
     existing: list[SolveObject], hits: list[SolveObject], *, next_id: int
 ) -> list[SolveObject]:
-    """Fold ``hits`` into ``existing``: by any shared (normalised) name first, then by position
-    for the same kind within half the smaller radius; a joined hit adds its names and nothing
-    else. The rest are appended with ids from ``next_id`` by descending radius then primary
-    name, dropping the smallest beyond ``MAX_LABELS``. ``existing`` keeps its order and ids,
-    and is not mutated."""
+    """Fold ``hits`` into ``existing``: by any shared (normalised) name first, except a group
+    designation, then by position for the same kind within half the smaller radius, except for
+    dark nebulae; a joined hit adds its names and nothing else. The rest are appended with ids
+    from ``next_id`` by descending radius then primary name, dropping the smallest beyond
+    ``MAX_LABELS``. ``existing`` keeps its order and ids, and is not mutated."""
     merged = [o.model_copy(update={"catalog_names": list(o.catalog_names)}) for o in existing]
     by_name: dict[str, SolveObject] = {}
     for o in merged:
         for n in o.catalog_names:
-            by_name.setdefault(normalise(n), o)
+            if (key := _join_key(n)) is not None:
+                by_name.setdefault(key, o)
     fresh: list[SolveObject] = []
     for hit in hits:
-        target = next(
-            (by_name[normalise(n)] for n in hit.catalog_names if normalise(n) in by_name), None
-        )
+        keys = [k for n in hit.catalog_names if (k := _join_key(n)) is not None]
+        target = next((by_name[k] for k in keys if k in by_name), None)
         if target is None:
             target = next((o for o in merged if _joins_by_position(o, hit)), None)
         if target is None:
             fresh.append(hit)
             continue
         for n in hit.catalog_names:
-            if normalise(n) not in by_name:
+            key = _join_key(n)
+            if key is None:  # a group designation: carried once, claimed by nobody
+                if normalise(n) not in {normalise(m) for m in target.catalog_names}:
+                    target.catalog_names.append(n)
+            elif key not in by_name:  # a name another object already carries stays theirs
                 target.catalog_names.append(n)
-                by_name[normalise(n)] = target
+                by_name[key] = target
     fresh.sort(key=lambda o: (-o.radius, primary_name(o.catalog_names)))
     room = max(0, MAX_LABELS - len(merged))
     for i, hit in enumerate(fresh[:room]):

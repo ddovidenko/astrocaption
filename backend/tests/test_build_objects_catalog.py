@@ -92,6 +92,7 @@ def test_kind_by_source_covers_every_source() -> None:
 
 from scripts.build_objects_catalog import (
     DEFAULT_RADIUS_ARCMIN,
+    _names,
     build,
     parse_tsv,
     rows_from_barnard,
@@ -243,3 +244,28 @@ def test_the_shipped_catalogue_loads_and_carries_the_landmarks() -> None:
     sh2_8 = next(o for o in cat.objects if "Sh2-8" in o.names)
     assert sh2_8.type == "sharpless"
     assert all(o.radius_arcmin > 0 for o in cat.objects)
+
+
+PGC_PAIR_TSV = """\
+_RAJ2000\t_DEJ2000\tPGC\tlogD25\tANames
+deg\tdeg\t \t[0.1arcmin]\t
+----------\t----------\t-------\t-----\t--------
+162.000000\t+32.980000\t  32424\t 1.20\tNGC3395               ARP270
+162.020000\t+32.990000\t  32434\t 1.15\tNGC3396               ARP270
+"""
+
+
+def test_build_keeps_galaxies_that_share_a_group_name_apart() -> None:
+    """Arp 270 names the pair NGC 3395/3396: two galaxies, two rows, the group number on each."""
+    rows = build(
+        {
+            "sharpless": SHARPLESS_TSV,
+            "barnard": BARNARD_TSV,
+            "ldn": LDN_TSV,
+            "lbn": LBN_TSV,
+            "pgc": PGC_PAIR_TSV,
+        }
+    )
+    pgc = [r for r in rows if r["type"] == "pgc"]
+    assert [first_name(r) for r in pgc] == ["PGC 32424", "PGC 32434"]
+    assert all("Arp 270" in _names(r) for r in pgc)

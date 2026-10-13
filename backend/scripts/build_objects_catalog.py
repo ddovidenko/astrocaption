@@ -181,19 +181,21 @@ def _names(row: Row) -> list[str]:
 
 
 def build(tables: dict[str, str]) -> list[Row]:
-    """Every source's rows, then: an LBN row naming a Sharpless number joins that Sharpless row
-    (names merged, larger radius kept); rows whose first name repeats keep the larger radius."""
+    """Every source's rows, then: a row whose own designation (its first name) repeats folds
+    into the first one, and an LBN row naming a Sharpless number folds into that Sharpless row;
+    a fold merges the names and keeps the larger radius. Only designations fold rows: a
+    cross-name such as an Arp number or a shared NGC name belongs to several galaxies, and
+    folding on it would turn a pair or a group into one object."""
     rows: list[Row] = []
     for source, parser in PARSERS.items():
         rows.extend(parser(parse_tsv(tables[source])))
-    by_name: dict[str, Row] = {}
+    by_designation: dict[str, Row] = {}
     unique: list[Row] = []
     for r in rows:
         names = _names(r)
-        existing = next((by_name[n] for n in names if n in by_name), None)
+        existing = next((by_designation[n] for n in names if n in by_designation), None)
         if existing is None:
-            for n in names:
-                by_name[n] = r
+            by_designation[names[0]] = r
             unique.append(r)
             continue
         # Fold: keep the existing row, take the union of names and the larger radius.
@@ -201,7 +203,6 @@ def build(tables: dict[str, str]) -> list[Row]:
         for n in names:
             if n not in merged:
                 merged.append(n)
-                by_name[n] = existing
         existing["radius_arcmin"] = max(
             float(existing["radius_arcmin"]),  # type: ignore[arg-type]
             float(r["radius_arcmin"]),  # type: ignore[arg-type]

@@ -47,16 +47,20 @@ def lookup_catalog(
     image_id: str, wcs_text: str, solve_scale: float, existing: list[SolveObject]
 ) -> list[SolveObject]:
     """``existing`` plus the bundled catalogue's objects in this field (SPEC § 5.2 step 4),
-    merged by name then position. A header the projection cannot read is logged and the
-    objects stay as they were: the image is still solved."""
+    merged by name then position. The catalogue is an add-on: a header the projection cannot
+    read is logged as a warning, anything else it raises goes to the log with its traceback,
+    and either way the objects stay as they were, so the image is still solved."""
     try:
         wcs = Wcs.from_text(wcs_text)
+        hits = objects_from_catalog(wcs, solve_scale, objects_catalog())
+        next_id = max((o.id for o in existing), default=0) + 1
+        return merge_objects(existing, hits, next_id=next_id)
     except WcsError as exc:
         log.warning("image %s: catalogue lookup skipped: %s", image_id, exc.detail)
         return existing
-    hits = objects_from_catalog(wcs, solve_scale, objects_catalog())
-    next_id = max((o.id for o in existing), default=0) + 1
-    return merge_objects(existing, hits, next_id=next_id)
+    except Exception:
+        log.exception("image %s: catalogue lookup failed; keeping nova's objects", image_id)
+        return existing
 
 
 class ImageGoneError(Exception):

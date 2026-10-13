@@ -9,7 +9,7 @@ import pytest
 
 from app.config import Settings
 from app.db import Database
-from app.models import SolveHints, SolveStatus
+from app.models import SolveHints, SolveObject, SolveStatus
 from app.solver import JobState, SolveRequest, SolverError, SolveResult, TransientSolverError
 from app.storage import image_dir
 from app.worker import NO_KEY_MESSAGE, UNEXPECTED_MESSAGE, SolveWorker, _span
@@ -529,5 +529,27 @@ def test_an_unreadable_wcs_leaves_novas_objects_alone(
     objects = db.get_objects(rec.id)
     assert len(objects) == 20 and {o.type for o in objects} <= {"ngc", "ic", "bright"}
     assert "catalogue lookup skipped" in caplog.text and rec.id in caplog.text
+    got = db.get_image(rec.id)
+    assert got is not None and got.solve_status == SolveStatus.SOLVED
+
+
+def test_a_failing_projection_leaves_novas_objects_alone(
+    settings: Settings, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The catalogue is an add-on: whatever it raises, the solve nova completed is kept."""
+    from app import worker as worker_module
+
+    def boom(*_args: object, **_kwargs: object) -> list[SolveObject]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(worker_module, "objects_from_catalog", boom)
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    with caplog.at_level(logging.WARNING, logger="app.worker"):
+        asyncio.run(make_worker(settings, db, FakeSolver()).process(rec.id))
+    objects = db.get_objects(rec.id)
+    assert len(objects) == 20 and {o.type for o in objects} <= {"ngc", "ic", "bright"}
+    assert "catalogue lookup failed" in caplog.text and rec.id in caplog.text
+    assert "boom" in caplog.text
     got = db.get_image(rec.id)
     assert got is not None and got.solve_status == SolveStatus.SOLVED
