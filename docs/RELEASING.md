@@ -3,7 +3,8 @@
 For maintainers. Self-hosters only need the tag table in `INSTALL.md`.
 
 A release is a git tag `vX.Y.Z` on `main`. The `release.yml` workflow does everything else:
-it refuses the tag unless it matches the version recorded in the three version files, builds
+it refuses the tag unless it matches the version recorded in the version files (`pyproject.toml`,
+`app/__init__.py`, `package.json` and both fields of its lockfile), builds
 and smoke-tests the amd64 image (size cap, `/api/health` reports the tag's version), then
 builds amd64 + arm64, pushes them to `ghcr.io/ddovidenko/astrocaption` and creates the GitHub
 Release with generated notes and that version's `compose.yml` attached.
@@ -29,10 +30,11 @@ image tag and a GitHub pre-release; it never moves `X.Y` or `latest`.
 
 ## What not to do
 
-- **Never re-run an old tag's workflow after a newer stable release has shipped.** Every stable
-  tag's run re-points `latest` (and `X.Y`) at the image it built, so re-running `v0.1.0` after
-  `v0.2.0` exists would send everyone following `latest` back to 0.1.0. If an old release needs
-  a fix, cut a new patch tag instead.
+- **Do not re-run an old tag's workflow after a newer release has shipped.** `latest` is
+  guarded: the run compares the tag with the current Latest release and leaves `latest` (and
+  GitHub's Latest badge) alone when the tag is older. `X.Y` is not: re-running `v0.1.0` after
+  `v0.1.1` exists moves `0.1` back to 0.1.0. If an old release needs a fix, cut a new patch tag
+  instead; a patch on an old line (`v0.1.2` after `v0.2.0`) moves `0.1` and nothing else.
 - Never push to `main` directly; `main` allows squash merges only, and the tag guard assumes the
   version files were changed in a reviewed PR.
 - Never tag a commit whose version files do not match: the workflow stops at the guard, but the

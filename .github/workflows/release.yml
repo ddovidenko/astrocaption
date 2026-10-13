@@ -29,8 +29,27 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
-      - name: the tag must match the three version files
+      - name: the tag must match the version files
         run: cd backend && python scripts/check_release_version.py "$GITHUB_REF_NAME"
+
+      # An older stable tag re-run after a newer release has shipped (a retry long after, or a
+      # patch on an old line) must not re-point `latest`: neither the image tag nor the Release
+      # badge (#162). `gh release view` without a tag is GitHub's Latest release, which already
+      # leaves out pre-releases and drafts; no release at all means this is the first.
+      - name: is this tag at least as new as the current Latest release?
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          current=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
+          latest=auto
+          if [ -n "$current" ] && [ "$(printf '%s\n' "${current#v}" "${TAG#v}" | sort -V | tail -n1)" != "${TAG#v}" ]; then
+            latest=false
+          fi
+          echo "current Latest release: ${current:-none}; latest=$latest"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
@@ -48,9 +67,12 @@ jobs:
           # type=semver also emits `latest` (flavor latest=auto) and, for a pre-release tag
           # such as v0.1.0-rc1, falls back from the partial X.Y pattern to {{version}} and never emits `latest`.
           # The explicit enable= makes the X.Y rule visible rather than relying on that.
+          # latest=false when the tag is older than the current Latest release (the step above).
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
+          flavor: |
+            latest=${{ steps.latest.outputs.latest }}
           labels: |
             org.opencontainers.image.title=AstroCaption
             org.opencontainers.image.licenses=MIT
@@ -100,6 +122,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # No attestation manifests: mode=min adds `unknown/unknown` entries to the manifest
+          # list that show up on the package page and in `docker manifest inspect` (#162).
+          provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -107,6 +132,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          LATEST: ${{ steps.latest.outputs.latest }}
+          CURRENT: ${{ steps.latest.outputs.current }}
         run: |
           # Re-run after a transient failure: keep the existing Release, refresh the asset.
           # Only "release not found" means create; any other error (API hiccup) fails here
@@ -117,6 +144,14 @@ jobs:
             exit 0
           fi
           grep -q "release not found" view.err || { cat view.err; exit 1; }
-          prerelease=""
-          case "$TAG" in *-*) prerelease="--prerelease";; esac
-          gh release create "$TAG" compose.yml --verify-tag --generate-notes $prerelease
+          set -- --verify-tag --generate-notes
+          case "$TAG" in *-*) set -- "$@" --prerelease;; esac
+          if [ "$LATEST" = false ]; then
+            # An older tag: GitHub would otherwise move its Latest badge here too.
+            set -- "$@" --latest=false
+          elif [ -n "$CURRENT" ]; then
+            # Notes since the previous stable release, not since the last rc (the default
+            # start is whatever release came before, pre-release or not).
+            set -- "$@" --notes-start-tag "$CURRENT"
+          fi
+          gh release create "$TAG" compose.yml "$@"
