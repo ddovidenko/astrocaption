@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -163,7 +165,13 @@ def test_gallery_item_and_files_for_a_published_image(
         assert file_resp.headers["content-type"] == "image/jpeg"
         assert file_resp.headers["cache-control"] == "public, no-cache"
         assert file_resp.content[:2] == b"\xff\xd8", key  # a JPEG, not an error page
+        # HEAD is the same answer without the body (a link checker, a crawler; #137).
+        head = anon_client.head(item[key])
+        assert head.status_code == 200 and head.content == b"", key
+        assert head.headers["content-type"] == "image/jpeg"
     export = anon_client.get(item["export_url"])
+    # A download, not an inline image, under the title's slug.
+    assert export.headers["content-disposition"].startswith("attachment;")
     assert 'filename="Orion-Field-annotated.jpg"' in export.headers["content-disposition"]
     # The unannotated original is owner-only: no public kind serves it, and an unknown kind is
     # the same 404 as every other miss.
@@ -195,12 +203,22 @@ def test_gallery_hides_unpublished_unknown_and_unsolved_images(
 
 
 def test_gallery_skips_a_published_row_whose_export_vanished(
-    anon_client: TestClient, client: TestClient, settings: Settings, sample_jpeg: Path
+    anon_client: TestClient,
+    client: TestClient,
+    settings: Settings,
+    sample_jpeg: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     kept = published_image(client, sample_jpeg)
     gone = published_image(client, sample_jpeg)
     (settings.renders_dir / gone["id"] / "annotated.jpg").unlink()
-    assert [i["id"] for i in anon_client.get("/api/gallery").json()["items"]] == [kept["id"]]
+    with caplog.at_level(logging.WARNING, logger="app.api.gallery"):
+        assert [i["id"] for i in anon_client.get("/api/gallery").json()["items"]] == [kept["id"]]
+    # The owner learns from the server log which row was skipped and why; the visitor does not.
+    warnings = [r.getMessage() for r in caplog.records if r.name == "app.api.gallery"]
+    assert warnings == [
+        f"gallery: skipping published image {gone['id']}: its export files are missing"
+    ]
     resp = anon_client.get(f"/api/gallery/{gone['id']}")
     assert resp.status_code == 404 and resp.json() == {"detail": NOT_FOUND}
 

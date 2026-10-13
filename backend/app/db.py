@@ -327,6 +327,9 @@ class Database:
         # UUID) cannot. Paging is keyset on that same (created_at, rowid) order (SPEC § 8): the
         # page after `before` is everything strictly older than that row, so an upload or a
         # delete elsewhere never shifts it. One row more than asked tells whether a page follows.
+        # Known limit (#137): without AUTOINCREMENT SQLite hands a deleted newest row's rowid to
+        # the next insert, so deleting the newest image and uploading another within the same
+        # second lists those two in the wrong order. Cosmetic; not worth a schema migration.
         conds = [where] if where else []
         values: list[object] = list(params)
         with self.connect() as conn:
