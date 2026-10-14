@@ -202,7 +202,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
               required
               min={MIN_LABEL_RADIUS_PERCENT}
               max={MAX_LABEL_RADIUS_PERCENT}
-              step="0.1"
+              step="any"
               value={labelRadiusPercent}
               disabled={locked('min_label_radius_percent')}
               onChange={(e) => edit(setLabelRadiusPercent, e.target.value)}

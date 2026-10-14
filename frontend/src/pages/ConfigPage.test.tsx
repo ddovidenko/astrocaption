@@ -99,6 +99,7 @@ describe('ConfigPage', () => {
     await mount()
     const threshold = screen.getByLabelText(/^Label objects at least this large/) as HTMLInputElement
     expect(threshold.value).toBe('0.4')
+    expect(threshold.step).toBe('any') // the API takes any value in range; 0.25 must not be refused by the browser
     vi.mocked(api.updateConfig).mockResolvedValue({ ...config, min_label_radius_percent: 1 })
     fireEvent.change(threshold, { target: { value: '1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
