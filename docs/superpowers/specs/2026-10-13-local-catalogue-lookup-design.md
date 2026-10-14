@@ -30,7 +30,10 @@ objects (SPEC § 13 "custom object entries" stays a separate item), any change t
   and search. Going deeper is a rebuild of the file (`make objects-catalog`), like `names.json`.
 - **Backfill at startup, additive, before the server accepts requests.** It never contacts nova:
   it reads each image's stored `wcs.fits`. Existing labels, positions, enabled states and
-  overrides are untouched; only rows are added.
+  overrides are untouched; only rows are added. A lookup that would only append names to
+  existing objects is not applied (the label text would change while the export's content hash,
+  and so the out-of-date signal, stayed put); names arrive together with added rows. An image
+  whose lookup raises is logged with its traceback, left unstamped, and the start continues.
 - **Image size.** The catalogue data is about 1.5 MB. The 400 MB rule stays.
 
 ## Data: `backend/app/catalog/objects.json`
@@ -118,9 +121,12 @@ tables and their papers. The package-data glob already ships every JSON under `c
 - `merge_objects(nova, hits, *, next_id) -> list[SolveObject]`:
   1. **By name.** A hit sharing any normalised name with an existing object joins it: names
      appended (deduplicated), the existing position and radius stay. NGC 6334 gains `Sh2-8`.
+     A group designation (Arp, HCG) names several objects, so it is carried but never joins.
   2. **By position, narrowly.** A hit of the same kind as an existing object, both with known
      (non-zero) radii, whose centre is within half the smaller radius of that object's centre,
-     joins it the same way. Nothing else merges: NGC 1980 and ι Ori stay two objects.
+     joins it the same way. Dark nebulae (Barnard, LDN) are excepted: nova's nebulae are bright
+     ones and a dark cloud inside one is its own object. Nothing else merges: NGC 1980 and ι Ori
+     stay two objects.
   3. **Ids.** Existing objects keep their ids (nova's 1..n exactly as today). Remaining hits are
      appended with ids from `next_id`, ordered by descending radius then primary name.
   4. **Cap.** `MAX_LABELS` (5,000) bounds the document; if existing + hits would exceed it, hits

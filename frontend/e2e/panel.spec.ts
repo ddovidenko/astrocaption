@@ -14,19 +14,24 @@ test('the side panel: kind chips, keyboard tabs, kept state, names follow the pr
   // The name preference and a label toggle below are flipped and put back through the UI; the
   // wrapper puts them back regardless, so a failure in between stays one failure (#116).
   await withAnnotationsRestored(page, imageId, async () => {
-    // Kind chips: the Orion fixture has 8 bright stars, 9 NGC and 3 IC rows. A chip only hides the
-    // *disabled* rows of its kind: a star whose label is drawn stays listed with Stars off.
+    // Kind chips: the Orion fixture has 8 bright stars, 9 NGC and 3 IC rows from nova, plus the
+    // local catalogue's objects in this field (Sharpless, LBN, LDN; #17). The total is read from
+    // the server so the spec follows the shipped catalogue rather than hard-coding it. A chip only
+    // hides the *disabled* rows of its kind: a star whose label is drawn stays listed with Stars off.
     const rows = page.locator('.object-list .object-row')
-    await expect(page.getByText('20 of 20 objects')).toBeVisible()
     const objects = await fetchObjects(page, imageId)
+    const total = objects.length
+    expect(total).toBeGreaterThan(20)
+    await expect(page.getByText(`${total} of ${total} objects`)).toBeVisible()
     const enabledIds = new Set((await fetchAnnotations(page, imageId)).labels.filter((l) => l.enabled).map((l) => l.object_id))
+    const stars = objects.filter((o) => o.kind === 'star').length
     const drawnStars = objects.filter((o) => o.kind === 'star' && enabledIds.has(o.id)).length
     await page.getByRole('button', { name: 'Stars', exact: true }).click()
-    await expect(page.getByText(`${12 + drawnStars} of 20 objects`)).toBeVisible()
+    await expect(page.getByText(`${total - stars + drawnStars} of ${total} objects`)).toBeVisible()
     await expect(rows.filter({ hasText: 'star' })).toHaveCount(drawnStars)
     await expect(rows.filter({ hasText: 'star' }).locator('input[type=checkbox]:not(:checked)')).toHaveCount(0)
     await page.getByRole('button', { name: 'Stars', exact: true }).click()
-    await expect(page.getByText('20 of 20 objects')).toBeVisible()
+    await expect(page.getByText(`${total} of ${total} objects`)).toBeVisible()
     // No hd rows in this field: the toggle changes nothing but stays pressable.
     await page.getByRole('button', { name: 'HD stars' }).click()
     await expect(page.getByRole('button', { name: 'HD stars' })).toHaveAttribute('aria-pressed', 'true')
@@ -49,7 +54,7 @@ test('the side panel: kind chips, keyboard tabs, kept state, names follow the pr
     await search.press('Control+z')
     const undone = await search.inputValue()
     expect('M 31'.startsWith(undone)).toBe(true)
-    await expect(page.getByText(`${objects.filter((o) => o.catalog_names.some((n) => n.toLowerCase().includes(undone.toLowerCase()))).length} of 20 objects`)).toBeVisible()
+    await expect(page.getByText(`${objects.filter((o) => o.catalog_names.some((n) => n.toLowerCase().includes(undone.toLowerCase()))).length} of ${total} objects`)).toBeVisible()
     await search.fill('')
 
     // Keyboard: ArrowRight selects and focuses the next tab.

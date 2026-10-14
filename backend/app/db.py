@@ -46,7 +46,7 @@ class ImagePage(NamedTuple):
     next: str | None
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # Statements that bring an existing database from version N-1 to N.
 MIGRATIONS: dict[int, tuple[str, ...]] = {
@@ -59,6 +59,9 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "ALTER TABLE images ADD COLUMN exported_hash TEXT",
         "ALTER TABLE images DROP COLUMN exported_version",
     ),
+    # 6: which objects.json version an image's objects were looked up against (#17); NULL
+    # means "never", and the startup backfill fills it in.
+    6: ("ALTER TABLE images ADD COLUMN objects_catalog TEXT",),
 }
 
 SCHEMA = """
@@ -84,7 +87,8 @@ CREATE TABLE IF NOT EXISTS images (
     solve_hints_json   TEXT,
     published          INTEGER NOT NULL DEFAULT 0,
     exported_at        TEXT,
-    exported_hash      TEXT
+    exported_hash      TEXT,
+    objects_catalog    TEXT
 );
 CREATE INDEX IF NOT EXISTS images_created_at ON images (created_at);
 
@@ -365,6 +369,18 @@ class Database:
             rows = conn.execute(
                 "SELECT * FROM images WHERE solve_status IN (?, ?) ORDER BY created_at",
                 (SolveStatus.PENDING.value, SolveStatus.SOLVING.value),
+            ).fetchall()
+        return [_row_to_image(r) for r in rows]
+
+    def images_for_catalog_backfill(self, version: str) -> list[ImageRecord]:
+        """Solved images with a stored WCS whose objects were last looked up against another
+        catalogue version (or never), oldest first."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM images WHERE solve_status = ? AND wcs_text IS NOT NULL"
+                " AND (objects_catalog IS NULL OR objects_catalog != ?)"
+                " ORDER BY created_at, rowid",
+                (SolveStatus.SOLVED.value, version),
             ).fetchall()
         return [_row_to_image(r) for r in rows]
 

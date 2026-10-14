@@ -101,10 +101,14 @@ class Wcs:
         def f(key: str) -> float:
             return float(cards[key])
 
+        cd = (f("CD1_1"), f("CD1_2"), f("CD2_1"), f("CD2_2"))
+        det = cd[0] * cd[3] - cd[1] * cd[2]
+        if det == 0.0 or not math.isfinite(det):
+            raise WcsError("the stored WCS has no usable plate scale", f"CD={cd!r}")
         return cls(
             crval=(f("CRVAL1"), f("CRVAL2")),
             crpix=(f("CRPIX1"), f("CRPIX2")),
-            cd=(f("CD1_1"), f("CD1_2"), f("CD2_1"), f("CD2_2")),
+            cd=cd,
             width=int(f("IMAGEW")),
             height=int(f("IMAGEH")),
             a=polys["A"],

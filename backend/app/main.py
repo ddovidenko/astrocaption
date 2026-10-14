@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-from . import __version__
+from . import __version__, catalog_backfill
 from .api import auth, config, docs, fonts, gallery, health, images, uploads
 from .auth import (
     LoginLimiter,
@@ -93,6 +93,14 @@ def create_app(
         uploads.clear_partial_uploads(cfg)
         _headless_setup(source, setup_password)
         db.init()
+        # Images solved before the local catalogue (or before its current version) gain its
+        # objects now, before any request is served (#17): additive, never contacts nova.
+        report = await asyncio.to_thread(catalog_backfill.run, db, cfg)
+        if report.changed:
+            log.info(
+                "catalogue backfill changed %d image(s); their exports now read as out of date",
+                report.changed,
+            )
         http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(30.0, read=300.0, write=300.0), follow_redirects=True
         )

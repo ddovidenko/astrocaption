@@ -173,3 +173,13 @@ def test_a_header_without_sip_projects_as_a_plain_tan() -> None:
     # One pixel east: CD1_1 = -0.001 deg/px, so RA grows westwards on the pixel axis.
     ra, _ = wcs.pixel_to_sky(1499.0, 1125.0)
     assert ra > 84.0
+
+
+def test_wcs_from_text_refuses_a_singular_cd_matrix() -> None:
+    """A zero plate scale would divide every projection by zero; it is refused like a missing card."""
+    text = MINIMAL_TAN.replace(card("CD2_2", "0.001"), card("CD2_2", "0.0")).replace(
+        card("CD1_1", "-0.001"), card("CD1_1", "0.0")
+    )
+    with pytest.raises(WcsError) as caught:
+        Wcs.from_text(text)
+    assert "scale" in caught.value.public
