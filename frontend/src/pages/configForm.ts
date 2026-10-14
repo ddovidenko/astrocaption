@@ -14,6 +14,8 @@ export function sameOverrides(a: StyleOverrides, b: StyleOverrides): boolean {
 export interface ConfigForm {
   siteTitle: string
   uploadMb: string
+  /** `min_label_radius_percent` as typed; blank means unchanged, "0" is a value. */
+  labelRadiusPercent: string
   novaKey: string
   style: StyleForm
   publicGallery: boolean
@@ -34,6 +36,10 @@ export function buildUpdate(form: ConfigForm, config: ConfigOut): ConfigUpdate {
   const mb = form.uploadMb.trim()
   if (!locked('max_upload_mb') && mb !== '' && mb !== String(config.max_upload_mb)) {
     body.max_upload_mb = Number(mb)
+  }
+  const pct = form.labelRadiusPercent.trim()
+  if (!locked('min_label_radius_percent') && pct !== '' && Number(pct) !== config.min_label_radius_percent) {
+    body.min_label_radius_percent = Number(pct)
   }
   if (!locked('public_gallery_enabled') && form.publicGallery !== config.public_gallery_enabled) {
     body.public_gallery_enabled = form.publicGallery

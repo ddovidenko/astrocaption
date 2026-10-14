@@ -322,18 +322,26 @@ def test_lockable_covers_every_lockable_field(tmp_path: Path) -> None:
             ASTROCAPTION_MAX_UPLOAD_MB="7",
             ASTROCAPTION_SITE_TITLE="T",
             ASTROCAPTION_PUBLIC_GALLERY="false",
+            ASTROCAPTION_MIN_LABEL_RADIUS_PERCENT="1",
         )
     )
     assert (
         set(LOCKABLE)
         == set(s.locked_by)
-        == {"nova_api_key", "max_upload_mb", "site_title", "public_gallery_enabled"}
+        == {
+            "nova_api_key",
+            "max_upload_mb",
+            "site_title",
+            "public_gallery_enabled",
+            "min_label_radius_percent",
+        }
     )
     assert s.locked_by == {
         "nova_api_key": "NOVA_API_KEY",
         "max_upload_mb": "ASTROCAPTION_MAX_UPLOAD_MB",
         "site_title": "ASTROCAPTION_SITE_TITLE",
         "public_gallery_enabled": "ASTROCAPTION_PUBLIC_GALLERY",
+        "min_label_radius_percent": "ASTROCAPTION_MIN_LABEL_RADIUS_PERCENT",
     }
 
 
@@ -512,3 +520,31 @@ def test_public_gallery_flag_in_the_file_must_be_a_boolean(
         s = load_settings(env_for(tmp_path))
     assert s.public_gallery_enabled is True
     assert "public_gallery_enabled" in caplog.text
+
+
+def test_min_label_radius_percent_reads_the_file_and_the_env_and_clamps(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#211: the default-enabled threshold as a percentage of the image width; 0 is a value
+    (every object with a size starts drawn), not "unset"."""
+    from app.config import DEFAULT_MIN_LABEL_RADIUS_PERCENT
+
+    assert DEFAULT_MIN_LABEL_RADIUS_PERCENT == 0.4
+    assert load_settings(env_for(tmp_path)).min_label_radius_percent == 0.4
+    (tmp_path / "config.json").write_text(json.dumps({"min_label_radius_percent": 0}))
+    assert load_settings(env_for(tmp_path)).min_label_radius_percent == 0.0
+    (tmp_path / "config.json").write_text(json.dumps({"min_label_radius_percent": 1.5}))
+    assert load_settings(env_for(tmp_path)).min_label_radius_percent == 1.5
+    pinned = load_settings(env_for(tmp_path, ASTROCAPTION_MIN_LABEL_RADIUS_PERCENT="2"))
+    assert pinned.min_label_radius_percent == 2.0
+    assert pinned.locked_by["min_label_radius_percent"] == "ASTROCAPTION_MIN_LABEL_RADIUS_PERCENT"
+    (tmp_path / "config.json").write_text(json.dumps({"min_label_radius_percent": 50}))
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        assert load_settings(env_for(tmp_path)).min_label_radius_percent == 10.0
+    assert "50" in caplog.text and "10" in caplog.text
+    (tmp_path / "config.json").write_text(json.dumps({"min_label_radius_percent": -1}))
+    assert load_settings(env_for(tmp_path)).min_label_radius_percent == 0.0
+    (tmp_path / "config.json").write_text(json.dumps({"min_label_radius_percent": "big"}))
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        assert load_settings(env_for(tmp_path)).min_label_radius_percent == 0.4
+    assert "min_label_radius_percent" in caplog.text

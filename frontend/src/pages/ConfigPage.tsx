@@ -1,5 +1,15 @@
 import { useEffect, useId, useState } from 'react'
-import { MAX_UPLOAD_MB, MIN_UPLOAD_MB, api, pageError, type ConfigOut, type FontOut, type HealthOut } from '../api'
+import {
+  MAX_LABEL_RADIUS_PERCENT,
+  MAX_UPLOAD_MB,
+  MIN_LABEL_RADIUS_PERCENT,
+  MIN_UPLOAD_MB,
+  api,
+  pageError,
+  type ConfigOut,
+  type FontOut,
+  type HealthOut,
+} from '../api'
 import StyleForm from '../style/StyleForm'
 import { styleFormFromOverrides, type StyleForm as StyleFormValues } from '../style/styleForm'
 import { buildUpdate } from './configForm'
@@ -12,6 +22,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
   const [fonts, setFonts] = useState<FontOut[] | null>(null) // null: the font list did not load
   const [siteTitle, setSiteTitle] = useState('')
   const [uploadMb, setUploadMb] = useState('')
+  const [labelRadiusPercent, setLabelRadiusPercent] = useState('')
   const [novaKey, setNovaKey] = useState('')
   const [publicGallery, setPublicGallery] = useState(true)
   const [style, setStyle] = useState<StyleFormValues>(styleFormFromOverrides({}))
@@ -33,6 +44,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
       setFonts(list.status === 'fulfilled' ? list.value : null)
       setSiteTitle(cfg.value.site_title)
       setUploadMb(String(cfg.value.max_upload_mb))
+      setLabelRadiusPercent(String(cfg.value.min_label_radius_percent))
       setPublicGallery(cfg.value.public_gallery_enabled)
       setStyle(styleFormFromOverrides(cfg.value.default_style))
     })
@@ -57,6 +69,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
     setConfig(fresh)
     setSiteTitle(fresh.site_title)
     setUploadMb(String(fresh.max_upload_mb))
+    setLabelRadiusPercent(String(fresh.min_label_radius_percent))
     setPublicGallery(fresh.public_gallery_enabled)
     setStyle(styleFormFromOverrides(fresh.default_style))
     setNovaKey('')
@@ -68,7 +81,7 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
     setBusy(true)
     setError(null)
     setSaved(null)
-    const body = buildUpdate({ siteTitle, uploadMb, novaKey, style, publicGallery }, config)
+    const body = buildUpdate({ siteTitle, uploadMb, labelRadiusPercent, novaKey, style, publicGallery }, config)
     try {
       adopt(await api.updateConfig(body))
       const health = await refreshHealth() // the header title follows site_title
@@ -180,7 +193,28 @@ export default function ConfigPage({ refreshHealth }: { refreshHealth: () => Pro
       </section>
 
       <section className="panel">
-        <h2>Default label style</h2>
+        <h2>Default labels</h2>
+        <div className="row2">
+          <label className="field">
+            <span className="field-label">Label objects at least this large (% of image width)</span>
+            <input
+              type="number"
+              required
+              min={MIN_LABEL_RADIUS_PERCENT}
+              max={MAX_LABEL_RADIUS_PERCENT}
+              step="0.1"
+              value={labelRadiusPercent}
+              disabled={locked('min_label_radius_percent')}
+              onChange={(e) => edit(setLabelRadiusPercent, e.target.value)}
+            />
+            <span className="field-note">
+              An object whose radius is at least this share of the image width starts drawn; smaller ones are listed in the
+              Objects tab but off. 0 draws every object with a known size. Applies to new solves and re-solves, not to
+              layouts you already have.
+              {locked('min_label_radius_percent') && <> · {lockedNote('min_label_radius_percent')}</>}
+            </span>
+          </label>
+        </div>
         <StyleForm mode="overrides" values={style} defaults={d} fonts={fonts} onChange={setField}>
           <p className="field-note">
             Applies to newly solved images. Blank fields keep the built-in defaults; the four sizes then scale with each image.

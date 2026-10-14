@@ -48,7 +48,13 @@ def _backfill_one(db: Database, settings: Settings, rec: ImageRecord, version: s
         db.update_image(rec.id, {"objects_catalog": version})
         return 0
     ann = rematch_annotations(
-        previous, old_objects, merged, rec.width, rec.height, settings.fonts_dir
+        previous,
+        old_objects,
+        merged,
+        rec.width,
+        rec.height,
+        settings.fonts_dir,
+        min_radius_fraction=settings.min_label_radius_fraction,
     )
     if not db.store_solve_result(rec.id, merged, ann, {"objects_catalog": version}):
         return 0  # deleted meanwhile

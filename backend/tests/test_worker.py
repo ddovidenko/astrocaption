@@ -555,3 +555,22 @@ def test_a_failing_projection_leaves_novas_objects_alone(
     got = db.get_image(rec.id)
     assert got is not None and got.solve_status == SolveStatus.SOLVED
     assert got.objects_catalog is None  # not stamped: the backfill may try again
+
+
+def test_the_owner_threshold_decides_which_objects_start_enabled(settings: Settings) -> None:
+    """#211: at 0 % every object with a size starts drawn; the default leaves the small ones off."""
+    import dataclasses
+
+    db = Database(settings.db_path)
+    strict = seed_image(settings, db, "strict")
+    asyncio.run(make_worker(settings, db, FakeSolver()).process(strict.id))
+    strict_ann = db.get_annotations(strict.id)
+    assert strict_ann is not None and not all(lab.enabled for lab in strict_ann.labels)
+
+    loose_settings = dataclasses.replace(settings, min_label_radius_percent=0.0)
+    loose = seed_image(settings, db, "loose")
+    asyncio.run(make_worker(loose_settings, db, FakeSolver()).process(loose.id))
+    ann = db.get_annotations(loose.id)
+    assert ann is not None
+    by_id = {o.id: o for o in db.get_objects(loose.id)}
+    assert all(lab.enabled for lab in ann.labels if by_id[lab.object_id].type != "hd")

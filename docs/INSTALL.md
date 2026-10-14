@@ -63,6 +63,7 @@ a new one inside the running container and logs every browser out; on a source c
 | Public gallery | `ASTROCAPTION_PUBLIC_GALLERY` env (`true`/`false`, also `1`/`0`, `yes`/`no`, `on`/`off`, case-insensitive), or `"public_gallery_enabled"`, or the config page | on |
 | Data directory | `ASTROCAPTION_DATA_DIR` env | `/data` in the container |
 | Default label style | `"default_style"` object in `data/config.json`, or the config page | built-in defaults (size-relative for the four size fields) |
+| Default-enabled size | `ASTROCAPTION_MIN_LABEL_RADIUS_PERCENT` env, or `"min_label_radius_percent"`, or the config page: an object whose radius is at least this % of the image width starts drawn; 0 draws every object with a known size; applies to new solves and re-solves only | 0.4 (bounds 0–10) |
 | Owner password | setup page, or `ASTROCAPTION_PASSWORD` env at first start, or the Config page later | required |
 | Reverse proxy | `TRUST_PROXY=1` env: trust `X-Forwarded-*` from the proxy; session cookie `Secure` over https | off |
 | Solve timeout | `ASTROCAPTION_SOLVE_TIMEOUT_SECONDS` env | 900 (bounds 1-86400) |

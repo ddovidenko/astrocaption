@@ -424,3 +424,33 @@ def test_an_unreadable_config_is_a_500_and_a_corrupt_one_a_409(
     # The write path draws the same line.
     assert config_write_error(ConfigError("x", fault=True), "Settings").status_code == 500
     assert config_write_error(ConfigError("x"), "Settings").status_code == 409
+
+
+def test_min_label_radius_percent_round_trips_with_its_bounds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with owner_client(tmp_path, monkeypatch) as client:
+        assert client.get("/api/config").json()["min_label_radius_percent"] == 0.4
+        resp = client.put("/api/config", json={"min_label_radius_percent": 0})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["min_label_radius_percent"] == 0
+        assert read_config(tmp_path)["min_label_radius_percent"] == 0
+        resp = client.put("/api/config", json={"min_label_radius_percent": 10.5})
+        assert resp.status_code == 422
+        assert "min_label_radius_percent" in resp.json()["detail"]
+        assert "at most 10" in resp.json()["detail"]
+        assert (
+            read_config(tmp_path)["min_label_radius_percent"] == 0
+        )  # the refused value never landed
+
+
+def test_min_label_radius_percent_pinned_by_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with owner_client(tmp_path, monkeypatch, ASTROCAPTION_MIN_LABEL_RADIUS_PERCENT="1") as client:
+        body = client.get("/api/config").json()
+        assert body["min_label_radius_percent"] == 1.0
+        assert body["locked"] == ["min_label_radius_percent"]
+        resp = client.put("/api/config", json={"min_label_radius_percent": 2})
+        assert resp.status_code == 422
+        assert "ASTROCAPTION_MIN_LABEL_RADIUS_PERCENT" in resp.json()["detail"]

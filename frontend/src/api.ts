@@ -160,6 +160,8 @@ export interface ConfigOut {
   solve_timeout_seconds: number
   /** Files larger than this go up in chunks of this size (#166), so each request stays under a proxy's body cap. */
   upload_chunk_mb: number
+  /** Objects whose radius is at least this % of the image width start enabled (#211). */
+  min_label_radius_percent: number
 }
 
 export interface UploadSessionOut {
@@ -175,6 +177,7 @@ export interface ConfigUpdate {
   public_gallery_enabled?: boolean
   nova_api_key?: string | null
   default_style?: StyleOverrides
+  min_label_radius_percent?: number
 }
 
 export interface FontOut {
@@ -193,6 +196,9 @@ export const MAX_PASSWORD_LENGTH = 1024
 /** The upload limit's bounds (models.MIN_UPLOAD_MB / MAX_UPLOAD_MB), pinned by the render vectors. */
 export const MIN_UPLOAD_MB = 1
 export const MAX_UPLOAD_MB = 1024
+/** Bounds of `min_label_radius_percent`, mirrored from `ConfigUpdate` (#211). */
+export const MIN_LABEL_RADIUS_PERCENT = 0
+export const MAX_LABEL_RADIUS_PERCENT = 10
 
 export interface SetupRequest {
   password: string

@@ -38,6 +38,7 @@ describe('config form helpers', () => {
       nova_api_key_set: true,
       solve_timeout_seconds: 900,
       upload_chunk_mb: 16,
+      min_label_radius_percent: 0.4,
       default_style: { font_file: 'Roboto-Bold.ttf' },
       style_defaults: {
         font_file: 'Inter-Regular.ttf',
@@ -56,6 +57,7 @@ describe('config form helpers', () => {
     const form = {
       siteTitle: 'Sky',
       uploadMb: '60',
+      labelRadiusPercent: '0.4',
       novaKey: '',
       style: { ...empty, font_file: 'Roboto-Bold.ttf' },
       publicGallery: true,
@@ -68,6 +70,19 @@ describe('config form helpers', () => {
     it('sends only the changed scalars, trimmed, and treats a blank limit as unchanged', () => {
       expect(buildUpdate({ ...form, siteTitle: '  New sky ', uploadMb: '' }, config)).toEqual({ site_title: 'New sky' })
       expect(buildUpdate({ ...form, uploadMb: '12' }, config)).toEqual({ max_upload_mb: 12 })
+    })
+
+    it('sends the label threshold as a number, 0 included, and a blank one as unchanged (#211)', () => {
+      expect(buildUpdate({ ...form, labelRadiusPercent: '1.5' }, config)).toEqual({ min_label_radius_percent: 1.5 })
+      expect(buildUpdate({ ...form, labelRadiusPercent: '0' }, config)).toEqual({ min_label_radius_percent: 0 })
+      expect(buildUpdate({ ...form, labelRadiusPercent: '' }, config)).toEqual({})
+      expect(buildUpdate({ ...form, labelRadiusPercent: '0.4' }, config)).toEqual({})
+      const locked = {
+        ...config,
+        locked: ['min_label_radius_percent'],
+        locked_by: { min_label_radius_percent: 'ASTROCAPTION_MIN_LABEL_RADIUS_PERCENT' },
+      }
+      expect(buildUpdate({ ...form, labelRadiusPercent: '2' }, locked)).toEqual({})
     })
 
     it('never sends a locked field', () => {
@@ -108,6 +123,7 @@ describe('config form helpers', () => {
       nova_api_key_set: true,
       solve_timeout_seconds: 900,
       upload_chunk_mb: 16,
+      min_label_radius_percent: 0.4,
       default_style: { font_file: 'Roboto-Bold.ttf' },
       style_defaults: {
         font_file: 'Inter-Regular.ttf',
@@ -126,6 +142,7 @@ describe('config form helpers', () => {
     const form = {
       siteTitle: 'Sky',
       uploadMb: '60',
+      labelRadiusPercent: '0.4',
       novaKey: '',
       style: { ...empty, font_file: 'Roboto-Bold.ttf' },
       publicGallery: true,
