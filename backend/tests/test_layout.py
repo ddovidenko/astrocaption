@@ -142,3 +142,17 @@ def test_autoplace_clears_a_kept_labels_stale_collided_flag() -> None:
     out = autoplace(3000, 2000, style, labels, objects, FONTS_DIR, keep=frozenset({1}))
     assert (out[0].x, out[0].y) == (420, 290)
     assert out[0].collided is False
+
+
+def test_default_enabled_takes_the_owner_threshold_as_a_fraction() -> None:
+    """#211: the threshold is the owner's; hd stars stay off and bright stars on whatever it is."""
+    small = SolveObject(id=2, catalog_names=["NGC 1924"], type="ngc", x=100, y=100, radius=5)
+    big = SolveObject(id=5, catalog_names=["M 31"], type="ngc", x=0, y=0, radius=200)
+    hd = SolveObject(id=3, catalog_names=["HD 198639"], type="hd", x=100, y=100, radius=0)
+    bright = SolveObject(id=4, catalog_names=["Alnitak"], type="bright", x=100, y=100, radius=0)
+    assert default_enabled(small, 3000, 0.0)  # 0: every object with a size
+    assert not default_enabled(small, 3000, 0.004)
+    assert default_enabled(big, 3000, 0.004)
+    assert not default_enabled(big, 3000, 0.1)  # 10 % of 3000 is 300 px
+    assert not default_enabled(hd, 3000, 0.0)
+    assert default_enabled(bright, 3000, 0.1)

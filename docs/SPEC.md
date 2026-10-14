@@ -125,7 +125,10 @@ No multi-user, no roles, no invites in v1.
    backfill (the text would change while the export still read as current); an image whose lookup fails is
    logged, left as it was and unstamped, and the server still starts. Never contacts nova.
 5. Owner lands in the editor with all objects present but **only objects above a size
-   threshold enabled** (default: radius ≥ 0.4 % of image width, plus all named bright stars, plus
+   threshold enabled** (radius ≥ the owner's `min_label_radius_percent` of the image width, default
+   0.4 %, bounds 0–10, set on the config page or pinned by `ASTROCAPTION_MIN_LABEL_RADIUS_PERCENT`;
+   0 draws every object with a known size; it applies to new solves, to objects new to a re-solved
+   document and to the catalogue backfill, never to a stored layout (#211); plus all named bright stars, plus
    non-stellar objects nova returns with radius 0: there the radius means "no size known", not
    "small", so NGC 206 in M 31 is enabled like any other NGC entry. Decided 2026-09-11, #9).
    `hd`-type stars have radius 0 and are therefore hidden by default (see § 14). Catalogue objects always

@@ -41,12 +41,19 @@ DEFAULT_SOLVE_TIMEOUT_SECONDS = 15.0 * 60
 DEFAULT_UPLOAD_CHUNK_MB = 16
 MIN_UPLOAD_CHUNK_MB = 1
 MAX_UPLOAD_CHUNK_MB = 64
+# The default-enabled rule (SPEC § 5.2 step 5, #211): an object starts drawn when its radius is at
+# least this percentage of the image width. 0 draws every object with a known size; the bounds
+# are the API's (``ConfigUpdate``).
+DEFAULT_MIN_LABEL_RADIUS_PERCENT = 0.4
+MIN_MIN_LABEL_RADIUS_PERCENT = 0.0
+MAX_MIN_LABEL_RADIUS_PERCENT = 10.0
 
 LOCKABLE: dict[str, tuple[str, ...]] = {
     "nova_api_key": ("NOVA_API_KEY", "ASTROMETRY_API_KEY"),
     "max_upload_mb": ("ASTROCAPTION_MAX_UPLOAD_MB",),
     "site_title": ("ASTROCAPTION_SITE_TITLE",),
     "public_gallery_enabled": ("ASTROCAPTION_PUBLIC_GALLERY",),
+    "min_label_radius_percent": ("ASTROCAPTION_MIN_LABEL_RADIUS_PERCENT",),
 }
 """Env vars that pin each lockable config.json field (read-only in the UI when one is set).
 
@@ -112,12 +119,19 @@ class Settings:
     solve_timeout_seconds: float = DEFAULT_SOLVE_TIMEOUT_SECONDS
     upload_chunk_mb: int = DEFAULT_UPLOAD_CHUNK_MB
     default_style: dict[str, object] = field(default_factory=dict)
+    #: The default-enabled threshold (#211), a percentage of the image width; the layout code
+    #: takes it as a fraction (``min_label_radius_fraction``).
+    min_label_radius_percent: float = DEFAULT_MIN_LABEL_RADIUS_PERCENT
     config_error: str | None = None  # why config.json was ignored, if it was
     config_fault: bool = False  # ... and whether that was a read fault (500) or its content (409)
     password_hash: str | None = field(default=None, repr=False)
     session_secret: str | None = field(default=None, repr=False)
     trust_proxy: bool = False
     locked_by: dict[str, str] = field(default_factory=dict)  # locked field -> the variable name
+
+    @property
+    def min_label_radius_fraction(self) -> float:
+        return self.min_label_radius_percent / 100.0
 
     @property
     def uploads_dir(self) -> Path:
@@ -200,6 +214,33 @@ def _upload_mb(raw: object) -> int:
             value,
             MIN_UPLOAD_MB,
             MAX_UPLOAD_MB,
+            clamped,
+        )
+    return clamped
+
+
+def _label_radius_percent(raw: object) -> float:
+    """config.json's (or the env's) default-enabled threshold, clamped to the API's bounds.
+    ``None`` and a blank string mean "not set"; ``0`` is a value."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return DEFAULT_MIN_LABEL_RADIUS_PERCENT
+    try:
+        value = float(str(raw))
+    except (TypeError, ValueError):
+        value = math.nan
+    if math.isnan(value):
+        log.warning(
+            "ignoring min_label_radius_percent: not a number; using %s",
+            DEFAULT_MIN_LABEL_RADIUS_PERCENT,
+        )
+        return DEFAULT_MIN_LABEL_RADIUS_PERCENT
+    clamped = max(MIN_MIN_LABEL_RADIUS_PERCENT, min(MAX_MIN_LABEL_RADIUS_PERCENT, value))
+    if clamped != value:
+        log.warning(
+            "min_label_radius_percent %s is outside %s-%s; using %s",
+            value,
+            MIN_MIN_LABEL_RADIUS_PERCENT,
+            MAX_MIN_LABEL_RADIUS_PERCENT,
             clamped,
         )
     return clamped
@@ -317,6 +358,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         else _flag_from_config(cfg.get("public_gallery_enabled"))
     )
     default_style = _normalise_style(cfg.get("default_style"))
+    radius_env = from_env["min_label_radius_percent"][0]
+    min_label_radius = _label_radius_percent(
+        radius_env if radius_env is not None else cfg.get("min_label_radius_percent")
+    )
     poll_seconds = _positive_seconds(
         e.get("ASTROCAPTION_SOLVE_POLL_SECONDS"),
         default=DEFAULT_POLL_SECONDS,
@@ -363,6 +408,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         solve_timeout_seconds=solve_timeout,
         upload_chunk_mb=chunk_mb,
         default_style=default_style,
+        min_label_radius_percent=min_label_radius,
         config_error=config_error,
         config_fault=config_fault,
         password_hash=password_hash,

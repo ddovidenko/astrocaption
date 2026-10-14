@@ -81,16 +81,18 @@ def default_style(
         return base
 
 
-def default_enabled(obj: SolveObject, width: int) -> bool:
+def default_enabled(
+    obj: SolveObject, width: int, min_radius_fraction: float = MIN_ENABLED_RADIUS_FRACTION
+) -> bool:
     """SPEC § 5.2 step 5. Bright stars always, ``hd`` stars never (hundreds per narrow field,
     hidden behind the object list's type filter). Any other object when its radius clears the
-    threshold, or when nova gives no size at all: radius 0 there means "unknown", not "tiny"
-    (NGC 206 in M 31, #9)."""
+    owner's threshold (``Settings.min_label_radius_fraction``, #211), or when nova gives no size
+    at all: radius 0 there means "unknown", not "tiny" (NGC 206 in M 31, #9)."""
     if obj.type in NEVER_ENABLED_TYPES:
         return False
     if obj.type in ALWAYS_ENABLED_TYPES:
         return True
-    return obj.radius == 0 or obj.radius >= MIN_ENABLED_RADIUS_FRACTION * width
+    return obj.radius == 0 or obj.radius >= min_radius_fraction * width
 
 
 def autoplace(
@@ -144,10 +146,12 @@ def build_default_annotations(
     objects: list[SolveObject],
     fonts_dir: Path,
     style_overrides: Mapping[str, object] | None = None,
+    min_radius_fraction: float = MIN_ENABLED_RADIUS_FRACTION,
 ) -> Annotations:
     style = default_style(width, height, fonts_dir, style_overrides)
     labels = [
-        Label(object_id=o.id, enabled=default_enabled(o, width), x=o.x, y=o.y) for o in objects
+        Label(object_id=o.id, enabled=default_enabled(o, width, min_radius_fraction), x=o.x, y=o.y)
+        for o in objects
     ]
     labels = autoplace(width, height, style, labels, objects, fonts_dir)
     return Annotations(image_id=image_id, style=style, labels=labels, version=1)
@@ -160,8 +164,10 @@ def rematch_annotations(
     width: int,
     height: int,
     fonts_dir: Path,
+    min_radius_fraction: float = MIN_ENABLED_RADIUS_FRACTION,
 ) -> Annotations:
-    """After a re-solve, carry labels over by catalogue name; place only the new objects."""
+    """After a re-solve, carry labels over by catalogue name; place only the new objects, whose
+    enabled flag follows the owner's threshold (#211)."""
     old_by_id = {o.id: o for o in old_objects}
     name_to_old: dict[str, int] = {}
     for o in old_objects:
@@ -179,7 +185,12 @@ def rematch_annotations(
             keep.add(obj.id)
         else:
             labels.append(
-                Label(object_id=obj.id, enabled=default_enabled(obj, width), x=obj.x, y=obj.y)
+                Label(
+                    object_id=obj.id,
+                    enabled=default_enabled(obj, width, min_radius_fraction),
+                    x=obj.x,
+                    y=obj.y,
+                )
             )
     labels = autoplace(
         width, height, previous.style, labels, new_objects, fonts_dir, keep=frozenset(keep)

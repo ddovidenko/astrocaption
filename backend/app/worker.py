@@ -358,12 +358,24 @@ class SolveWorker:
         fonts: Path = settings.fonts_dir
         if previous is None:
             ann = build_default_annotations(
-                rec.id, rec.width, rec.height, new_objects, fonts, settings.default_style
+                rec.id,
+                rec.width,
+                rec.height,
+                new_objects,
+                fonts,
+                settings.default_style,
+                min_radius_fraction=settings.min_label_radius_fraction,
             )
         else:
             old_objects = self.db.get_objects(rec.id)
             ann = rematch_annotations(
-                previous, old_objects, new_objects, rec.width, rec.height, fonts
+                previous,
+                old_objects,
+                new_objects,
+                rec.width,
+                rec.height,
+                fonts,
+                min_radius_fraction=settings.min_label_radius_fraction,
             )
         self.db.store_solve_result(
             rec.id,

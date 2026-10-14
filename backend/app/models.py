@@ -655,6 +655,8 @@ class ConfigOut(BaseModel):
     public_gallery_enabled: bool
     nova_api_key_set: bool
     default_style: dict[str, object]
+    #: The default-enabled threshold, % of image width (#211); see ``ConfigUpdate`` for bounds.
+    min_label_radius_percent: float
     locked: list[str]  # fields pinned by environment variables
     locked_by: dict[str, str]  # locked field -> the variable that pins it, never its value
     style_defaults: StyleDefaults  # built-ins for fields with no override
@@ -723,8 +725,18 @@ class ConfigUpdate(BaseModel):
     public_gallery_enabled: bool | None = None
     nova_api_key: str | None = Field(default=None, max_length=200)
     default_style: StyleOverrides | None = None
+    #: Objects whose radius is at least this % of the image width start enabled (#211); 0 draws
+    #: every object with a known size. Applies to new solves and re-solves, never to stored
+    #: documents.
+    min_label_radius_percent: float | None = Field(default=None, ge=0, le=10)
 
-    @field_validator("site_title", "max_upload_mb", "public_gallery_enabled", mode="before")
+    @field_validator(
+        "site_title",
+        "max_upload_mb",
+        "public_gallery_enabled",
+        "min_label_radius_percent",
+        mode="before",
+    )
     @classmethod
     def _null_is_not_a_value(cls, value: object, info: ValidationInfo) -> object:
         # ``None`` here only means "absent"; an explicit null has no meaning for these

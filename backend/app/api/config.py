@@ -37,6 +37,7 @@ def config_out(settings: Settings, worker: SolveWorker) -> ConfigOut:
         public_gallery_enabled=settings.public_gallery_enabled,
         nova_api_key_set=settings.nova_api_key_set,
         default_style=dict(settings.default_style),
+        min_label_radius_percent=settings.min_label_radius_percent,
         style_defaults=STYLE_DEFAULTS,
         locked=sorted(settings.locked_by),
         locked_by=dict(settings.locked_by),
@@ -69,6 +70,8 @@ def _updates_for(body: ConfigUpdate, settings: Settings) -> dict[str, object | N
         updates["max_upload_mb"] = body.max_upload_mb
     if body.public_gallery_enabled is not None:
         updates["public_gallery_enabled"] = body.public_gallery_enabled
+    if body.min_label_radius_percent is not None:
+        updates["min_label_radius_percent"] = body.min_label_radius_percent
     if "nova_api_key" in body.model_fields_set:  # only here does an explicit null mean something
         key = (body.nova_api_key or "").strip()
         updates["nova_api_key"] = key or None  # null (or blank) clears the key

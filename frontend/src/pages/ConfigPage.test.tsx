@@ -33,6 +33,7 @@ const config: ConfigOut = {
   locked_by: { max_upload_mb: 'ASTROCAPTION_MAX_UPLOAD_MB' },
   solve_timeout_seconds: 900,
   upload_chunk_mb: 16,
+  min_label_radius_percent: 0.4,
 }
 
 beforeEach(() => {
@@ -92,5 +93,18 @@ describe('ConfigPage', () => {
     const body = vi.mocked(api.updateConfig).mock.calls[0]![0]
     expect(body).toEqual({ site_title: 'New sky' })
     expect('max_upload_mb' in body).toBe(false)
+  })
+
+  it('the label threshold is shown as a percentage and saved as a number (#211)', async () => {
+    await mount()
+    const threshold = screen.getByLabelText(/^Label objects at least this large/) as HTMLInputElement
+    expect(threshold.value).toBe('0.4')
+    expect(threshold.step).toBe('any') // the API takes any value in range; 0.25 must not be refused by the browser
+    vi.mocked(api.updateConfig).mockResolvedValue({ ...config, min_label_radius_percent: 1 })
+    fireEvent.change(threshold, { target: { value: '1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    expect(vi.mocked(api.updateConfig).mock.calls[0]![0]).toEqual({ min_label_radius_percent: 1 })
+    expect(threshold.value).toBe('1')
   })
 })
