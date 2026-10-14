@@ -23,6 +23,9 @@ optional public gallery. The roadmap is in `docs/SPEC.md` § 13.
 - **Share.** Publish an export to the gallery, a read-only page for visitors; the editor, the
   configuration and unpublished images stay behind the owner login.
 
+The editor needs Chrome, Edge or Firefox; Safari lacks the canvas text measurement the preview-export
+match depends on, so it gets the gallery and the exports but not the editor (docs/INSTALL.md).
+
 ![A published image in the gallery, with the annotated preview shown on hover](docs/screenshots/gallery-image.png)
 
 ## Run it

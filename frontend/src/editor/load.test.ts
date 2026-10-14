@@ -19,7 +19,7 @@ describe('loadEditor', () => {
   beforeEach(() => {
     // The test environment is plain node: there is no real CanvasRenderingContext2D at all, let
     // alone one with `textRendering`. Stub a browser-capable one so loadEditor's pre-flight check
-    // passes; the one test that wants a Firefox-shaped prototype overrides this with its own.
+    // passes; the one test that wants a Safari-shaped prototype overrides this with its own.
     Object.defineProperty(globalThis, 'CanvasRenderingContext2D', { value: class {}, configurable: true })
     CanvasRenderingContext2D.prototype.textRendering = 'auto'
   })
@@ -30,7 +30,7 @@ describe('loadEditor', () => {
   })
 
   it('rejects before any fetch when the browser cannot measure text like the export', async () => {
-    // Stubs a Firefox-shaped prototype: no `textRendering`, so the browser cannot draw text the
+    // Stubs a Safari-shaped prototype: no `textRendering`, so the browser cannot draw text the
     // way Pillow does. No fetch mocking needed — the check runs before the network calls.
     Object.defineProperty(globalThis, 'CanvasRenderingContext2D', {
       value: class {},
@@ -38,7 +38,7 @@ describe('loadEditor', () => {
     })
     await expect(loadEditor('img-1')).rejects.toThrow(
       'This browser cannot measure text the way the export does (no canvas textRendering support); ' +
-        'the editor needs a current browser such as Chrome, Edge or Safari.',
+        'the editor needs a current browser such as Chrome, Edge or Firefox.',
     )
   })
 

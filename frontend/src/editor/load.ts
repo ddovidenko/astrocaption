@@ -7,12 +7,12 @@ import type { FontFallback, LoadedDocument } from './store'
 export async function loadEditor(id: string): Promise<LoadedDocument> {
   // Checked before the fetches, not just inside `getMeasurer()`: that throw happens
   // during render, which bypasses this page's error state and blanks the whole app through the
-  // root ErrorBoundary instead (Firefox lacks `textRendering`). The measurer keeps its own throw
-  // as a backstop.
+  // root ErrorBoundary instead. Safari lacks `textRendering`; Chromium 99+ and Firefox 116+ have it
+  // and both meet the width contract (#72). The measurer keeps its own throw as a backstop.
   if (!('textRendering' in CanvasRenderingContext2D.prototype)) {
     throw new Error(
       'This browser cannot measure text the way the export does (no canvas textRendering support); ' +
-        'the editor needs a current browser such as Chrome, Edge or Safari.',
+        'the editor needs a current browser such as Chrome, Edge or Firefox.',
     )
   }
   const [image, objects, raw, fonts] = await Promise.all([
