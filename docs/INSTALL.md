@@ -9,6 +9,10 @@
 - A free nova.astrometry.net account and its API key (profile page → *API key*).
   Each solve uploads a copy of the image (at most 3000 px on its long side) to that account. It is
   not publicly listed, but nova has no way to delete uploads, so every copy stays there.
+- A browser for the editor: Chrome or Edge 99+, or Firefox 116+. The editor measures text with the
+  canvas `textRendering` property so the preview matches the export, and Safari does not implement
+  it: Safari opens the gallery, the config page and the exports, but the editor refuses to load there
+  with a message saying so (#72).
 
 ## Three commands
 

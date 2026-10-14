@@ -478,7 +478,10 @@ label strings from the nova fixtures, in every bundled font. `backend/tests/test
 Pillow's; the editor's rendering of the e2e field may differ from the server's annotated preview in at
 most 1 % of pixels by more than 48 (of 255) in any channel (`frontend/e2e/parity.spec.ts`).
 Box widths are rounded up to whole pixels, so a difference under 0.5 px can still move a box edge, and
-with it a leader endpoint, by one pixel; the pixel budget allows for it.
+with it a leader endpoint, by one pixel; the pixel budget allows for it. Chromium (99+) and Firefox
+(116+) implement `textRendering` and both meet the width contract (every vector string, worst 0.26 px);
+Safari does not implement it, so `loadEditor` refuses the editor there with a message naming the
+browsers that work, while the gallery, config page and exports stay available (#72).
 A stored per-image
 style whose `font_file` is no longer bundled renders, places and is served by `GET /annotations`
 with the built-in default and a server-log warning naming the file; `GET /annotations` names the stored file in `font_fallback`; the editor shows it and the next save stores the resolved font. `resolve_font_file` and `GET /fonts` use the same predicate (`list_fonts`).

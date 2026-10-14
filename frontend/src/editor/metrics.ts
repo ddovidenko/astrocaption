@@ -115,7 +115,9 @@ export type TextMeasurer = (text: string, fontFile: string, size: number) => num
 
 /** The canvas measurer. `geometricPrecision` turns hinting off so widths agree with Pillow's
  *  getlength within 0.5 px at every size (design § 1); default canvas text rounds to whole
- *  pixels and drifts up to 27 % at small sizes. The font must be loaded (FontFace) first.
+ *  pixels and drifts up to 27 % at small sizes. Chromium and Firefox (116+) both meet the
+ *  contract (#72: 1,944 vector strings, worst 0.26 px); Safari has no `textRendering` and is
+ *  refused by `loadEditor`. The font must be loaded (FontFace) first.
  *  The font's FontFace must already be loaded: `measureText` on an unloaded family silently uses
  *  a fallback font, and `document.fonts.check()` cannot detect that (it returns true for an
  *  unregistered family), so the editor awaits `document.fonts.load()` before its first draw. */
