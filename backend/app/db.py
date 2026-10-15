@@ -326,28 +326,26 @@ class Database:
     def _list_images(
         self, limit: int, before: str | None, where: str = "", params: tuple[object, ...] = ()
     ) -> ImagePage:
-        # created_at has whole-second resolution (utcnow_iso), so two rows inserted within the
-        # same second tie there; rowid (insertion order) breaks the tie the way "id" (a random
-        # UUID) cannot. Paging is keyset on that same (created_at, rowid) order (SPEC § 8): the
-        # page after `before` is everything strictly older than that row, so an upload or a
-        # delete elsewhere never shifts it. One row more than asked tells whether a page follows.
-        # Known limit (#137): without AUTOINCREMENT SQLite hands a deleted newest row's rowid to
-        # the next insert, so deleting the newest image and uploading another within the same
-        # second lists those two in the wrong order. Cosmetic; not worth a schema migration.
+        # "Newest first" is insertion order: rowid, not created_at. created_at is a wall-clock
+        # stamp with whole-second resolution, so rows a moment apart tie there, and a host whose
+        # clock is stepped backwards (WSL2 does it every half minute) stamps a later upload with
+        # an earlier time (#214). rowid never does either: without AUTOINCREMENT SQLite reuses a
+        # deleted newest row's rowid, but that is still the highest. Paging is keyset on the same
+        # order (SPEC § 8): the page after `before` is everything inserted before that row, so an
+        # upload or a delete elsewhere never shifts it. One row more than asked tells whether a
+        # page follows.
         conds = [where] if where else []
         values: list[object] = list(params)
         with self.connect() as conn:
             if before is not None:
-                cursor = conn.execute(
-                    "SELECT created_at, rowid FROM images WHERE id = ?", (before,)
-                ).fetchone()
+                cursor = conn.execute("SELECT rowid FROM images WHERE id = ?", (before,)).fetchone()
                 if cursor is None:
                     raise UnknownCursor(before)
-                conds.append("(created_at < ? OR (created_at = ? AND rowid < ?))")
-                values += [cursor[0], cursor[0], cursor[1]]
+                conds.append("rowid < ?")
+                values.append(cursor[0])
             clause = f" WHERE {' AND '.join(conds)}" if conds else ""
             rows = conn.execute(
-                f"SELECT * FROM images{clause} ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                f"SELECT * FROM images{clause} ORDER BY rowid DESC LIMIT ?",
                 (*values, limit + 1),
             ).fetchall()
         items = [_row_to_image(r) for r in rows[:limit]]

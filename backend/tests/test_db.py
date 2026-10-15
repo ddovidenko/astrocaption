@@ -372,10 +372,10 @@ def _plain_image(image_id: str, created: str, published: bool = False) -> ImageR
     )
 
 
-def test_list_images_pages_newest_first_by_created_at_then_insertion(tmp_path: Path) -> None:
+def test_list_images_pages_newest_first_by_insertion(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.sqlite")
     db.init()
-    # Three rows share one second (the resolution of created_at), so insertion order decides.
+    # Insertion order is the list's order; created_at is display only (#214).
     for image_id, created in [
         ("a", "2026-09-01T00:00:00Z"),
         ("b", "2026-09-02T00:00:00Z"),
@@ -398,6 +398,36 @@ def test_list_images_pages_newest_first_by_created_at_then_insertion(tmp_path: P
     # A row that lands after the cursor row (newer) never shifts the page after it.
     db.insert_image(_plain_image("f", "2026-09-04T00:00:00Z"))
     assert [r.id for r in db.list_images(limit=2, before="d").items] == ["c", "b"]
+
+
+def test_list_images_follows_insertion_when_the_clock_stepped_back(tmp_path: Path) -> None:
+    """A host whose wall clock is stepped backwards (WSL2 does it every half minute, #214)
+    stamps a later upload with an earlier created_at. The list and its cursor still follow the
+    order the rows arrived in."""
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    for image_id, created in [
+        ("a", "2026-09-01T00:00:05Z"),
+        ("b", "2026-09-01T00:00:06Z"),
+        ("c", "2026-09-01T00:00:04Z"),  # stamped after a 2 s backward step
+    ]:
+        db.insert_image(_plain_image(image_id, created))
+    page = db.list_images(limit=2)
+    assert ([r.id for r in page.items], page.next) == (["c", "b"], "b")
+    page = db.list_images(limit=2, before="b")
+    assert ([r.id for r in page.items], page.next) == (["a"], None)
+
+
+def test_list_images_keeps_order_when_a_deleted_newest_rowid_is_reused(tmp_path: Path) -> None:
+    """Without AUTOINCREMENT SQLite hands the deleted newest row's rowid to the next insert;
+    that rowid is still the highest, so the replacement lists first (was a known limit, #137)."""
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    db.insert_image(_plain_image("a", "2026-09-01T00:00:00Z"))
+    db.insert_image(_plain_image("b", "2026-09-01T00:00:00Z"))
+    assert db.delete_image("b")
+    db.insert_image(_plain_image("c", "2026-09-01T00:00:00Z"))
+    assert [r.id for r in db.list_images().items] == ["c", "a"]
 
 
 def test_list_images_unknown_cursor_raises(tmp_path: Path) -> None:
