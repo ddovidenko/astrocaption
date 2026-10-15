@@ -546,7 +546,8 @@ async def put_annotations(
     the stored one, else 409 and nothing written."""
     _, stored = _editable_layout(db, image_id)
     _check_version(doc, stored, image_id)
-    _validate_document(doc, db.get_objects(image_id), settings, image_id)
+    objects = db.get_objects(image_id)
+    _validate_document(doc, objects, settings, image_id)
     ann = Annotations(
         image_id=image_id, style=doc.style, labels=doc.labels, version=doc.version + 1
     )
@@ -555,7 +556,7 @@ async def put_annotations(
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Image not found.")
         log.info("annotations for %s: compare-and-swap lost", image_id)
         raise HTTPException(status.HTTP_409_CONFLICT, CONFLICT_MESSAGE)  # lost the race
-    return ann.model_copy(update={"content_hash": hash_of(ann)})
+    return ann.model_copy(update={"content_hash": hash_of(ann, objects)})
 
 
 @router.post("/{image_id}/autoarrange")

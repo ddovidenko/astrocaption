@@ -143,14 +143,17 @@ def test_backfill_skips_an_image_whose_lookup_fails_and_finishes_the_rest(
     assert "catalogue backfill failed" in caplog.text and "bad" in caplog.text
 
 
-def test_backfill_leaves_a_document_alone_when_only_names_would_change(
+def test_backfill_applies_a_names_only_merge_and_the_export_reads_as_out_of_date(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A name appended to an existing object changes the rendered text without moving the
-    document hash, so the export would read as current while it is not: the backfill applies
-    names only alongside added rows, and otherwise just stamps."""
+    """A name appended to an existing object changes the rendered text. The content hash covers
+    the objects' names (#217), so the merge is applied, the document itself is left as it was,
+    and an export made before it reads as out of date."""
     db = Database(settings.db_path)
     solved_without_catalogue(settings, db)
+    before = db.annotations_hash("img-1")
+    assert before is not None
+    db.update_image("img-1", {"exported_at": "2026-10-01T00:00:00+00:00", "exported_hash": before})
 
     def names_only(
         image_id: str, wcs_text: str, scale: float, existing: list[SolveObject]
@@ -163,12 +166,13 @@ def test_backfill_leaves_a_document_alone_when_only_names_would_change(
 
     monkeypatch.setattr(catalog_backfill, "lookup_catalog", names_only)
     report = run(db, settings)
-    assert (report.visited, report.changed, report.added) == (1, 0, 0)
-    assert "Sh2-999" not in {n for o in db.get_objects("img-1") for n in o.catalog_names}
+    assert (report.visited, report.changed, report.added) == (1, 1, 0)
+    assert "Sh2-999" in {n for o in db.get_objects("img-1") for n in o.catalog_names}
     ann = db.get_annotations("img-1")
-    assert ann is not None and ann.version == 3
+    assert ann is not None and ann.version == 3  # the labels did not move
     got = db.get_image("img-1")
     assert got is not None and got.objects_catalog == objects_catalog().version
+    assert got.exported_hash == before != db.annotations_hash("img-1")
 
 
 def test_backfill_leaves_an_image_with_an_unreadable_header_unstamped(
