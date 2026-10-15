@@ -37,16 +37,18 @@ export default function ImagesPage({
   // When the list was last fetched: the clock the cards read the age of a solving row from
   // (#80), moved on by every refresh (every 3 s while a solve runs), never during a render.
   const [now, setNow] = useState(0)
-  // Refreshes overlap: the 3-second poll, an action's own refresh and a card's finally block
-  // all call it, and a slow answer arriving after a fast one would put the old list back (a
+  // Refreshes overlap: an action's own refresh, a card's finally block and the 3-second poll
+  // all fetch, and a slow answer arriving after a fast one would put the old list back (a
   // deleted card reappearing, a solved row going back to Solving…). Only the newest applies.
   // Show more takes a number too, so it and a refresh in flight cannot both apply.
   const seq = useRef(0)
   // How many cards are on screen, for a refresh to fetch the same number again rather than
-  // fold the list back to the first page.
+  // fold the list back to the first page; and which of them a solve is running on, for the poll.
   const shown = useRef(0)
+  const busyIds = useRef<string[]>([])
   useEffect(() => {
     shown.current = images.length
+    busyIds.current = images.filter((img) => isBusy(img.solve_status)).map((img) => img.id)
   }, [images])
 
   const applyPage = useCallback((page: Page<ImageOut>) => {
@@ -116,12 +118,41 @@ export default function ImagesPage({
     }
   }, [next, refresh])
 
+  // The poll re-fetches only the rows a solve is running on and merges each answer in place by
+  // id, so a long library (many Show more taps) costs one small request per busy row every
+  // 3 seconds, not the whole list again (#188). Health and config come along as before. A busy
+  // row that is gone (deleted in another tab) answers 404: the list changed under us, so the
+  // tick falls back to one full refresh.
+  const pollBusy = useCallback(async () => {
+    const mine = ++seq.current
+    try {
+      const [rows, cfg] = await Promise.all([
+        Promise.all(busyIds.current.map((id) => api.image(id))),
+        api.config(),
+        refreshHealth(),
+      ])
+      if (mine !== seq.current) return
+      const byId = new Map(rows.map((row) => [row.id, row]))
+      setImages((current) => current.map((img) => byId.get(img.id) ?? img))
+      setConfig(cfg)
+      setNow(Date.now())
+      setError(null)
+    } catch (err) {
+      if (mine !== seq.current) return
+      if (err instanceof ApiError && err.status === 404) {
+        void refresh()
+        return
+      }
+      setError(pageError(err))
+    }
+  }, [refresh, refreshHealth])
+
   const busy = images.some((img) => isBusy(img.solve_status))
   useEffect(() => {
     if (!busy) return
-    const timer = window.setInterval(() => void refresh(), POLL_MS)
+    const timer = window.setInterval(() => void pollBusy(), POLL_MS)
     return () => window.clearInterval(timer)
-  }, [busy, refresh])
+  }, [busy, pollBusy])
 
   return (
     <>
@@ -640,7 +671,7 @@ export function ImageCard({
           </p>
           {exported && (
             <a href={exported.url}>
-              <img src={exported.preview} alt={`${image.title} annotated`} />
+              <img src={exported.preview} alt={`${image.title} annotated`} loading="lazy" />
             </a>
           )}
         </div>

@@ -171,6 +171,8 @@ describe('ImageCard downloads', () => {
     const imgs = container.querySelectorAll('img')
     expect(imgs).toHaveLength(1)
     expect(imgs[0]!.getAttribute('src')).toBe(exported.annotated_preview_url)
+    // A long library fetches its 2048 px previews as the cards scroll into view, not on load (#188).
+    expect(imgs[0]!.getAttribute('loading')).toBe('lazy')
   })
 })
 
