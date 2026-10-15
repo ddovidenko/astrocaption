@@ -129,7 +129,18 @@ def test_sky_to_pixel_lands_on_novas_own_pixels(text: str, fixtures_dir: Path) -
         assert checked == 12  # every NGC/IC entry of the Orion fixture has a position above
 
 
-@pytest.mark.parametrize("text", [ORION, PELICAN], ids=["orion", "pelican"])
+#: The minimal TAN frame moved so that a celestial pole lies inside it (#216).
+NORTH_POLE_TAN = MINIMAL_TAN.replace("CRVAL2  = -4.0", "CRVAL2  = 89.0")
+SOUTH_POLE_TAN = MINIMAL_TAN.replace(
+    "CRVAL2  = -4.0 ", "CRVAL2  = -89.0"
+)  # keeps the 80-column card
+
+
+@pytest.mark.parametrize(
+    "text",
+    [ORION, PELICAN, NORTH_POLE_TAN, SOUTH_POLE_TAN],
+    ids=["orion", "pelican", "north-pole", "south-pole"],
+)
 def test_pixel_to_sky_round_trips_across_the_frame(text: str) -> None:
     wcs = Wcs.from_text(text)
     for x, y in [
@@ -160,6 +171,13 @@ def test_field_covers_the_corners() -> None:
         corner = unit_vector(*wcs.pixel_to_sky(x, y))
         dot = sum(a * b for a, b in zip(centre, corner, strict=True))
         assert math.degrees(math.acos(min(1.0, dot))) <= radius_deg + 1e-6
+
+
+def test_field_of_a_frame_containing_the_pole_stays_small() -> None:
+    """Corners on the far side of the pole came back at dec < -90, which blew the field radius
+    up to ~178 degrees and switched the catalogue prefilter off (#216)."""
+    _, radius_deg = Wcs.from_text(NORTH_POLE_TAN).field()
+    assert radius_deg < 3.0  # a 3 x 2.25 degree frame: half-diagonal 1.9 degrees
 
 
 def test_a_point_behind_the_tangent_plane_is_none() -> None:

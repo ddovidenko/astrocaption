@@ -158,7 +158,9 @@ class Wcs:
         ra0, dec0 = (math.radians(w) for w in self.crval)
         denom = math.cos(dec0) - eta * math.sin(dec0)
         ra = ra0 + math.atan2(xi, denom)
-        dec = math.atan2((math.sin(dec0) + eta * math.cos(dec0)) * math.cos(ra - ra0), denom)
+        # The inverse gnomonic form: the second argument is never negative, so a pixel on the far
+        # side of the celestial pole from the reference point lands in the right quadrant (#216).
+        dec = math.atan2(math.sin(dec0) + eta * math.cos(dec0), math.hypot(xi, denom))
         return math.degrees(ra) % 360.0, math.degrees(dec)
 
     def field(self) -> tuple[tuple[float, float, float], float]:
