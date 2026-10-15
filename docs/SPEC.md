@@ -374,9 +374,10 @@ unpublished or not currently solved, its export files are missing, or the galler
   `{items: GalleryItem[], next: <id> | null}`. `GalleryItem` is {id, title, width, height,
   exported_at, thumb_url, preview_url, annotated_preview_url, export_url}; the URLs are all under
   `/api/gallery/{id}/files/…` and carry `?v=<exported_at>` where the file changes with an export.
-  Paging is keyset on the list's own order (created time, then insertion): `before` names the last
-  item seen and the page holds what is strictly older, so uploads and deletions elsewhere never
-  shift it; `next` is the last item's id when a page follows, null on the last page. `limit` is
+  Newest first is insertion order, not the created-time stamp, so a host clock stepped backwards
+  cannot reorder two uploads (#214). Paging is keyset on that order: `before` names the last
+  item seen and the page holds what was inserted before it, so uploads and deletions elsewhere
+  never shift it; `next` is the last item's id when a page follows, null on the last page. `limit` is
   1–100, default 24. A `before` that names no image is 422 `That page is no longer available;
   reload the list.` A published row whose export files are missing is skipped but still counted,
   so a page can be short by one.
