@@ -10,7 +10,7 @@ import hashlib
 import json
 import logging
 import sqlite3
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import NamedTuple
@@ -46,10 +46,31 @@ class ImagePage(NamedTuple):
     next: str | None
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
+
 
 # Statements that bring an existing database from version N-1 to N.
-MIGRATIONS: dict[int, tuple[str, ...]] = {
+def _migrate_7_rehash_current_exports(conn: sqlite3.Connection) -> None:
+    """Schema 7 widens ``content_hash`` to the objects' names (#217). An export whose recorded
+    hash matched the old formula (style and labels only) was current: re-stamp it with the new
+    one, so no owner finds every export "out of date" after an upgrade. A stale one stays as it
+    is; a row without a layout cannot be re-hashed and stays as it is too. The catalogue stamps
+    are cleared so the startup backfill revisits every image once and applies the names-only
+    merges the previous build held back (additive; the labels do not move)."""
+    rows = conn.execute(
+        "SELECT i.id, i.exported_hash, a.style_json, a.labels_json FROM images i"
+        " JOIN annotations a ON a.image_id = i.id WHERE i.exported_hash IS NOT NULL"
+    ).fetchall()
+    for row in rows:
+        old = hashlib.sha256(f"{row['style_json']}\n{row['labels_json']}".encode()).hexdigest()[:32]
+        if row["exported_hash"] != old:
+            continue
+        new = content_hash(row["style_json"], row["labels_json"], _names_text(conn, row["id"]))
+        conn.execute("UPDATE images SET exported_hash = ? WHERE id = ?", (new, row["id"]))
+    conn.execute("UPDATE images SET objects_catalog = NULL")
+
+
+MIGRATIONS: dict[int, tuple[str | Callable[[sqlite3.Connection], None], ...]] = {
     2: ("ALTER TABLE images ADD COLUMN solve_hints_json TEXT",),
     3: ("ALTER TABLE images ADD COLUMN solve_failure TEXT",),
     4: ("ALTER TABLE images ADD COLUMN exported_version INTEGER",),
@@ -62,6 +83,9 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
     # 6: which objects.json version an image's objects were looked up against (#17); NULL
     # means "never", and the startup backfill fills it in.
     6: ("ALTER TABLE images ADD COLUMN objects_catalog TEXT",),
+    # 7: the content hash covers the objects' names (#217); current exports are re-stamped and
+    # the catalogue stamps cleared, so the backfill revisits every image once.
+    7: (_migrate_7_rehash_current_exports,),
 }
 
 SCHEMA = """
@@ -239,17 +263,32 @@ def _annotation_row(ann: Annotations) -> tuple[str, str]:
     return ann.style.model_dump_json(), json.dumps([lab.model_dump() for lab in ann.labels])
 
 
-def hash_of(ann: Annotations) -> str:
-    """``content_hash`` of ``ann`` as the write path would store it (the PUT response carries it
-    without a second read)."""
-    return content_hash(*_annotation_row(ann))
+def names_text(objects: Iterable[SolveObject]) -> str:
+    """The objects' names as the ``objects`` table stores them, one object per line in id order:
+    the third input of ``content_hash``."""
+    return "\n".join(json.dumps(o.catalog_names) for o in sorted(objects, key=lambda o: o.id))
 
 
-def content_hash(style_json: str, labels_json: str) -> str:
-    """The document's identity by content, over the text the row stores (the write path dumps
-    the models deterministically, so equal documents hash alike). ``Annotations.content_hash``
-    and ``images.exported_hash`` are this; the pages compare them (#91)."""
-    return hashlib.sha256(f"{style_json}\n{labels_json}".encode()).hexdigest()[:32]
+def _names_text(conn: sqlite3.Connection, image_id: str) -> str:
+    rows = conn.execute(
+        "SELECT catalog_names FROM objects WHERE image_id = ? ORDER BY id", (image_id,)
+    ).fetchall()
+    return "\n".join(r["catalog_names"] for r in rows)
+
+
+def hash_of(ann: Annotations, objects: Iterable[SolveObject]) -> str:
+    """``content_hash`` of ``ann`` over ``objects`` as the write path would store them (the PUT
+    response carries it without a second read)."""
+    return content_hash(*_annotation_row(ann), names_text(objects))
+
+
+def content_hash(style_json: str, labels_json: str, names: str) -> str:
+    """The rendered document's identity by content, over the text the rows store (the write
+    paths dump the models deterministically, so equal documents hash alike): the style, the
+    labels and the objects' names, which the label text is built from (#217).
+    ``Annotations.content_hash`` and ``images.exported_hash`` are this; the pages compare them
+    (#91)."""
+    return hashlib.sha256(f"{style_json}\n{labels_json}\n{names}".encode()).hexdigest()[:32]
 
 
 def _row_to_object(row: sqlite3.Row) -> SolveObject:
@@ -297,8 +336,11 @@ class Database:
                 # SQLite DDL is transactional: a failed step leaves the old version stamped.
                 conn.execute("BEGIN")
                 try:
-                    for statement in MIGRATIONS[target]:
-                        conn.execute(statement)
+                    for step in MIGRATIONS[target]:
+                        if callable(step):
+                            step(conn)
+                        else:
+                            conn.execute(step)
                     conn.execute(f"PRAGMA user_version = {target}")
                     conn.execute("COMMIT")
                 except Exception:
@@ -482,7 +524,15 @@ class Database:
         """``content_hash`` of every stored annotations row, by image id (for the list endpoint)."""
         with self.connect() as conn:
             rows = conn.execute("SELECT image_id, style_json, labels_json FROM annotations")
-            return {r["image_id"]: content_hash(r["style_json"], r["labels_json"]) for r in rows}
+            names: dict[str, list[str]] = {}
+            for r in conn.execute("SELECT image_id, catalog_names FROM objects ORDER BY id"):
+                names.setdefault(r["image_id"], []).append(r["catalog_names"])
+            return {
+                r["image_id"]: content_hash(
+                    r["style_json"], r["labels_json"], "\n".join(names.get(r["image_id"], []))
+                )
+                for r in rows
+            }
 
     def annotations_hash(self, image_id: str) -> str | None:
         """One row's ``content_hash`` without decoding its document (``image_out`` needs no more)."""
@@ -490,7 +540,10 @@ class Database:
             row = conn.execute(
                 "SELECT style_json, labels_json FROM annotations WHERE image_id = ?", (image_id,)
             ).fetchone()
-        return content_hash(row["style_json"], row["labels_json"]) if row else None
+            if row is None:
+                return None
+            names = _names_text(conn, image_id)
+        return content_hash(row["style_json"], row["labels_json"], names)
 
     # -- annotations --------------------------------------------------------------
 
@@ -531,13 +584,14 @@ class Database:
             row = conn.execute(
                 "SELECT * FROM annotations WHERE image_id = ?", (image_id,)
             ).fetchone()
-        if row is None:
-            return None
+            if row is None:
+                return None
+            names = _names_text(conn, image_id)
         return Annotations(
             image_id=row["image_id"],
             style=_load_style(row["style_json"], image_id),
             labels=_load_labels(row["labels_json"], image_id),
             version=row["version"],
             updated_at=row["updated_at"],
-            content_hash=content_hash(row["style_json"], row["labels_json"]),
+            content_hash=content_hash(row["style_json"], row["labels_json"], names),
         )

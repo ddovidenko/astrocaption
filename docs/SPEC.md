@@ -121,9 +121,10 @@ No multi-user, no roles, no invites in v1.
    version it was looked up against (`objects_catalog`); at startup, before requests are served, images whose
    stamp is behind the shipped version are looked up once more, additively: existing labels keep their
    position, state and overrides (the re-solve rematch), only new objects are placed, and their export then
-   reads as out of date. A lookup that would only add names to existing objects is not applied by the
-   backfill (the text would change while the export still read as current); an image whose lookup fails is
-   logged, left as it was and unstamped, and the server still starts. Never contacts nova.
+   reads as out of date. A lookup that only adds names to existing objects stores the names and leaves the
+   labels as they are; the export reads as out of date all the same, because the content hash covers the
+   objects' names (#217). An image whose lookup fails is logged, left as it was and unstamped, and the
+   server still starts. Never contacts nova.
 5. Owner lands in the editor with all objects present but **only objects above a size
    threshold enabled** (radius ≥ the owner's `min_label_radius_percent` of the image width, default
    0.4 %, bounds 0–10, set on the config page or pinned by `ASTROCAPTION_MIN_LABEL_RADIUS_PERCENT`;
@@ -176,8 +177,9 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
    60 MB source) and also writes `annotated_preview.jpg` (≤ 2048 px) for the gallery and the M1 page.
 4. The page says when an export is out of date (#91): the export records the content hash of the
    document it rendered (`images.exported_hash`, `ImageOut.exported_hash`; the hash of the stored
-   style and labels text, `Annotations.content_hash` on every GET/PUT response), and the export is
-   current only when that equals `ImageOut.annotations_hash`. By content, never by version or
+   style and labels text and of the objects' names the label text is built from (#217),
+   `Annotations.content_hash` on every GET/PUT response), and the export is current only when that
+   equals `ImageOut.annotations_hash`. By content, never by version or
    clock: an undo back to the exported document is a new version with the same content and reads
    as exported again, while a save that lands during the render is a different document. An
    export made before the column existed reads as out of date until the next export. The image

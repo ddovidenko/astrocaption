@@ -359,8 +359,8 @@ class Annotations(BaseModel):
     updated_at: str = Field(default_factory=utcnow_iso)
     # the stored font_file when `style.font_file` had to be replaced by the default (GET only)
     font_fallback: str | None = None
-    #: The stored document's identity by content (``db.content_hash``), filled on every read; what
-    #: ``images.exported_hash`` is compared with (#91).
+    #: The rendered document's identity by content (``db.content_hash``: style, labels and the
+    #: objects' names), filled on every read; what ``images.exported_hash`` is compared with (#91).
     content_hash: str | None = None
 
 

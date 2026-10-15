@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -7,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from app.config import Settings
-from app.db import SCHEMA_VERSION, Database, UnknownCursor
+from app.db import SCHEMA_VERSION, Database, UnknownCursor, hash_of
 from app.models import (
     Annotations,
     ImageRecord,
@@ -88,6 +89,70 @@ def test_migration_from_v4_swaps_the_exported_version_column_for_the_hash(tmp_pa
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(images)")}
         assert "exported_hash" in columns
         assert "exported_version" not in columns
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    db.init()  # idempotent
+
+
+def _solved_with_names(
+    db: Database, image_id: str, names: list[str]
+) -> tuple[list[SolveObject], Annotations]:
+    objects = [SolveObject(id=1, catalog_names=names, type="galaxy", x=10.0, y=20.0, radius=5)]
+    ann = Annotations(
+        image_id=image_id, style=StyleConfig(), labels=[Label(object_id=1)], version=1
+    )
+    assert db.store_solve_result(image_id, objects, ann, {"solve_status": SolveStatus.SOLVED})
+    return objects, ann
+
+
+def test_content_hash_covers_the_objects_names(settings: Settings) -> None:
+    """A name appended to an object changes the rendered text, so it must move the hash the
+    export is compared with (#217): every read path and the PUT response agree on it."""
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db)
+    objects, ann = _solved_with_names(db, rec.id, ["NGC 1924"])
+    before = db.annotations_hash(rec.id)
+    stored = db.get_annotations(rec.id)
+    assert stored is not None and before is not None
+    assert stored.content_hash == before == db.annotations_hashes()[rec.id] == hash_of(ann, objects)
+    renamed = [objects[0].model_copy(update={"catalog_names": ["NGC 1924", "PGC 17319"]})]
+    db.replace_objects(rec.id, renamed)
+    after = db.annotations_hash(rec.id)
+    assert after is not None and after != before
+    stored = db.get_annotations(rec.id)
+    assert stored is not None and after == stored.content_hash == hash_of(ann, renamed)
+
+
+def test_migration_from_v6_keeps_a_current_export_current(settings: Settings) -> None:
+    """Schema 7 widens the content hash to the objects' names (#217). An export that was current
+    under the old formula (style and labels only) is re-stamped with the new hash, so no owner
+    sees every export turn 'out of date' on upgrade; one that was already stale stays stale."""
+    db = Database(settings.db_path)
+    current, stale = seed_image(settings, db, "cur"), seed_image(settings, db, "old")
+    for rec in (current, stale):
+        _solved_with_names(db, rec.id, ["NGC 1924"])
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT style_json, labels_json FROM annotations WHERE image_id = 'cur'"
+        ).fetchone()
+        old_formula = hashlib.sha256(
+            f"{row['style_json']}\n{row['labels_json']}".encode()
+        ).hexdigest()[:32]
+        for image_id, value in (("cur", old_formula), ("old", "0123456789abcdef0123456789abcdef")):
+            conn.execute(
+                "UPDATE images SET exported_at = '2026-10-01T00:00:00+00:00', exported_hash = ?,"
+                " objects_catalog = '2026-10-13' WHERE id = ?",
+                (value, image_id),
+            )
+        conn.execute("PRAGMA user_version = 6")
+    db.init()
+    cur, old = db.get_image("cur"), db.get_image("old")
+    assert cur is not None and old is not None
+    assert cur.exported_hash == db.annotations_hash("cur") != old_formula
+    assert old.exported_hash == "0123456789abcdef0123456789abcdef"
+    # The catalogue stamps are cleared too, so the startup backfill revisits every image once
+    # and applies the names-only merges the previous build held back.
+    assert cur.objects_catalog is None and old.objects_catalog is None
+    with db.connect() as conn:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     db.init()  # idempotent
 
