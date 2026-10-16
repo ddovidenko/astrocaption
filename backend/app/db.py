@@ -86,12 +86,12 @@ def fold_names(catalog_names_json: str) -> str:
     return "\n".join(fold(n) for n in names if isinstance(n, str))
 
 
+#: The rows a solve is still running on: what the worker resumes and the owner polls.
+_BUSY_STATUSES = (SolveStatus.PENDING.value, SolveStatus.SOLVING.value)
+
 #: One of these per `ListFilter.status`, over `images.solve_status`.
-_STATUS_CONDITIONS: dict[str, tuple[str, tuple[object, ...]]] = {
-    "solving": (
-        "solve_status IN (?, ?)",
-        (SolveStatus.PENDING.value, SolveStatus.SOLVING.value),
-    ),
+_STATUS_CONDITIONS: dict[ListStatus, tuple[str, tuple[object, ...]]] = {
+    "solving": ("solve_status IN (?, ?)", _BUSY_STATUSES),
     "failed": ("solve_status = ?", (SolveStatus.FAILED.value,)),
     "solved": ("solve_status = ?", (SolveStatus.SOLVED.value,)),
 }
@@ -456,8 +456,6 @@ class Database:
         # order (SPEC § 8): the page after `before` is everything inserted before that row, so an
         # upload or a delete elsewhere never shifts it. One row more than asked tells whether a
         # page follows.
-        conds = list(conds)
-        values = list(values)
         with self.connect() as conn:
             if before is not None:
                 cursor = conn.execute("SELECT rowid FROM images WHERE id = ?", (before,)).fetchone()
@@ -482,9 +480,10 @@ class Database:
     def list_published_images(
         self, limit: int = PAGE_LIMIT, before: str | None = None, filter: ListFilter = NO_FILTER
     ) -> ImagePage:
-        """The gallery's rows: published and currently solved, newest first (SPEC § 5.5),
-        narrowed by the search only: the owner's status and published chips are not public."""
-        conds, values = _filter_conditions(ListFilter(q=filter.q))
+        """The gallery's rows: published and currently solved, newest first (SPEC § 5.5), then
+        whatever `filter` narrows further. Which filters are public is the gallery endpoint's
+        business (it declares only the public ones); here an owner field can only narrow."""
+        conds, values = _filter_conditions(filter)
         return self._list_images(
             limit,
             before,
@@ -496,7 +495,7 @@ class Database:
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM images WHERE solve_status IN (?, ?) ORDER BY created_at",
-                (SolveStatus.PENDING.value, SolveStatus.SOLVING.value),
+                _BUSY_STATUSES,
             ).fetchall()
         return [_row_to_image(r) for r in rows]
 

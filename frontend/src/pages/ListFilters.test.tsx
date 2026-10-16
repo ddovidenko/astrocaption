@@ -23,21 +23,22 @@ describe('ListFilters', () => {
     expect(onChange).not.toHaveBeenCalled()
     act(() => vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS))
     expect(onChange).toHaveBeenCalledTimes(1)
-    expect(onChange).toHaveBeenCalledWith({ ...EMPTY_QUERY, q: 'm 27' })
+    expect(onChange).toHaveBeenCalledWith({ q: 'm 27' })
   })
 
   it('shows the chips to the owner only, one pressed per group, and a second press clears it', () => {
+    // Each press reports a patch; the page merges it onto the URL as it is then.
     const onChange = vi.fn()
     const query: ListQuery = { q: '', status: 'failed', published: null }
     const { rerender } = render(<ListFilters query={query} onChange={onChange} owner label="Search images" />)
     expect(pressed('Failed')).toBe('true')
     expect(pressed('Solved')).toBe('false')
     fireEvent.click(screen.getByRole('button', { name: 'Solved' }))
-    expect(onChange).toHaveBeenLastCalledWith({ ...query, status: 'solved' })
+    expect(onChange).toHaveBeenLastCalledWith({ status: 'solved' })
     fireEvent.click(screen.getByRole('button', { name: 'Failed' }))
-    expect(onChange).toHaveBeenLastCalledWith({ ...query, status: null })
+    expect(onChange).toHaveBeenLastCalledWith({ status: null })
     fireEvent.click(screen.getByRole('button', { name: 'Unpublished' }))
-    expect(onChange).toHaveBeenLastCalledWith({ ...query, published: false })
+    expect(onChange).toHaveBeenLastCalledWith({ published: false })
 
     rerender(<ListFilters query={EMPTY_QUERY} onChange={onChange} label="Search images" />)
     expect(screen.queryByRole('button', { name: 'Failed' })).toBeNull()
@@ -54,17 +55,6 @@ describe('ListFilters', () => {
     expect(onChange).toHaveBeenLastCalledWith(EMPTY_QUERY)
     rerender(<ListFilters query={EMPTY_QUERY} onChange={onChange} label="Search images" />)
     expect(box.value).toBe('')
-  })
-
-  it('keeps a chip pressed inside the typing pause: the search lands on the latest query', () => {
-    const onChange = vi.fn()
-    const { rerender } = render(<ListFilters query={EMPTY_QUERY} onChange={onChange} owner label="Search images" />)
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search images' }), { target: { value: 'veil' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Solved' }))
-    expect(onChange).toHaveBeenLastCalledWith({ ...EMPTY_QUERY, status: 'solved' })
-    rerender(<ListFilters query={{ ...EMPTY_QUERY, status: 'solved' }} onChange={onChange} owner label="Search images" />)
-    act(() => vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS))
-    expect(onChange).toHaveBeenLastCalledWith({ q: 'veil', status: 'solved', published: null })
   })
 
   it('caps the box at the length the server accepts, so typing alone can never be refused', () => {

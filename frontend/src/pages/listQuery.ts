@@ -1,7 +1,5 @@
 import type { ListStatus, PageQuery } from '../api'
 
-export type { ListStatus }
-
 /** The search and filters of a list page (SPEC § 5.5, § 8). The URL is its only home: both
  *  pages read it with `readListQuery` and write it back with `writeListQuery`, so a result is
  *  linkable and a reload lands on the same list. */
@@ -13,10 +11,11 @@ export interface ListQuery {
 
 export const EMPTY_QUERY: ListQuery = { q: '', status: null, published: null }
 
-const STATUSES: readonly ListStatus[] = ['solving', 'failed', 'solved']
+/** The owner's status chips, in display order; `solving` is every row the page polls. */
+export const STATUS_LABELS: Record<ListStatus, string> = { solving: 'Solving', failed: 'Failed', solved: 'Solved' }
 
 function statusOf(value: string | null): ListStatus | null {
-  return (STATUSES as readonly string[]).includes(value ?? '') ? (value as ListStatus) : null
+  return value !== null && value in STATUS_LABELS ? (value as ListStatus) : null
 }
 
 function publishedOf(value: string | null): boolean | null {
@@ -63,11 +62,9 @@ export function toPageQuery(query: ListQuery): PageQuery {
 /** The Show more link: the current filters, then the cursor, so a followed link stays inside
  *  the result set (SPEC § 5.5). */
 export function pageHref(query: ListQuery, before: string): string {
-  const parts = entries(query)
-    .filter((pair): pair is [string, string] => pair[1] !== null)
-    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
-  parts.push(`before=${encodeURIComponent(before)}`)
-  return `?${parts.join('&')}`
+  const params = writeListQuery(new URLSearchParams(), query)
+  params.set('before', before)
+  return `?${params}`
 }
 
 /** The query's URL keys and string values, in URL order; null for an unset one. */

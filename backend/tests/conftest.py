@@ -166,6 +166,15 @@ def upload(client: TestClient, path: Path, title: str | None = None) -> dict[str
     return body
 
 
+def list_ids(client: TestClient, path: str, **params: object) -> list[str]:
+    """The ids of one page of a list endpoint, asserting the page shape (SPEC § 8)."""
+    resp = client.get(path, params=params)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert set(body) == {"items", "next"}
+    return [i["id"] for i in body["items"]]
+
+
 def wait_for_status(
     client: TestClient, image_id: str, statuses: set[str], timeout: float = 15.0
 ) -> dict[str, Any]:

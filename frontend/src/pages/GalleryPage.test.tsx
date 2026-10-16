@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
+import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError, type GalleryItem, type HealthOut } from '../api'
 import { galleryItem as item } from './galleryTestItem'
 import GalleryImagePage from './GalleryImagePage'
 import GalleryPage from './GalleryPage'
 import { SEARCH_DEBOUNCE_MS } from './ListFilters'
+import Url from './testUrl'
 
 vi.mock('../api', async (importOriginal) => {
   const real = await importOriginal<typeof import('../api')>()
@@ -18,11 +19,6 @@ afterEach(() => {
   vi.mocked(api.gallery).mockReset()
   vi.mocked(api.galleryImage).mockReset()
 })
-
-/** Echoes the current URL search into the DOM, so a test can see what the page wrote. */
-function Url() {
-  return <output data-testid="url">{useLocation().search}</output>
-}
 
 const health = (over: Partial<HealthOut> = {}): HealthOut => ({
   status: 'ok',

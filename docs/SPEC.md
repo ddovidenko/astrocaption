@@ -205,7 +205,8 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
   Unpublished). The search and chips live in the URL (`/gallery?q=veil`), so a result is
   linkable and a reload keeps it, and the Show more link carries them so a followed page stays
   inside the result set; changing a filter starts again from the top. An active search with no
-  result says "Nothing matches." (owner: "No images match.") next to a Clear button.
+  result says "Nothing matches." (owner: "No images match.") next to a Clear button. An upload
+  clears the owner's search and chips, so the new (pending, unpublished) card is in view.
   Hover (or tap on touch) swaps the preview
   to the annotated preview. Click opens a full-size view (the 2048 px preview) with the same
   hover behaviour and a link to download the full-resolution annotated export. The unannotated

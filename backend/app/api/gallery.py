@@ -77,10 +77,10 @@ async def list_gallery(
     db: DbDep,
     limit: LimitParam = PAGE_LIMIT,
     before: BeforeParam = None,
-    q: QParam = None,
+    q: QParam = "",
 ) -> Page[GalleryItem]:
     try:
-        page = db.list_published_images(limit, before, ListFilter(q=q or ""))
+        page = db.list_published_images(limit, before, ListFilter(q=q))
     except UnknownCursor:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, PAGE_GONE) from None
     items: list[GalleryItem] = []

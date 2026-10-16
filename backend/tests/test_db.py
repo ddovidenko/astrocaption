@@ -639,8 +639,10 @@ def test_fold_names_folds_every_name_in_the_json_array() -> None:
     assert "c34veil" not in names
 
 
-def _with_objects(db: Database, image_id: str, created: str, names: list[list[str]]) -> None:
-    db.insert_image(_plain_image(image_id, created))
+def _with_objects(
+    db: Database, image_id: str, created: str, names: list[list[str]], published: bool = False
+) -> None:
+    db.insert_image(_plain_image(image_id, created, published))
     db.replace_objects(
         image_id,
         [
@@ -650,25 +652,25 @@ def _with_objects(db: Database, image_id: str, created: str, names: list[list[st
     )
 
 
+def _ids(db: Database, **filter: object) -> list[str]:
+    return [r.id for r in db.list_images(filter=ListFilter(**filter)).items]  # type: ignore[arg-type]
+
+
 def test_list_images_q_matches_title_primary_name_and_alias(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.sqlite")
     db.init()
     _with_objects(db, "veil", "2026-09-01T00:00:00Z", [["NGC 6960", "C 34", "Veil Nebula"]])
     _with_objects(db, "m27", "2026-09-02T00:00:00Z", [["NGC 6853", "M 27", "Dumbbell Nebula"]])
     db.insert_image(_plain_image("M31_stacked_final", "2026-09-03T00:00:00Z"))
-
-    def ids(q: str) -> list[str]:
-        return [r.id for r in db.list_images(filter=ListFilter(q=q)).items]
-
-    assert ids("veil") == ["veil"]
-    assert ids("NGC6960") == ["veil"]
-    assert ids("ngc 6960") == ["veil"]
-    assert ids("c 34") == ["veil"]
-    assert ids("m27") == ["m27"]
-    assert ids("dumbbell") == ["m27"]
-    assert ids("m31") == ["M31_stacked_final"]
-    assert ids("nebula") == ["m27", "veil"]  # newest first, both by an object name
-    assert ids("andromeda") == []
+    assert _ids(db, q="veil") == ["veil"]
+    assert _ids(db, q="NGC6960") == ["veil"]
+    assert _ids(db, q="ngc 6960") == ["veil"]
+    assert _ids(db, q="c 34") == ["veil"]
+    assert _ids(db, q="m27") == ["m27"]
+    assert _ids(db, q="dumbbell") == ["m27"]
+    assert _ids(db, q="m31") == ["M31_stacked_final"]
+    assert _ids(db, q="nebula") == ["m27", "veil"]  # newest first, both by an object name
+    assert _ids(db, q="andromeda") == []
 
 
 def test_list_images_blank_q_is_no_filter(tmp_path: Path) -> None:
@@ -718,37 +720,25 @@ def test_list_images_status_and_published_filters(tmp_path: Path) -> None:
     for n, (image_id, status, published) in enumerate(rows):
         rec = _plain_image(image_id, f"2026-09-0{n + 1}T00:00:00Z", published)
         db.insert_image(rec.model_copy(update={"solve_status": status}))
-
-    def ids(**kw: object) -> list[str]:
-        return [r.id for r in db.list_images(filter=ListFilter(**kw)).items]  # type: ignore[arg-type]
-
-    assert ids(status="solving") == ["solving", "pending"]
-    assert ids(status="failed") == ["failed"]
-    assert ids(status="solved") == ["solved-unpub", "solved-pub"]
-    assert ids(published=True) == ["solved-pub", "failed"]
-    assert ids(published=False) == ["solved-unpub", "solving", "pending"]
-    assert ids(status="solved", published=True) == ["solved-pub"]
-    assert ids(status="solved", published=True, q="unpub") == []
+    assert _ids(db, status="solving") == ["solving", "pending"]
+    assert _ids(db, status="failed") == ["failed"]
+    assert _ids(db, status="solved") == ["solved-unpub", "solved-pub"]
+    assert _ids(db, published=True) == ["solved-pub", "failed"]
+    assert _ids(db, published=False) == ["solved-unpub", "solving", "pending"]
+    assert _ids(db, status="solved", published=True) == ["solved-pub"]
+    assert _ids(db, status="solved", published=True, q="unpub") == []
 
 
-def test_list_published_images_takes_q_and_ignores_status_and_published(tmp_path: Path) -> None:
+def test_list_published_images_searches_and_an_owner_field_can_only_narrow(
+    tmp_path: Path,
+) -> None:
     db = Database(tmp_path / "t.sqlite")
     db.init()
     _with_objects(db, "veil-unpub", "2026-09-01T00:00:00Z", [["NGC 6960", "Veil Nebula"]])
-    db.insert_image(_plain_image("veil-pub", "2026-09-02T00:00:00Z", published=True))
-    db.replace_objects(
-        "veil-pub",
-        [
-            SolveObject(
-                id=1, catalog_names=["NGC 6992", "Eastern Veil"], type="ngc", x=1.0, y=1.0, radius=1
-            )
-        ],
-    )
+    _with_objects(db, "veil-pub", "2026-09-02T00:00:00Z", [["NGC 6992", "Eastern Veil"]], True)
     db.insert_image(_plain_image("m27-pub", "2026-09-03T00:00:00Z", published=True))
     gallery = db.list_published_images(filter=ListFilter(q="veil"))
     assert [r.id for r in gallery.items] == ["veil-pub"]
-    # The gallery's own conditions win: an owner filter cannot widen what visitors see.
-    widened = db.list_published_images(
-        filter=ListFilter(q="veil", published=False, status="failed")
-    )
-    assert [r.id for r in widened.items] == ["veil-pub"]
+    # The gallery's own conditions are ANDed first, so an owner field never widens the list.
+    narrowed = db.list_published_images(filter=ListFilter(q="veil", published=False))
+    assert narrowed.items == []

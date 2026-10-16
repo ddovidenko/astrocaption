@@ -34,6 +34,7 @@ from tests.conftest import (
     NOVA_NARROW_FIXTURES,
     TEST_PASSWORD_HASH,
     FakeSolver,
+    list_ids,
     load_fixture,
     login,
     make_client,
@@ -150,11 +151,7 @@ def test_list_images_search_and_filters(client: TestClient, sample_jpeg: Path) -
     other = upload(client, sample_jpeg, title="Untitled stack")["id"]
 
     def ids(**params: object) -> list[str]:
-        resp = client.get("/api/images", params=params)
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        assert set(body) == {"items", "next"}
-        return [i["id"] for i in body["items"]]
+        return list_ids(client, "/api/images", **params)
 
     assert ids(q="veil") == [veil]
     assert ids(q="m 27") == [m27]

@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { api, ApiError, describeError, type GalleryItem, type HealthOut, type PageQuery } from '../api'
 import GalleryCard from './GalleryCard'
 import ListFilters from './ListFilters'
-import { isFiltered, readListQuery, toPageQuery, writeListQuery, type ListQuery } from './listQuery'
+import { isFiltered, toPageQuery } from './listQuery'
 import ShowMore from './ShowMore'
+import { useListQuery } from './useListQuery'
 
 /** The public gallery (SPEC § 5.5): published images newest first, 24 at a time with Show more,
  *  hover to see the annotations. The same page serves the owner at /gallery, so what they see is
@@ -13,12 +14,9 @@ import ShowMore from './ShowMore'
  *  typed search replaces the URL (no history entry per keystroke) and drops the cursor. */
 export default function GalleryPage({ health }: { health: HealthOut }) {
   const enabled = health.public_gallery_enabled
-  const [params, setParams] = useSearchParams()
+  const [params] = useSearchParams()
   const start = params.get('before')
-  // `readListQuery` builds a fresh object per render; round-tripping it through one string
-  // gives an identity that changes only when the query does, safe as an effect dependency.
-  const queryKey = JSON.stringify(readListQuery(params))
-  const query = useMemo(() => JSON.parse(queryKey) as ListQuery, [queryKey])
+  const [query, changeQuery] = useListQuery()
   const [items, setItems] = useState<GalleryItem[] | null>(null)
   const [next, setNext] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -77,11 +75,6 @@ export default function GalleryPage({ health }: { health: HealthOut }) {
     }
   }, [next, start, page])
 
-  const changeQuery = useCallback(
-    (nextQuery: ListQuery) => setParams(writeListQuery(params, nextQuery), { replace: true }),
-    [params, setParams],
-  )
-
   if (!enabled) {
     return (
       <section className="gallery-off">
@@ -90,30 +83,33 @@ export default function GalleryPage({ health }: { health: HealthOut }) {
       </section>
     )
   }
+  const body = () => {
+    if (error) return <p className="error">{error}</p>
+    if (items === null) return <p className="meta">Loading…</p>
+    if (items.length === 0) {
+      return <p className="gallery-empty">{isFiltered(query) ? 'Nothing matches.' : 'Nothing published yet.'}</p>
+    }
+    return (
+      <section className="gallery" aria-label="Gallery">
+        {items.map((item) => (
+          <GalleryCard
+            key={item.id}
+            item={item}
+            plain={item.thumb_url}
+            annotated={item.annotated_preview_url}
+            to={`/gallery/${item.id}`}
+            frame="uniform"
+          >
+            {item.title}
+          </GalleryCard>
+        ))}
+      </section>
+    )
+  }
   return (
     <>
       <ListFilters query={query} onChange={changeQuery} label="Search the gallery" />
-      {error && <p className="error">{error}</p>}
-      {!error && items === null && <p className="meta">Loading…</p>}
-      {!error && items !== null && items.length === 0 && (
-        <p className="gallery-empty">{isFiltered(query) ? 'Nothing matches.' : 'Nothing published yet.'}</p>
-      )}
-      {items !== null && items.length > 0 && (
-        <section className="gallery" aria-label="Gallery">
-          {items.map((item) => (
-            <GalleryCard
-              key={item.id}
-              item={item}
-              plain={item.thumb_url}
-              annotated={item.annotated_preview_url}
-              to={`/gallery/${item.id}`}
-              frame="uniform"
-            >
-              {item.title}
-            </GalleryCard>
-          ))}
-        </section>
-      )}
+      {body()}
       <ShowMore next={next} busy={more.busy} error={more.error} onMore={() => void showMore()} query={query} />
     </>
   )

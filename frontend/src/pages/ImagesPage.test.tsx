@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter, useLocation } from 'react-router'
+import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError, type ConfigOut, type HealthOut, type ImageOut } from '../api'
 import ImagesPage from './ImagesPage'
 import { SEARCH_DEBOUNCE_MS } from './ListFilters'
+import Url from './testUrl'
 
 vi.mock('../api', async (importOriginal) => {
   const real = await importOriginal<typeof import('../api')>()
@@ -92,11 +93,6 @@ function mount() {
   )
 }
 
-/** Echoes the current URL search into the DOM, so a test can see what the page wrote. */
-function Url() {
-  return <output data-testid="url">{useLocation().search}</output>
-}
-
 function mountAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
@@ -177,6 +173,20 @@ describe('ImagesPage search and filters (#189)', () => {
     await tick(SEARCH_DEBOUNCE_MS)
     expect(screen.getByTestId('url').textContent).toBe('?q=m+27&status=solved')
     expect(api.listImages).toHaveBeenLastCalledWith({ q: 'm 27', status: 'solved' })
+  })
+
+  it('a chip pressed inside the typing pause survives the search landing', async () => {
+    vi.mocked(api.listImages).mockResolvedValue({ items: [image('a')], next: null })
+    vi.mocked(api.config).mockResolvedValue(config)
+    mountAt('/')
+    await tick(0)
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search images' }), { target: { value: 'veil' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Solved' }))
+    await tick(0)
+    expect(screen.getByTestId('url').textContent).toBe('?status=solved')
+    await tick(SEARCH_DEBOUNCE_MS)
+    expect(screen.getByTestId('url').textContent).toBe('?q=veil&status=solved')
+    expect(api.listImages).toHaveBeenLastCalledWith({ q: 'veil', status: 'solved' })
   })
 
   it('a refresh after a card action re-queries with the current filters', async () => {

@@ -1,4 +1,4 @@
-import { EMPTY_QUERY, pageHref, type ListQuery } from './listQuery'
+import { pageHref, type ListQuery } from './listQuery'
 
 /** The pager (SPEC § 5.5, § 8): one "Show more" that appends the next page. A real link to
  *  `?…&before=<id>` carrying the current search and filters, so a crawler that runs the app
@@ -9,13 +9,13 @@ export default function ShowMore({
   busy,
   error,
   onMore,
-  query = EMPTY_QUERY,
+  query,
 }: {
   next: string | null
   busy: boolean
   error: string | null
   onMore: () => void
-  query?: ListQuery
+  query: ListQuery
 }) {
   if (next === null) return null
   return (

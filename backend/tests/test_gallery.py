@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.db import Database
 from app.models import SolveStatus
-from tests.conftest import upload, wait_for_status
+from tests.conftest import list_ids, upload, wait_for_status
 
 PUBLISH_NEEDS_EXPORT = "Export the image before publishing it."
 NOT_FOUND = "Image not found."
@@ -149,9 +149,7 @@ def test_gallery_search_finds_a_title_or_an_object_name_and_ignores_owner_filter
     unpublished = exported_image(client, sample_jpeg)
 
     def ids(**params: object) -> list[str]:
-        resp = anon_client.get("/api/gallery", params=params)
-        assert resp.status_code == 200, resp.text
-        return [i["id"] for i in resp.json()["items"]]
+        return list_ids(anon_client, "/api/gallery", **params)
 
     assert ids(q="orion field") == [published["id"]]
     assert ids(q="ngc1976") == [published["id"]]  # an object name, space-insensitively

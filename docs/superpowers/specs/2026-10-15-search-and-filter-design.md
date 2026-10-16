@@ -91,7 +91,9 @@ No `count` of matches in the response: nothing displays it and it would be a sec
   opens the link starts from that page of the same search.
 - **Images page plumbing.** First load, `refresh` (via `listFirst`), `showMore` and its 422
   fallback all pass the current filter. The busy-row poll by id is untouched. Because filters
-  live in the URL, a refresh after an upload or a delete re-queries the filtered list. The
+  live in the URL, a refresh after a delete re-queries the filtered list; an upload clears the
+  search and chips first, since the new card is pending and unpublished and would be out of
+  sight under them (decided in review, 2026-10-16). The
   newest-answer-wins sequence guard already covers a slow old query landing after a fast new
   one; the gallery's cancelled flag does the same because the filter is in the effect's deps.
 - **Empty states.** "No images yet. Upload a finished JPG to start." stays for an unfiltered

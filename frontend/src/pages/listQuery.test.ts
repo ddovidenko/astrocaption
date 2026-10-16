@@ -47,8 +47,8 @@ describe('isFiltered', () => {
 })
 
 describe('pageHref', () => {
-  it('carries the filters before the cursor, encoded', () => {
-    expect(pageHref(EMPTY_QUERY, 'img 9')).toBe('?before=img%209')
-    expect(pageHref({ q: 'm 27', status: 'failed', published: null }, 'img-9')).toBe('?q=m%2027&status=failed&before=img-9')
+  it('carries the filters before the cursor, spelled as the address bar spells them', () => {
+    expect(pageHref(EMPTY_QUERY, 'img 9')).toBe('?before=img+9')
+    expect(pageHref({ q: 'm 27', status: 'failed', published: null }, 'img-9')).toBe('?q=m+27&status=failed&before=img-9')
   })
 })

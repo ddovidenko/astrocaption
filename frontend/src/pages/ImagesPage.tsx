@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router'
 import {
   ApiError,
   PAGE_LIMIT,
@@ -19,8 +19,9 @@ import {
 import { elapsed, exportOf, exportState, relativeTime } from '../exportStatus'
 import ConfirmInline from '../ConfirmInline'
 import ListFilters from './ListFilters'
-import { EMPTY_QUERY, isFiltered, readListQuery, toPageQuery, writeListQuery, type ListQuery } from './listQuery'
+import { EMPTY_QUERY, isFiltered, toPageQuery, type ListQuery } from './listQuery'
 import ShowMore from './ShowMore'
+import { useListQuery } from './useListQuery'
 
 const POLL_MS = 3000
 
@@ -32,14 +33,7 @@ export default function ImagesPage({
   refreshHealth: () => Promise<HealthOut | null>
 }) {
   // The search and chips live in the URL (SPEC § 5.5): linkable, and a reload keeps them.
-  // Round-tripped through one string so `query`'s identity changes only when the query does.
-  const [params, setParams] = useSearchParams()
-  const queryKey = JSON.stringify(readListQuery(params))
-  const query = useMemo(() => JSON.parse(queryKey) as ListQuery, [queryKey])
-  const changeQuery = useCallback(
-    (next: ListQuery) => setParams(writeListQuery(params, next), { replace: true }),
-    [params, setParams],
-  )
+  const [query, changeQuery] = useListQuery()
   const [images, setImages] = useState<ImageOut[]>([])
   const [next, setNext] = useState<string | null>(null)
   const [config, setConfig] = useState<ConfigOut | null>(null)
@@ -87,17 +81,34 @@ export default function ImagesPage({
     }
   }, [applyPage, refreshHealth, query])
 
-  // The first load, and every search or chip change after it (the query is in the URL, so a
-  // change re-runs this), obeys the same "newest answer wins" rule as `refresh`. Not
-  // `void refresh()`: react-hooks/set-state-in-effect forbids a setState-wrapping call in an
-  // effect body.
+  // The config is fetched once; `refresh` and the poll keep it fresh after that. A search
+  // does not change it, so the list below does not wait on it.
+  useEffect(() => {
+    let cancelled = false
+    api
+      .config()
+      .then((cfg) => {
+        if (!cancelled) setConfig(cfg)
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(pageError(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // The list the URL names: the first load, and every search or chip change after it (the
+  // query is in the URL, so a change re-runs this), under the same "newest answer wins" rule
+  // as `refresh`. Not `void refresh()`: react-hooks/set-state-in-effect forbids a
+  // setState-wrapping call in an effect body.
   useEffect(() => {
     const mine = ++seq.current
-    Promise.all([api.listImages(toPageQuery(query)), api.config()])
-      .then(([page, cfg]) => {
+    api
+      .listImages(toPageQuery(query))
+      .then((page) => {
         if (mine !== seq.current) return
         applyPage(page)
-        setConfig(cfg)
         setNow(Date.now())
         setError(null)
       })
@@ -206,10 +217,9 @@ export default function ImagesPage({
       <ListFilters query={query} onChange={changeQuery} owner label="Search images" />
       {error && <p className="error">{error}</p>}
       <section className="images">
-        {images.length === 0 && !isFiltered(query) && (
-          <p className="meta">No images yet. Upload a finished JPG to start.</p>
+        {images.length === 0 && !error && (
+          <p className="meta">{isFiltered(query) ? 'No images match.' : 'No images yet. Upload a finished JPG to start.'}</p>
         )}
-        {images.length === 0 && isFiltered(query) && <p className="meta">No images match.</p>}
         {images.map((img) => (
           <ImageCard
             key={img.id}
