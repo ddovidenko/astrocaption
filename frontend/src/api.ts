@@ -229,6 +229,9 @@ export const PAGE_LIMIT = 24
 
 export type ListStatus = 'solving' | 'failed' | 'solved'
 
+/** The longest `q` the server accepts (SPEC § 8); the search box stops there too. */
+export const SEARCH_MAX_LENGTH = 200
+
 export interface PageQuery {
   limit?: number
   before?: string | null

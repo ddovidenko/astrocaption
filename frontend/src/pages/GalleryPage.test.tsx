@@ -162,6 +162,30 @@ describe('GalleryPage', () => {
     }
   })
 
+  it('a search that fails shows the error and no cards from the previous search, with Clear', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.mocked(api.gallery)
+        .mockResolvedValueOnce({ items: [item], next: 'img-1' })
+        .mockRejectedValueOnce(new ApiError(500, 'The server could not answer.'))
+      render(
+        <MemoryRouter>
+          <GalleryPage health={health()} />
+        </MemoryRouter>,
+      )
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(screen.getByRole('link', { name: /Orion/ })).toBeTruthy()
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Search the gallery' }), { target: { value: 'veil' } })
+      await act(async () => { await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS) })
+      expect(screen.getByText('The server could not answer.')).toBeTruthy()
+      expect(screen.queryByRole('link', { name: /Orion/ })).toBeNull()
+      expect(screen.queryByRole('link', { name: 'Show more' })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Clear' })).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('carries the search in the Show more link', async () => {
     vi.mocked(api.gallery).mockResolvedValue({ items: [item], next: 'img-1' })
     render(

@@ -19,7 +19,7 @@ import {
 import { elapsed, exportOf, exportState, relativeTime } from '../exportStatus'
 import ConfirmInline from '../ConfirmInline'
 import ListFilters from './ListFilters'
-import { isFiltered, readListQuery, toPageQuery, writeListQuery, type ListQuery } from './listQuery'
+import { EMPTY_QUERY, isFiltered, readListQuery, toPageQuery, writeListQuery, type ListQuery } from './listQuery'
 import ShowMore from './ShowMore'
 
 const POLL_MS = 3000
@@ -102,9 +102,25 @@ export default function ImagesPage({
         setError(null)
       })
       .catch((err: unknown) => {
-        if (mine === seq.current) setError(pageError(err))
+        if (mine !== seq.current) return
+        // The cards on screen belong to the previous query; leaving them under the error
+        // would let Show more append this query's rows to them.
+        applyPage({ items: [], next: null })
+        setError(pageError(err))
       })
   }, [applyPage, query])
+
+  // A fresh upload is pending and unpublished, so under a chip or a search it would be out
+  // of sight (or the page would say "No images match." right after it landed): the filters
+  // go, and the URL change fetches the whole list; health comes along as a refresh would.
+  const uploaded = useCallback(async () => {
+    if (!isFiltered(query)) {
+      await refresh()
+      return
+    }
+    changeQuery(EMPTY_QUERY)
+    await refreshHealth()
+  }, [query, refresh, changeQuery, refreshHealth])
 
   const showMore = useCallback(async () => {
     if (next === null) return
@@ -183,7 +199,7 @@ export default function ImagesPage({
         </div>
       )}
       <UploadPanel
-        onUploaded={refresh}
+        onUploaded={uploaded}
         maxUploadMb={config?.max_upload_mb ?? null}
         chunkMb={config?.upload_chunk_mb ?? null}
       />

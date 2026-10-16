@@ -8,7 +8,7 @@ import { SEARCH_DEBOUNCE_MS } from './ListFilters'
 
 vi.mock('../api', async (importOriginal) => {
   const real = await importOriginal<typeof import('../api')>()
-  return { ...real, api: { ...real.api, listImages: vi.fn(), config: vi.fn(), image: vi.fn(), setPublished: vi.fn() } }
+  return { ...real, api: { ...real.api, listImages: vi.fn(), config: vi.fn(), image: vi.fn(), setPublished: vi.fn(), upload: vi.fn() } }
 })
 
 beforeEach(() => {
@@ -22,6 +22,7 @@ afterEach(() => {
   vi.mocked(api.config).mockReset()
   vi.mocked(api.image).mockReset()
   vi.mocked(api.setPublished).mockReset()
+  vi.mocked(api.upload).mockReset()
 })
 
 const health: HealthOut = {
@@ -188,6 +189,39 @@ describe('ImagesPage search and filters (#189)', () => {
     await tick(0)
     const calls = vi.mocked(api.listImages).mock.calls
     expect(calls[calls.length - 1]![0]).toEqual({ limit: 24, published: true, before: null })
+  })
+
+  it('a search that fails shows the error and no cards from the previous list', async () => {
+    vi.mocked(api.listImages)
+      .mockResolvedValueOnce({ items: [image('a')], next: 'a' })
+      .mockRejectedValueOnce(new ApiError(500, 'The server could not answer.'))
+    vi.mocked(api.config).mockResolvedValue(config)
+    mountAt('/')
+    await tick(0)
+    expect(titles()).toEqual(['a'])
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search images' }), { target: { value: 'veil' } })
+    await tick(SEARCH_DEBOUNCE_MS)
+    expect(screen.getByText('The server could not answer.')).toBeTruthy()
+    expect(screen.queryAllByRole('heading', { level: 3 })).toEqual([])
+    expect(screen.queryByRole('link', { name: 'Show more' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Clear' })).toBeTruthy()
+  })
+
+  it('an upload clears the search and chips so the new card is in view', async () => {
+    vi.mocked(api.listImages)
+      .mockResolvedValueOnce({ items: [], next: null })
+      .mockResolvedValue({ items: [image('fresh', { solve_status: 'pending' })], next: null })
+    vi.mocked(api.config).mockResolvedValue(config)
+    vi.mocked(api.upload).mockResolvedValue(image('fresh', { solve_status: 'pending' }))
+    mountAt('/?q=orion&status=failed')
+    await tick(0)
+    expect(screen.getByText('No images match.')).toBeTruthy()
+    const panel = screen.getByRole('heading', { name: 'Upload' }).closest('section')!
+    fireEvent.drop(panel, { dataTransfer: { files: [new File(['jpg'], 'fresh.jpg', { type: 'image/jpeg' })] } })
+    await tick(0)
+    expect(screen.getByTestId('url').textContent).toBe('')
+    expect(api.listImages).toHaveBeenLastCalledWith({})
+    expect(titles()).toEqual(['fresh'])
   })
 
   it('Show more carries the filters and appends inside the result set', async () => {

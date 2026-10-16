@@ -38,7 +38,12 @@ export default function GalleryPage({ health }: { health: HealthOut }) {
         setError(null)
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(describeError(err))
+        if (cancelled) return
+        // The cards on screen belong to the previous search; leaving them under the error
+        // would let Show more append this search's rows to them.
+        setItems(null)
+        setNext(null)
+        setError(describeError(err))
       })
     return () => {
       cancelled = true

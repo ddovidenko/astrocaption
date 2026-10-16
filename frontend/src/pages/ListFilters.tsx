@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { SEARCH_MAX_LENGTH } from '../api'
 import { EMPTY_QUERY, isFiltered, type ListQuery, type ListStatus } from './listQuery'
 
 /** How long typing pauses before the search runs and lands in the URL. */
@@ -33,6 +34,12 @@ export default function ListFilters({
   // types, and the query only writes it back when it changed elsewhere (Clear, back button).
   const box = useRef<HTMLInputElement>(null)
   const timer = useRef<number | undefined>(undefined)
+  // The query as of the latest render, for the timer: a chip pressed inside the pause changed
+  // it after the keystroke's closure was made, and the search must land on top of that press.
+  const latest = useRef(query)
+  useEffect(() => {
+    latest.current = query
+  })
   useEffect(() => {
     if (box.current && box.current.value.trim() !== query.q) box.current.value = query.q
   }, [query.q])
@@ -40,7 +47,7 @@ export default function ListFilters({
 
   function typed(value: string) {
     window.clearTimeout(timer.current)
-    timer.current = window.setTimeout(() => onChange({ ...query, q: value.trim() }), SEARCH_DEBOUNCE_MS)
+    timer.current = window.setTimeout(() => onChange({ ...latest.current, q: value.trim() }), SEARCH_DEBOUNCE_MS)
   }
 
   return (
@@ -50,6 +57,7 @@ export default function ListFilters({
         type="search"
         aria-label={label}
         placeholder={label}
+        maxLength={SEARCH_MAX_LENGTH}
         defaultValue={query.q}
         onChange={(e) => typed(e.target.value)}
       />

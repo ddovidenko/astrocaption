@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { SEARCH_MAX_LENGTH } from '../api'
 import ListFilters, { SEARCH_DEBOUNCE_MS } from './ListFilters'
 import { EMPTY_QUERY, type ListQuery } from './listQuery'
 
@@ -53,6 +54,22 @@ describe('ListFilters', () => {
     expect(onChange).toHaveBeenLastCalledWith(EMPTY_QUERY)
     rerender(<ListFilters query={EMPTY_QUERY} onChange={onChange} label="Search images" />)
     expect(box.value).toBe('')
+  })
+
+  it('keeps a chip pressed inside the typing pause: the search lands on the latest query', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(<ListFilters query={EMPTY_QUERY} onChange={onChange} owner label="Search images" />)
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search images' }), { target: { value: 'veil' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Solved' }))
+    expect(onChange).toHaveBeenLastCalledWith({ ...EMPTY_QUERY, status: 'solved' })
+    rerender(<ListFilters query={{ ...EMPTY_QUERY, status: 'solved' }} onChange={onChange} owner label="Search images" />)
+    act(() => vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS))
+    expect(onChange).toHaveBeenLastCalledWith({ q: 'veil', status: 'solved', published: null })
+  })
+
+  it('caps the box at the length the server accepts, so typing alone can never be refused', () => {
+    render(<ListFilters query={EMPTY_QUERY} onChange={() => {}} label="Search images" />)
+    expect(screen.getByRole('searchbox', { name: 'Search images' }).getAttribute('maxlength')).toBe(String(SEARCH_MAX_LENGTH))
   })
 
   it('follows a query changed from outside (back button) without echoing it back', () => {
