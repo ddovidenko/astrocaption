@@ -17,11 +17,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
 from ..config import Settings
-from ..db import PAGE_LIMIT, Database, UnknownCursor
+from ..db import PAGE_LIMIT, Database, ListFilter, UnknownCursor
 from ..models import GalleryItem, ImageRecord, Page
 from ..storage import export_exists, render_dir, slug_of
 from .deps import DbDep, SettingsDep
-from .images import PAGE_GONE, BeforeParam, LimitParam
+from .images import PAGE_GONE, BeforeParam, LimitParam, QParam
 
 log = logging.getLogger(__name__)
 
@@ -73,10 +73,14 @@ def _visible(settings: Settings, db: Database, image_id: str) -> ImageRecord:
 
 @router.get("")
 async def list_gallery(
-    settings: SettingsDep, db: DbDep, limit: LimitParam = PAGE_LIMIT, before: BeforeParam = None
+    settings: SettingsDep,
+    db: DbDep,
+    limit: LimitParam = PAGE_LIMIT,
+    before: BeforeParam = None,
+    q: QParam = "",
 ) -> Page[GalleryItem]:
     try:
-        page = db.list_published_images(limit, before)
+        page = db.list_published_images(limit, before, ListFilter(q=q))
     except UnknownCursor:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, PAGE_GONE) from None
     items: list[GalleryItem] = []

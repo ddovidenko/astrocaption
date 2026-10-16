@@ -1,3 +1,4 @@
+import Chip from '../Chip'
 import { memo, useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { ObjectKind, ObjectOut } from '../api'
@@ -73,15 +74,6 @@ const ObjectRow = memo(function ObjectRow({
     </li>
   )
 })
-
-/** A filter chip: pressed state, never takes the focus (the canvas shortcuts stay alive). */
-function Chip({ pressed, onClick, title, children }: { pressed: boolean; onClick: () => void; title?: string; children: string }) {
-  return (
-    <button type="button" className="chip" aria-pressed={pressed} title={title} onMouseDown={(e) => e.preventDefault()} onClick={onClick}>
-      {children}
-    </button>
-  )
-}
 
 /** Search, kind chips and one row per object (design § 5). The checkbox does exactly what a click
  *  on the canvas marker does — `toggleWithPlacement`, so a label enabled here is placed by the

@@ -12,8 +12,9 @@ import logging
 import sqlite3
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, ValidationError
 
@@ -44,6 +45,80 @@ class ImagePage(NamedTuple):
     items: list[ImageRecord]
     #: The id to pass as ``before`` for the next page, or None when this is the last one.
     next: str | None
+
+
+ListStatus = Literal["solving", "failed", "solved"]
+"""The owner's status chip: ``solving`` is every row the Images page polls (pending too)."""
+
+
+@dataclass(frozen=True)
+class ListFilter:
+    """What narrows a paged list (SPEC § 8). An empty ``q`` and None filters mean "everything";
+    the gallery takes only ``q`` and ignores the owner's two."""
+
+    q: str = ""
+    status: ListStatus | None = None
+    published: bool | None = None
+
+
+#: The whole list, unfiltered (the frozen dataclass makes one shared instance safe).
+NO_FILTER = ListFilter()
+
+
+def fold(text: str) -> str:
+    """The search form of a title, a catalogue name or a query: case-folded (Unicode, not
+    SQLite's ASCII ``LOWER``) with every whitespace run removed, so "m27", "M 27" and "M  27"
+    are the same string. Registered on every connection as the SQL function ``fold``."""
+    return "".join(text.casefold().split())
+
+
+def fold_names(catalog_names_json: str) -> str:
+    """``fold`` of every name in an ``objects.catalog_names`` cell, newline-separated so a
+    query cannot bridge two names. Registered as the SQL function ``fold_names``. A cell that
+    is not a JSON list (never written by this code) folds to nothing rather than failing the
+    whole query."""
+    try:
+        names = json.loads(catalog_names_json)
+    except ValueError:
+        return ""
+    if not isinstance(names, list):
+        return ""
+    return "\n".join(fold(n) for n in names if isinstance(n, str))
+
+
+#: The rows a solve is still running on: what the worker resumes and the owner polls.
+_BUSY_STATUSES = (SolveStatus.PENDING.value, SolveStatus.SOLVING.value)
+
+#: One of these per `ListFilter.status`, over `images.solve_status`.
+_STATUS_CONDITIONS: dict[ListStatus, tuple[str, tuple[object, ...]]] = {
+    "solving": ("solve_status IN (?, ?)", _BUSY_STATUSES),
+    "failed": ("solve_status = ?", (SolveStatus.FAILED.value,)),
+    "solved": ("solve_status = ?", (SolveStatus.SOLVED.value,)),
+}
+
+_SEARCH_CONDITION = (
+    "(instr(fold(title), ?) > 0 OR EXISTS ("
+    "SELECT 1 FROM objects o WHERE o.image_id = images.id"
+    " AND instr(fold_names(o.catalog_names), ?) > 0))"
+)
+
+
+def _filter_conditions(filter: ListFilter) -> tuple[list[str], list[object]]:
+    """The WHERE fragments and their parameters for `filter`, in a fixed order."""
+    conds: list[str] = []
+    values: list[object] = []
+    needle = fold(filter.q)
+    if needle:
+        conds.append(_SEARCH_CONDITION)
+        values.extend((needle, needle))
+    if filter.status is not None:
+        cond, params = _STATUS_CONDITIONS[filter.status]
+        conds.append(cond)
+        values.extend(params)
+    if filter.published is not None:
+        conds.append("published = ?")
+        values.append(1 if filter.published else 0)
+    return conds, values
 
 
 SCHEMA_VERSION = 7
@@ -313,6 +388,11 @@ class Database:
         conn = sqlite3.connect(self.path, timeout=30, isolation_level=None)
         try:
             conn.row_factory = sqlite3.Row
+            # The search's normaliser runs in Python so a Cyrillic title case-folds too and
+            # a space in "M 27" never matters; `instr` rather than LIKE, so a "%" in the
+            # query is a "%".
+            conn.create_function("fold", 1, fold, deterministic=True)
+            conn.create_function("fold_names", 1, fold_names, deterministic=True)
             conn.execute("PRAGMA foreign_keys = ON")
             yield conn
         finally:
@@ -366,7 +446,7 @@ class Database:
         return _row_to_image(row) if row else None
 
     def _list_images(
-        self, limit: int, before: str | None, where: str = "", params: tuple[object, ...] = ()
+        self, limit: int, before: str | None, conds: list[str], values: list[object]
     ) -> ImagePage:
         # "Newest first" is insertion order: rowid, not created_at. created_at is a wall-clock
         # stamp with whole-second resolution, so rows a moment apart tie there, and a host whose
@@ -376,8 +456,6 @@ class Database:
         # order (SPEC § 8): the page after `before` is everything inserted before that row, so an
         # upload or a delete elsewhere never shifts it. One row more than asked tells whether a
         # page follows.
-        conds = [where] if where else []
-        values: list[object] = list(params)
         with self.connect() as conn:
             if before is not None:
                 cursor = conn.execute("SELECT rowid FROM images WHERE id = ?", (before,)).fetchone()
@@ -393,22 +471,31 @@ class Database:
         items = [_row_to_image(r) for r in rows[:limit]]
         return ImagePage(items, items[-1].id if len(rows) > limit else None)
 
-    def list_images(self, limit: int = PAGE_LIMIT, before: str | None = None) -> ImagePage:
-        return self._list_images(limit, before)
+    def list_images(
+        self, limit: int = PAGE_LIMIT, before: str | None = None, filter: ListFilter = NO_FILTER
+    ) -> ImagePage:
+        conds, values = _filter_conditions(filter)
+        return self._list_images(limit, before, conds, values)
 
     def list_published_images(
-        self, limit: int = PAGE_LIMIT, before: str | None = None
+        self, limit: int = PAGE_LIMIT, before: str | None = None, filter: ListFilter = NO_FILTER
     ) -> ImagePage:
-        """The gallery's rows: published and currently solved, newest first (SPEC § 5.5)."""
+        """The gallery's rows: published and currently solved, newest first (SPEC § 5.5), then
+        whatever `filter` narrows further. Which filters are public is the gallery endpoint's
+        business (it declares only the public ones); here an owner field can only narrow."""
+        conds, values = _filter_conditions(filter)
         return self._list_images(
-            limit, before, "published = 1 AND solve_status = ?", (SolveStatus.SOLVED.value,)
+            limit,
+            before,
+            ["published = 1", "solve_status = ?", *conds],
+            [SolveStatus.SOLVED.value, *values],
         )
 
     def images_needing_solve(self) -> list[ImageRecord]:
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM images WHERE solve_status IN (?, ?) ORDER BY created_at",
-                (SolveStatus.PENDING.value, SolveStatus.SOLVING.value),
+                _BUSY_STATUSES,
             ).fetchall()
         return [_row_to_image(r) for r in rows]
 

@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError, type ConfigOut, type HealthOut, type ImageOut } from '../api'
 import ImagesPage from './ImagesPage'
+import { SEARCH_DEBOUNCE_MS } from './ListFilters'
+import Url from './testUrl'
 
 vi.mock('../api', async (importOriginal) => {
   const real = await importOriginal<typeof import('../api')>()
-  return { ...real, api: { ...real.api, listImages: vi.fn(), config: vi.fn(), image: vi.fn() } }
+  return { ...real, api: { ...real.api, listImages: vi.fn(), config: vi.fn(), image: vi.fn(), setPublished: vi.fn(), upload: vi.fn() } }
 })
 
 beforeEach(() => {
@@ -20,6 +22,8 @@ afterEach(() => {
   vi.mocked(api.listImages).mockReset()
   vi.mocked(api.config).mockReset()
   vi.mocked(api.image).mockReset()
+  vi.mocked(api.setPublished).mockReset()
+  vi.mocked(api.upload).mockReset()
 })
 
 const health: HealthOut = {
@@ -89,6 +93,15 @@ function mount() {
   )
 }
 
+function mountAt(path: string) {
+  render(
+    <MemoryRouter initialEntries={[path]}>
+      <ImagesPage health={health} refreshHealth={vi.fn(async () => health)} />
+      <Url />
+    </MemoryRouter>,
+  )
+}
+
 /** The titles of the cards on screen, in order. */
 const titles = () => screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)
 
@@ -131,5 +144,170 @@ describe('ImagesPage poll while a solve runs (#188)', () => {
     expect(api.image).toHaveBeenCalledWith('a')
     expect(api.listImages).toHaveBeenCalledTimes(2)
     expect(titles()).toEqual(['b'])
+  })
+})
+
+describe('ImagesPage search and filters (#189)', () => {
+  it('fetches the list the URL names and shows the no-match sentence', async () => {
+    vi.mocked(api.listImages).mockResolvedValue({ items: [], next: null })
+    vi.mocked(api.config).mockResolvedValue(config)
+    mountAt('/?q=veil&status=failed&published=true')
+    await tick(0)
+    expect(api.listImages).toHaveBeenCalledWith({ q: 'veil', status: 'failed', published: true })
+    expect(screen.getByText('No images match.')).toBeTruthy()
+    expect(screen.queryByText(/No images yet/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Failed' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Published' }).getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('a chip rewrites the URL at once and a typed search after a pause, both from the top', async () => {
+    vi.mocked(api.listImages).mockResolvedValue({ items: [image('a')], next: null })
+    vi.mocked(api.config).mockResolvedValue(config)
+    mountAt('/?before=old-cursor')
+    await tick(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Solved' }))
+    await tick(0)
+    expect(screen.getByTestId('url').textContent).toBe('?status=solved')
+    expect(api.listImages).toHaveBeenLastCalledWith({ status: 'solved' })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search images' }), { target: { value: 'm 27' } })
+    await tick(SEARCH_DEBOUNCE_MS)
+    expect(screen.getByTestId('url').textContent).toBe('?q=m+27&status=solved')
+    expect(api.listImages).toHaveBeenLastCalledWith({ q: 'm 27', status: 'solved' })
+  })
+
+  it('a chip pressed inside the typing pause survives the search landing', async () => {
+    vi.mocked(api.listImages).mockResolvedValue({ items: [image('a')], next: null })
+    vi.mocked(api.config).mockResolvedValue(config)
+    mountAt('/')
+    await tick(0)
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search images' }), { target: { value: 'veil' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Solved' }))
+    await tick(0)
+    expect(screen.getByTestId('url').textContent).toBe('?status=solved')
+    await tick(SEARCH_DEBOUNCE_MS)
+    expect(screen.getByTestId('url').textContent).toBe('?q=veil&status=solved')
+    expect(api.listImages).toHaveBeenLastCalledWith({ q: 'veil', status: 'solved' })
+  })
+
+  it('a refresh after a card action re-queries with the current filters', async () => {
+    vi.mocked(api.listImages).mockResolvedValue({ items: [image('a', { published: true })], next: null })
+    vi.mocked(api.config).mockResolvedValue(config)
+    vi.mocked(api.setPublished).mockResolvedValue(image('a', { published: false }))
+    mountAt('/?published=true')
+    await tick(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Unpublish' }))
+    await tick(0)
+    const calls = vi.mocked(api.listImages).mock.calls
+    expect(calls[calls.length - 1]![0]).toEqual({ limit: 24, published: true, before: null })
+  })
+
+  it('a search that fails shows the error and no cards from the previous list', async () => {
+    vi.mocked(api.listImages)
+      .mockResolvedValueOnce({ items: [image('a')], next: 'a' })
+      .mockRejectedValueOnce(new ApiError(500, 'The server could not answer.'))
+    vi.mocked(api.config).mockResolvedValue(config)
+    mountAt('/')
+    await tick(0)
+    expect(titles()).toEqual(['a'])
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search images' }), { target: { value: 'veil' } })
+    await tick(SEARCH_DEBOUNCE_MS)
+    expect(screen.getByText('The server could not answer.')).toBeTruthy()
+    expect(screen.queryAllByRole('heading', { level: 3 })).toEqual([])
+    expect(screen.queryByRole('link', { name: 'Show more' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Clear' })).toBeTruthy()
+  })
+
+  it('an upload clears the search and chips so the new card is in view', async () => {
+    vi.mocked(api.listImages)
+      .mockResolvedValueOnce({ items: [], next: null })
+      .mockResolvedValue({ items: [image('fresh', { solve_status: 'pending' })], next: null })
+    vi.mocked(api.config).mockResolvedValue(config)
+    vi.mocked(api.upload).mockResolvedValue(image('fresh', { solve_status: 'pending' }))
+    mountAt('/?q=orion&status=failed')
+    await tick(0)
+    expect(screen.getByText('No images match.')).toBeTruthy()
+    const panel = screen.getByRole('heading', { name: 'Upload' }).closest('section')!
+    fireEvent.drop(panel, { dataTransfer: { files: [new File(['jpg'], 'fresh.jpg', { type: 'image/jpeg' })] } })
+    await tick(0)
+    expect(screen.getByTestId('url').textContent).toBe('')
+    expect(api.listImages).toHaveBeenLastCalledWith({})
+    expect(titles()).toEqual(['fresh'])
+  })
+
+  it('a card action that finishes after the search moved on refreshes the new search', async () => {
+    vi.mocked(api.listImages).mockResolvedValue({ items: [image('a', { published: true })], next: null })
+    vi.mocked(api.config).mockResolvedValue(config)
+    let finish: (img: ImageOut) => void = () => {}
+    vi.mocked(api.setPublished).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    mountAt('/')
+    await tick(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Unpublish' }))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search images' }), { target: { value: 'veil' } })
+    await tick(SEARCH_DEBOUNCE_MS)
+    expect(screen.getByTestId('url').textContent).toBe('?q=veil')
+    await act(async () => { finish(image('a', { published: false })) })
+    await tick(0)
+    // The refresh the action triggers must list what the URL says now, not what it said
+    // when the button was pressed: otherwise the whole library sits under "?q=veil" and the
+    // next Show more appends veil rows to it.
+    const calls = vi.mocked(api.listImages).mock.calls
+    expect(calls[calls.length - 1]![0]).toEqual({ limit: 24, q: 'veil', before: null })
+  })
+
+  it('an upload that finishes after a search began still clears it', async () => {
+    vi.mocked(api.listImages)
+      .mockResolvedValueOnce({ items: [], next: null })
+      .mockResolvedValueOnce({ items: [], next: null })
+      .mockResolvedValue({ items: [image('fresh', { solve_status: 'pending' })], next: null })
+    vi.mocked(api.config).mockResolvedValue(config)
+    let finish: (img: ImageOut) => void = () => {}
+    vi.mocked(api.upload).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    mountAt('/')
+    await tick(0)
+    const panel = screen.getByRole('heading', { name: 'Upload' }).closest('section')!
+    fireEvent.drop(panel, { dataTransfer: { files: [new File(['jpg'], 'fresh.jpg', { type: 'image/jpeg' })] } })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search images' }), { target: { value: 'm31' } })
+    await tick(SEARCH_DEBOUNCE_MS)
+    expect(screen.getByTestId('url').textContent).toBe('?q=m31')
+    await act(async () => { finish(image('fresh', { solve_status: 'pending' })) })
+    await tick(0)
+    expect(screen.getByTestId('url').textContent).toBe('')
+    expect(titles()).toEqual(['fresh'])
+  })
+
+  it('an upload that finishes after the owner cleared the filters still shows the new card', async () => {
+    vi.mocked(api.listImages)
+      .mockResolvedValueOnce({ items: [], next: null })
+      .mockResolvedValueOnce({ items: [], next: null })
+      .mockResolvedValue({ items: [image('fresh', { solve_status: 'pending' })], next: null })
+    vi.mocked(api.config).mockResolvedValue(config)
+    let finish: (img: ImageOut) => void = () => {}
+    vi.mocked(api.upload).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    mountAt('/?q=orion')
+    await tick(0)
+    const panel = screen.getByRole('heading', { name: 'Upload' }).closest('section')!
+    fireEvent.drop(panel, { dataTransfer: { files: [new File(['jpg'], 'fresh.jpg', { type: 'image/jpeg' })] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    await tick(0)
+    expect(screen.getByTestId('url').textContent).toBe('')
+    await act(async () => { finish(image('fresh', { solve_status: 'pending' })) })
+    await tick(0)
+    // Clearing an already clear URL changes nothing, so the page must refresh instead.
+    expect(titles()).toEqual(['fresh'])
+  })
+
+  it('Show more carries the filters and appends inside the result set', async () => {
+    vi.mocked(api.listImages)
+      .mockResolvedValueOnce({ items: [image('a')], next: 'a' })
+      .mockResolvedValueOnce({ items: [image('b')], next: null })
+    vi.mocked(api.config).mockResolvedValue(config)
+    mountAt('/?q=orion')
+    await tick(0)
+    const more = screen.getByRole('link', { name: 'Show more' })
+    expect(more.getAttribute('href')).toBe('?q=orion&before=a')
+    fireEvent.click(more)
+    await tick(0)
+    expect(api.listImages).toHaveBeenLastCalledWith({ q: 'orion', before: 'a' })
+    expect(titles()).toEqual(['a', 'b'])
   })
 })

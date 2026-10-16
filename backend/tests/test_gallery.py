@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.db import Database
 from app.models import SolveStatus
-from tests.conftest import upload, wait_for_status
+from tests.conftest import list_ids, upload, wait_for_status
 
 PUBLISH_NEEDS_EXPORT = "Export the image before publishing it."
 NOT_FOUND = "Image not found."
@@ -140,6 +140,26 @@ def test_gallery_is_paged_and_a_skipped_row_still_moves_the_cursor(
     second = anon_client.get("/api/gallery", params={"limit": 2, "before": first["next"]}).json()
     assert ([i["id"] for i in second["items"]], second["next"]) == ([oldest["id"]], None)
     assert anon_client.get("/api/gallery", params={"before": "nope"}).status_code == 422
+
+
+def test_gallery_search_finds_a_title_or_an_object_name_and_ignores_owner_filters(
+    client: TestClient, anon_client: TestClient, sample_jpeg: Path
+) -> None:
+    published = published_image(client, sample_jpeg)  # title "Orion Field", Orion fixture objects
+    unpublished = exported_image(client, sample_jpeg)
+
+    def ids(**params: object) -> list[str]:
+        return list_ids(anon_client, "/api/gallery", **params)
+
+    assert ids(q="orion field") == [published["id"]]
+    assert ids(q="ngc1976") == [published["id"]]  # an object name, space-insensitively
+    assert ids(q="m 42") == [published["id"]]
+    assert ids(q="pleiades") == []
+    # The owner's chips are not public: they are accepted and ignored, never widening the list.
+    assert ids(published="false") == [published["id"]]
+    assert ids(status="failed") == [published["id"]]
+    assert unpublished["id"] not in ids(q="orion")
+    assert anon_client.get("/api/gallery", params={"q": "x" * 201}).status_code == 422
 
 
 def test_gallery_payloads_never_carry_server_paths(

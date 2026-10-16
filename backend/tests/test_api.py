@@ -34,6 +34,7 @@ from tests.conftest import (
     NOVA_NARROW_FIXTURES,
     TEST_PASSWORD_HASH,
     FakeSolver,
+    list_ids,
     load_fixture,
     login,
     make_client,
@@ -142,6 +143,35 @@ def test_list_images_is_paged(client: TestClient, sample_jpeg: Path) -> None:
     assert resp.json() == {"detail": "That page is no longer available; reload the list."}
     assert client.get("/api/images", params={"limit": 0}).status_code == 422
     assert client.get("/api/images", params={"limit": 101}).status_code == 422
+
+
+def test_list_images_search_and_filters(client: TestClient, sample_jpeg: Path) -> None:
+    veil = upload(client, sample_jpeg, title="Veil Nebula wide")["id"]
+    m27 = upload(client, sample_jpeg, title="M27 final")["id"]
+    other = upload(client, sample_jpeg, title="Untitled stack")["id"]
+
+    def ids(**params: object) -> list[str]:
+        return list_ids(client, "/api/images", **params)
+
+    assert ids(q="veil") == [veil]
+    assert ids(q="m 27") == [m27]
+    assert ids(q="  ") == [other, m27, veil]
+    assert ids(q="nothing-here") == []
+    # Every upload is solved by the fake solver, or still on its way: both chips are accepted.
+    assert set(ids(status="solved") + ids(status="solving")) == {veil, m27, other}
+    assert ids(status="failed") == []
+    assert ids(published="true") == []
+    assert ids(published="false") == [other, m27, veil]
+    # Paging works inside the result set.
+    page = client.get("/api/images", params={"q": "l", "limit": 1}).json()
+    assert [i["id"] for i in page["items"]] == [other]
+    assert page["next"] == other
+    rest = client.get("/api/images", params={"q": "l", "limit": 1, "before": page["next"]}).json()
+    assert [i["id"] for i in rest["items"]] == [m27]
+    # Hand-edited parameters are a plain 422, never a 500.
+    assert client.get("/api/images", params={"status": "weird"}).status_code == 422
+    assert client.get("/api/images", params={"published": "maybe"}).status_code == 422
+    assert client.get("/api/images", params={"q": "x" * 201}).status_code == 422
 
 
 def test_preview_file_answers_head_for_the_editor_probe(

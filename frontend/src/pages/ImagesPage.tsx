@@ -18,7 +18,10 @@ import {
 } from '../api'
 import { elapsed, exportOf, exportState, relativeTime } from '../exportStatus'
 import ConfirmInline from '../ConfirmInline'
+import ListFilters from './ListFilters'
+import { EMPTY_QUERY, isFiltered, toPageQuery, type ListQuery } from './listQuery'
 import ShowMore from './ShowMore'
+import { useListQuery } from './useListQuery'
 
 const POLL_MS = 3000
 
@@ -29,6 +32,8 @@ export default function ImagesPage({
   health: HealthOut
   refreshHealth: () => Promise<HealthOut | null>
 }) {
+  // The search and chips live in the URL (SPEC § 5.5): linkable, and a reload keeps them.
+  const [query, changeQuery, currentQuery] = useListQuery()
   const [images, setImages] = useState<ImageOut[]>([])
   const [next, setNext] = useState<string | null>(null)
   const [config, setConfig] = useState<ConfigOut | null>(null)
@@ -57,12 +62,14 @@ export default function ImagesPage({
   }, [])
 
   // One refresh covers all three: a nova key added in config.json, or a config.json that
-  // just broke, must reach the banners as promptly as the image rows do.
+  // just broke, must reach the banners as promptly as the image rows do. It lists the query
+  // the URL names now, not the one of the render that handed it out: a card action or an
+  // upload can finish long after the owner typed a new search.
   const refresh = useCallback(async () => {
     const mine = ++seq.current
     try {
       const [page, cfg] = await Promise.all([
-        listFirst(Math.max(PAGE_LIMIT, shown.current)),
+        listFirst(Math.max(PAGE_LIMIT, shown.current), currentQuery()),
         api.config(),
         refreshHealth(),
       ])
@@ -74,30 +81,66 @@ export default function ImagesPage({
     } catch (err) {
       if (mine === seq.current) setError(pageError(err))
     }
-  }, [applyPage, refreshHealth])
+  }, [applyPage, refreshHealth, currentQuery])
 
-  // The first load obeys the same "newest answer wins" rule as `refresh`. Not `void refresh()`:
-  // react-hooks/set-state-in-effect forbids a setState-wrapping call in an effect body.
+  // The config is fetched once; `refresh` and the poll keep it fresh after that. A search
+  // does not change it, so the list below does not wait on it.
   useEffect(() => {
-    const mine = ++seq.current
-    Promise.all([api.listImages(), api.config()])
-      .then(([page, cfg]) => {
-        if (mine !== seq.current) return
-        applyPage(page)
-        setConfig(cfg)
-        setNow(Date.now())
+    let cancelled = false
+    api
+      .config()
+      .then((cfg) => {
+        if (!cancelled) setConfig(cfg)
       })
       .catch((err: unknown) => {
-        if (mine === seq.current) setError(pageError(err))
+        if (!cancelled) setError(pageError(err))
       })
-  }, [applyPage])
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // The list the URL names: the first load, and every search or chip change after it (the
+  // query is in the URL, so a change re-runs this), under the same "newest answer wins" rule
+  // as `refresh`. Not `void refresh()`: react-hooks/set-state-in-effect forbids a
+  // setState-wrapping call in an effect body.
+  useEffect(() => {
+    const mine = ++seq.current
+    api
+      .listImages(toPageQuery(query))
+      .then((page) => {
+        if (mine !== seq.current) return
+        applyPage(page)
+        setNow(Date.now())
+        setError(null)
+      })
+      .catch((err: unknown) => {
+        if (mine !== seq.current) return
+        // The cards on screen belong to the previous query; leaving them under the error
+        // would let Show more append this query's rows to them.
+        applyPage({ items: [], next: null })
+        setError(pageError(err))
+      })
+  }, [applyPage, query])
+
+  // A fresh upload is pending and unpublished, so under a chip or a search it would be out
+  // of sight (or the page would say "No images match." right after it landed): the filters
+  // go, and the URL change fetches the whole list; health comes along as a refresh would.
+  const uploaded = useCallback(async () => {
+    if (!isFiltered(currentQuery())) {
+      await refresh()
+      return
+    }
+    changeQuery(EMPTY_QUERY)
+    await refreshHealth()
+  }, [currentQuery, refresh, changeQuery, refreshHealth])
 
   const showMore = useCallback(async () => {
     if (next === null) return
     setMore({ busy: true, error: null })
     const mine = ++seq.current
     try {
-      const page = await api.listImages({ before: next })
+      const page = await api.listImages({ ...toPageQuery(query), before: next })
       // A refresh that applied meanwhile rebuilt the list from the top; appending to it could
       // skip or repeat a card, so this page is dropped and the link stays for another tap.
       if (mine !== seq.current) {
@@ -116,7 +159,7 @@ export default function ImagesPage({
       }
       setMore({ busy: false, error: pageError(err) })
     }
-  }, [next, refresh])
+  }, [next, refresh, query])
 
   // The poll re-fetches only the rows a solve is running on and merges each answer in place by
   // id, so a long library (many Show more taps) costs one small request per busy row every
@@ -169,13 +212,16 @@ export default function ImagesPage({
         </div>
       )}
       <UploadPanel
-        onUploaded={refresh}
+        onUploaded={uploaded}
         maxUploadMb={config?.max_upload_mb ?? null}
         chunkMb={config?.upload_chunk_mb ?? null}
       />
+      <ListFilters query={query} onChange={changeQuery} owner label="Search images" />
       {error && <p className="error">{error}</p>}
       <section className="images">
-        {images.length === 0 && <p className="meta">No images yet. Upload a finished JPG to start.</p>}
+        {images.length === 0 && !error && (
+          <p className="meta">{isFiltered(query) ? 'No images match.' : 'No images yet. Upload a finished JPG to start.'}</p>
+        )}
         {images.map((img) => (
           <ImageCard
             key={img.id}
@@ -186,18 +232,22 @@ export default function ImagesPage({
           />
         ))}
       </section>
-      <ShowMore next={next} busy={more.busy} error={more.error} onMore={() => void showMore()} />
+      <ShowMore next={next} busy={more.busy} error={more.error} onMore={() => void showMore()} query={query} />
     </>
   )
 }
 
-/** The first `count` images as one page: pages of at most 100 (the server's cap) joined, so a
- *  refresh keeps every card the owner has shown. */
-async function listFirst(count: number): Promise<Page<ImageOut>> {
+/** The first `count` images of `query` as one page: pages of at most 100 (the server's cap)
+ *  joined, so a refresh keeps every card the owner has shown. */
+async function listFirst(count: number, query: ListQuery): Promise<Page<ImageOut>> {
   const items: ImageOut[] = []
   let before: string | null = null
   do {
-    const page: Page<ImageOut> = await api.listImages({ limit: Math.min(100, count - items.length), before })
+    const page: Page<ImageOut> = await api.listImages({
+      ...toPageQuery(query),
+      limit: Math.min(100, count - items.length),
+      before,
+    })
     items.push(...page.items)
     before = page.next
   } while (before !== null && items.length < count)

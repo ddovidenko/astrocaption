@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from app.config import Settings
-from app.db import SCHEMA_VERSION, Database, UnknownCursor, hash_of
+from app.db import SCHEMA_VERSION, Database, ListFilter, UnknownCursor, fold, fold_names, hash_of
 from app.models import (
     Annotations,
     ImageRecord,
@@ -622,3 +622,123 @@ def test_images_for_catalog_backfill_picks_solved_rows_with_a_wcs_and_a_stale_st
     assert [r.id for r in db.images_for_catalog_backfill("2026-10-13")] == ["stale"]
     db.update_image(stale.id, {"objects_catalog": None})
     assert [r.id for r in db.images_for_catalog_backfill("2026-10-13")] == ["stale"]
+
+
+def test_fold_casefolds_unicode_and_drops_whitespace() -> None:
+    assert fold("  M 27 ") == "m27"
+    assert fold("Туманность Андромеды") == "туманностьандромеды"
+    assert fold("Straße") == "strasse"
+    assert fold("") == ""
+
+
+def test_fold_names_folds_every_name_in_the_json_array() -> None:
+    names = fold_names('["NGC 6960", "C 34", "Veil Nebula"]')
+    assert "ngc6960" in names
+    assert "veilnebula" in names
+    # Names are separated, so a query cannot bridge two of them.
+    assert "c34veil" not in names
+
+
+def _with_objects(
+    db: Database, image_id: str, created: str, names: list[list[str]], published: bool = False
+) -> None:
+    db.insert_image(_plain_image(image_id, created, published))
+    db.replace_objects(
+        image_id,
+        [
+            SolveObject(id=i, catalog_names=n, type="ngc", x=1.0, y=1.0, radius=1)
+            for i, n in enumerate(names, start=1)
+        ],
+    )
+
+
+def _ids(db: Database, **filter: object) -> list[str]:
+    return [r.id for r in db.list_images(filter=ListFilter(**filter)).items]  # type: ignore[arg-type]
+
+
+def test_list_images_q_matches_title_primary_name_and_alias(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    _with_objects(db, "veil", "2026-09-01T00:00:00Z", [["NGC 6960", "C 34", "Veil Nebula"]])
+    _with_objects(db, "m27", "2026-09-02T00:00:00Z", [["NGC 6853", "M 27", "Dumbbell Nebula"]])
+    db.insert_image(_plain_image("M31_stacked_final", "2026-09-03T00:00:00Z"))
+    assert _ids(db, q="veil") == ["veil"]
+    assert _ids(db, q="NGC6960") == ["veil"]
+    assert _ids(db, q="ngc 6960") == ["veil"]
+    assert _ids(db, q="c 34") == ["veil"]
+    assert _ids(db, q="m27") == ["m27"]
+    assert _ids(db, q="dumbbell") == ["m27"]
+    assert _ids(db, q="m31") == ["M31_stacked_final"]
+    assert _ids(db, q="nebula") == ["m27", "veil"]  # newest first, both by an object name
+    assert _ids(db, q="andromeda") == []
+
+
+def test_list_images_blank_q_is_no_filter(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    db.insert_image(_plain_image("a", "2026-09-01T00:00:00Z"))
+    db.insert_image(_plain_image("b", "2026-09-02T00:00:00Z"))
+    assert [r.id for r in db.list_images(filter=ListFilter(q="   ")).items] == ["b", "a"]
+    assert [r.id for r in db.list_images().items] == ["b", "a"]
+
+
+def test_list_images_q_treats_like_wildcards_literally(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    db.insert_image(_plain_image("M_27", "2026-09-01T00:00:00Z"))
+    db.insert_image(_plain_image("M 27", "2026-09-02T00:00:00Z"))
+    db.insert_image(_plain_image("100%", "2026-09-03T00:00:00Z"))
+    assert [r.id for r in db.list_images(filter=ListFilter(q="M_27")).items] == ["M_27"]
+    assert [r.id for r in db.list_images(filter=ListFilter(q="%")).items] == ["100%"]
+
+
+def test_list_images_q_pages_inside_the_result_set(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    for n in range(5):
+        db.insert_image(_plain_image(f"orion-{n}", f"2026-09-0{n + 1}T00:00:00Z"))
+        db.insert_image(_plain_image(f"other-{n}", f"2026-09-0{n + 1}T12:00:00Z"))
+    first = db.list_images(2, None, ListFilter(q="orion"))
+    assert [r.id for r in first.items] == ["orion-4", "orion-3"]
+    assert first.next == "orion-3"
+    second = db.list_images(2, first.next, ListFilter(q="orion"))
+    assert [r.id for r in second.items] == ["orion-2", "orion-1"]
+    third = db.list_images(2, second.next, ListFilter(q="orion"))
+    assert ([r.id for r in third.items], third.next) == (["orion-0"], None)
+
+
+def test_list_images_status_and_published_filters(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    rows = [
+        ("pending", SolveStatus.PENDING, False),
+        ("solving", SolveStatus.SOLVING, False),
+        ("failed", SolveStatus.FAILED, True),
+        ("solved-pub", SolveStatus.SOLVED, True),
+        ("solved-unpub", SolveStatus.SOLVED, False),
+    ]
+    for n, (image_id, status, published) in enumerate(rows):
+        rec = _plain_image(image_id, f"2026-09-0{n + 1}T00:00:00Z", published)
+        db.insert_image(rec.model_copy(update={"solve_status": status}))
+    assert _ids(db, status="solving") == ["solving", "pending"]
+    assert _ids(db, status="failed") == ["failed"]
+    assert _ids(db, status="solved") == ["solved-unpub", "solved-pub"]
+    assert _ids(db, published=True) == ["solved-pub", "failed"]
+    assert _ids(db, published=False) == ["solved-unpub", "solving", "pending"]
+    assert _ids(db, status="solved", published=True) == ["solved-pub"]
+    assert _ids(db, status="solved", published=True, q="unpub") == []
+
+
+def test_list_published_images_searches_and_an_owner_field_can_only_narrow(
+    tmp_path: Path,
+) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    _with_objects(db, "veil-unpub", "2026-09-01T00:00:00Z", [["NGC 6960", "Veil Nebula"]])
+    _with_objects(db, "veil-pub", "2026-09-02T00:00:00Z", [["NGC 6992", "Eastern Veil"]], True)
+    db.insert_image(_plain_image("m27-pub", "2026-09-03T00:00:00Z", published=True))
+    gallery = db.list_published_images(filter=ListFilter(q="veil"))
+    assert [r.id for r in gallery.items] == ["veil-pub"]
+    # The gallery's own conditions are ANDed first, so an owner field never widens the list.
+    narrowed = db.list_published_images(filter=ListFilter(q="veil", published=False))
+    assert narrowed.items == []
