@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError, type HealthOut } from '../api'
+import { api, ApiError, type GalleryItem, type HealthOut } from '../api'
 import { galleryItem as item } from './galleryTestItem'
 import GalleryImagePage from './GalleryImagePage'
 import GalleryPage from './GalleryPage'
+import { SEARCH_DEBOUNCE_MS } from './ListFilters'
 
 vi.mock('../api', async (importOriginal) => {
   const real = await importOriginal<typeof import('../api')>()
@@ -17,6 +18,11 @@ afterEach(() => {
   vi.mocked(api.gallery).mockReset()
   vi.mocked(api.galleryImage).mockReset()
 })
+
+/** Echoes the current URL search into the DOM, so a test can see what the page wrote. */
+function Url() {
+  return <output data-testid="url">{useLocation().search}</output>
+}
 
 const health = (over: Partial<HealthOut> = {}): HealthOut => ({
   status: 'ok',
@@ -113,6 +119,82 @@ describe('GalleryPage', () => {
       </MemoryRouter>,
     )
     expect(await screen.findByText('Nothing published yet.')).toBeTruthy()
+  })
+
+  it('searches from the URL and shows the no-match sentence with a way out', async () => {
+    vi.mocked(api.gallery).mockResolvedValue({ items: [], next: null })
+    render(
+      <MemoryRouter initialEntries={['/gallery?q=veil']}>
+        <GalleryPage health={health()} />
+      </MemoryRouter>,
+    )
+    expect(await screen.findByText('Nothing matches.')).toBeTruthy()
+    expect(api.gallery).toHaveBeenCalledWith({ q: 'veil', before: null })
+    expect((screen.getByRole('searchbox', { name: 'Search the gallery' }) as HTMLInputElement).value).toBe('veil')
+    expect(screen.getByRole('button', { name: 'Clear' })).toBeTruthy()
+    expect(screen.queryByText('Nothing published yet.')).toBeNull()
+  })
+
+  it('writes a typed search into the URL after a pause and fetches the first page of it', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.mocked(api.gallery)
+        .mockResolvedValueOnce({ items: [item], next: 'img-1' })
+        .mockResolvedValueOnce({ items: [{ ...item, id: 'img-3', title: 'Andromeda' }], next: null })
+      render(
+        <MemoryRouter initialEntries={['/gallery?before=img-7']}>
+          <GalleryPage health={health()} />
+          <Url />
+        </MemoryRouter>,
+      )
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(screen.getByRole('link', { name: /Orion/ })).toBeTruthy()
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Search the gallery' }), { target: { value: 'andromeda' } })
+      expect(api.gallery).toHaveBeenCalledTimes(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS) })
+      // The cursor is gone from the URL: the search starts from the top of its own result set.
+      expect(screen.getByTestId('url').textContent).toBe('?q=andromeda')
+      expect(api.gallery).toHaveBeenLastCalledWith({ q: 'andromeda', before: null })
+      expect(screen.getByRole('link', { name: /Andromeda/ })).toBeTruthy()
+      expect(screen.queryByRole('link', { name: /Orion/ })).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('carries the search in the Show more link', async () => {
+    vi.mocked(api.gallery).mockResolvedValue({ items: [item], next: 'img-1' })
+    render(
+      <MemoryRouter initialEntries={['/gallery?q=orion']}>
+        <GalleryPage health={health()} />
+      </MemoryRouter>,
+    )
+    const more = await screen.findByRole('link', { name: 'Show more' })
+    expect(more.getAttribute('href')).toBe('?q=orion&before=img-1')
+    fireEvent.click(more)
+    expect(api.gallery).toHaveBeenLastCalledWith({ q: 'orion', before: 'img-1' })
+  })
+
+  it('drops the answer of a search the visitor has already moved on from', async () => {
+    let answerSlow: (page: { items: GalleryItem[]; next: null }) => void = () => {}
+    vi.mocked(api.gallery)
+      .mockImplementationOnce(() => new Promise((resolve) => { answerSlow = resolve }))
+      .mockResolvedValueOnce({ items: [{ ...item, id: 'img-3', title: 'Andromeda' }], next: null })
+    const { rerender } = render(
+      <MemoryRouter key="slow" initialEntries={['/gallery?q=slow']}>
+        <GalleryPage health={health()} />
+      </MemoryRouter>,
+    )
+    // The URL moves on (a second search) before the first answers. A new `key` remounts the
+    // router: `initialEntries` is read once, so a plain rerender would keep the old URL.
+    rerender(
+      <MemoryRouter key="andromeda" initialEntries={['/gallery?q=andromeda']}>
+        <GalleryPage health={health()} />
+      </MemoryRouter>,
+    )
+    expect(await screen.findByRole('link', { name: /Andromeda/ })).toBeTruthy()
+    await act(async () => { answerSlow({ items: [item], next: null }) })
+    expect(screen.queryByRole('link', { name: /Orion/ })).toBeNull()
   })
 
   it('shows a plain sentence, not the gallery, when switched off', () => {
