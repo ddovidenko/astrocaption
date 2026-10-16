@@ -35,6 +35,23 @@ test('publish, gallery hover, full view download, unpublish', async ({ page, bro
       await expect(overlay).toHaveAttribute('src', /\/api\/gallery\/.*\/files\/annotated-preview\?v=/)
       await expect.poll(() => overlay.evaluate((e: HTMLImageElement) => e.naturalWidth)).toBeGreaterThan(0)
 
+      // Search (SPEC § 5.5): an object name finds the card space-insensitively, the query lands
+      // in the URL, nonsense says so, and the URL alone reproduces the result.
+      const search = pub.getByRole('searchbox', { name: 'Search the gallery' })
+      await search.fill('ngc1976')
+      await expect(pub).toHaveURL(/\?q=ngc1976$/)
+      await expect(galleryCard).toBeVisible()
+      await search.fill('zzqq')
+      await expect(pub.getByText('Nothing matches.')).toBeVisible()
+      await pub.getByRole('button', { name: 'Clear' }).click()
+      await expect(pub).toHaveURL(/\/$/)
+      await expect(galleryCard).toBeVisible()
+      await pub.goto('/gallery?q=orion%20nebula')
+      await expect(pub.locator('.gallery-card', { hasText: 'Orion' })).toBeVisible()
+      await expect(pub.getByRole('searchbox', { name: 'Search the gallery' })).toHaveValue('orion nebula')
+      await pub.goto('/')
+      await expect(galleryCard).toBeVisible()
+
       await galleryCard.click()
       await expect(pub).toHaveURL(new RegExp(`/gallery/${image!.id}$`))
       const download = pub.getByRole('link', { name: /^Download annotated image/ })
