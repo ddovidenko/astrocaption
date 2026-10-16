@@ -11,6 +11,10 @@
   font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 * { box-sizing: border-box; }
+/* Reserve the vertical scrollbar's width so a list that stops overflowing (an empty search)
+   does not shift the centred column. The editor fills the viewport and never scrolls. */
+html { scrollbar-gutter: stable; }
+html:has(> body > #root > main.editor-main) { scrollbar-gutter: auto; }
 body { margin: 0; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
 #root { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 header { display: flex; align-items: baseline; gap: 1rem; padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); }

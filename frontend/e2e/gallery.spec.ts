@@ -41,8 +41,12 @@ test('publish, gallery hover, full view download, unpublish', async ({ page, bro
       await search.fill('ngc1976')
       await expect(pub).toHaveURL(/\?q=ngc1976$/)
       await expect(galleryCard).toBeVisible()
+      // The column must not move when the result set stops overflowing and the vertical
+      // scrollbar goes away. Headless Chromium hides scrollbars, so pin the mechanism: the root
+      // reserves the gutter whether or not the page scrolls.
       await search.fill('zzqq')
       await expect(pub.getByText('Nothing matches.')).toBeVisible()
+      expect(await pub.evaluate(() => getComputedStyle(document.documentElement).scrollbarGutter)).toBe('stable')
       await pub.getByRole('button', { name: 'Clear' }).click()
       await expect(pub).toHaveURL(/\/$/)
       await expect(galleryCard).toBeVisible()
