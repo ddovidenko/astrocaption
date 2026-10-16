@@ -227,16 +227,25 @@ export interface Page<T> {
 /** Rows per page unless asked otherwise; the server clamps `limit` to 1..100. */
 export const PAGE_LIMIT = 24
 
+export type ListStatus = 'solving' | 'failed' | 'solved'
+
 export interface PageQuery {
   limit?: number
   before?: string | null
+  /** The search box (SPEC § 8): title or any object name, case- and space-insensitive. */
+  q?: string
+  status?: ListStatus
+  published?: boolean
 }
 
-function paged(path: string, { limit, before }: PageQuery): string {
-  const q = new URLSearchParams()
-  if (limit !== undefined) q.set('limit', String(limit))
-  if (before) q.set('before', before)
-  const query = q.toString()
+function paged(path: string, { limit, before, q, status, published }: PageQuery): string {
+  const params = new URLSearchParams()
+  if (limit !== undefined) params.set('limit', String(limit))
+  if (q) params.set('q', q)
+  if (status) params.set('status', status)
+  if (published !== undefined) params.set('published', String(published))
+  if (before) params.set('before', before)
+  const query = params.toString()
   return query ? `${path}?${query}` : path
 }
 
