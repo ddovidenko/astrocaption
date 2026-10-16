@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router'
 import {
   ApiError,
   PAGE_LIMIT,
@@ -18,6 +18,8 @@ import {
 } from '../api'
 import { elapsed, exportOf, exportState, relativeTime } from '../exportStatus'
 import ConfirmInline from '../ConfirmInline'
+import ListFilters from './ListFilters'
+import { isFiltered, readListQuery, toPageQuery, writeListQuery, type ListQuery } from './listQuery'
 import ShowMore from './ShowMore'
 
 const POLL_MS = 3000
@@ -29,6 +31,15 @@ export default function ImagesPage({
   health: HealthOut
   refreshHealth: () => Promise<HealthOut | null>
 }) {
+  // The search and chips live in the URL (SPEC § 5.5): linkable, and a reload keeps them.
+  // Round-tripped through one string so `query`'s identity changes only when the query does.
+  const [params, setParams] = useSearchParams()
+  const queryKey = JSON.stringify(readListQuery(params))
+  const query = useMemo(() => JSON.parse(queryKey) as ListQuery, [queryKey])
+  const changeQuery = useCallback(
+    (next: ListQuery) => setParams(writeListQuery(params, next), { replace: true }),
+    [params, setParams],
+  )
   const [images, setImages] = useState<ImageOut[]>([])
   const [next, setNext] = useState<string | null>(null)
   const [config, setConfig] = useState<ConfigOut | null>(null)
@@ -62,7 +73,7 @@ export default function ImagesPage({
     const mine = ++seq.current
     try {
       const [page, cfg] = await Promise.all([
-        listFirst(Math.max(PAGE_LIMIT, shown.current)),
+        listFirst(Math.max(PAGE_LIMIT, shown.current), query),
         api.config(),
         refreshHealth(),
       ])
@@ -74,30 +85,33 @@ export default function ImagesPage({
     } catch (err) {
       if (mine === seq.current) setError(pageError(err))
     }
-  }, [applyPage, refreshHealth])
+  }, [applyPage, refreshHealth, query])
 
-  // The first load obeys the same "newest answer wins" rule as `refresh`. Not `void refresh()`:
-  // react-hooks/set-state-in-effect forbids a setState-wrapping call in an effect body.
+  // The first load, and every search or chip change after it (the query is in the URL, so a
+  // change re-runs this), obeys the same "newest answer wins" rule as `refresh`. Not
+  // `void refresh()`: react-hooks/set-state-in-effect forbids a setState-wrapping call in an
+  // effect body.
   useEffect(() => {
     const mine = ++seq.current
-    Promise.all([api.listImages(), api.config()])
+    Promise.all([api.listImages(toPageQuery(query)), api.config()])
       .then(([page, cfg]) => {
         if (mine !== seq.current) return
         applyPage(page)
         setConfig(cfg)
         setNow(Date.now())
+        setError(null)
       })
       .catch((err: unknown) => {
         if (mine === seq.current) setError(pageError(err))
       })
-  }, [applyPage])
+  }, [applyPage, query])
 
   const showMore = useCallback(async () => {
     if (next === null) return
     setMore({ busy: true, error: null })
     const mine = ++seq.current
     try {
-      const page = await api.listImages({ before: next })
+      const page = await api.listImages({ ...toPageQuery(query), before: next })
       // A refresh that applied meanwhile rebuilt the list from the top; appending to it could
       // skip or repeat a card, so this page is dropped and the link stays for another tap.
       if (mine !== seq.current) {
@@ -116,7 +130,7 @@ export default function ImagesPage({
       }
       setMore({ busy: false, error: pageError(err) })
     }
-  }, [next, refresh])
+  }, [next, refresh, query])
 
   // The poll re-fetches only the rows a solve is running on and merges each answer in place by
   // id, so a long library (many Show more taps) costs one small request per busy row every
@@ -173,9 +187,13 @@ export default function ImagesPage({
         maxUploadMb={config?.max_upload_mb ?? null}
         chunkMb={config?.upload_chunk_mb ?? null}
       />
+      <ListFilters query={query} onChange={changeQuery} owner label="Search images" />
       {error && <p className="error">{error}</p>}
       <section className="images">
-        {images.length === 0 && <p className="meta">No images yet. Upload a finished JPG to start.</p>}
+        {images.length === 0 && !isFiltered(query) && (
+          <p className="meta">No images yet. Upload a finished JPG to start.</p>
+        )}
+        {images.length === 0 && isFiltered(query) && <p className="meta">No images match.</p>}
         {images.map((img) => (
           <ImageCard
             key={img.id}
@@ -186,18 +204,22 @@ export default function ImagesPage({
           />
         ))}
       </section>
-      <ShowMore next={next} busy={more.busy} error={more.error} onMore={() => void showMore()} />
+      <ShowMore next={next} busy={more.busy} error={more.error} onMore={() => void showMore()} query={query} />
     </>
   )
 }
 
-/** The first `count` images as one page: pages of at most 100 (the server's cap) joined, so a
- *  refresh keeps every card the owner has shown. */
-async function listFirst(count: number): Promise<Page<ImageOut>> {
+/** The first `count` images of `query` as one page: pages of at most 100 (the server's cap)
+ *  joined, so a refresh keeps every card the owner has shown. */
+async function listFirst(count: number, query: ListQuery): Promise<Page<ImageOut>> {
   const items: ImageOut[] = []
   let before: string | null = null
   do {
-    const page: Page<ImageOut> = await api.listImages({ limit: Math.min(100, count - items.length), before })
+    const page: Page<ImageOut> = await api.listImages({
+      ...toPageQuery(query),
+      limit: Math.min(100, count - items.length),
+      before,
+    })
     items.push(...page.items)
     before = page.next
   } while (before !== null && items.length < count)
