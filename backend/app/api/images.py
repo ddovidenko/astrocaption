@@ -17,7 +17,7 @@ from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ..config import Settings, SettingsSource
-from ..db import PAGE_LIMIT, Database, UnknownCursor, hash_of
+from ..db import PAGE_LIMIT, Database, ListFilter, ListStatus, UnknownCursor, hash_of
 from ..fonts import list_fonts, resolved_style
 from ..layout import autoplace, default_style
 from ..models import (
@@ -334,14 +334,27 @@ PAGE_GONE = "That page is no longer available; reload the list."
 
 LimitParam = Annotated[int, Query(ge=1, le=100)]
 BeforeParam = Annotated[str | None, Query(min_length=1)]
+#: The search box (SPEC § 8): title or any object name, case- and space-insensitive.
+QParam = Annotated[str | None, Query(max_length=200)]
+#: `status` on the wire; `status_filter` in the handler, where `status` is fastapi's module.
+StatusParam = Annotated[ListStatus | None, Query(alias="status")]
+PublishedParam = Annotated[bool | None, Query()]
 
 
 @router.get("")
 async def list_images(
-    settings: SettingsDep, db: DbDep, limit: LimitParam = PAGE_LIMIT, before: BeforeParam = None
+    settings: SettingsDep,
+    db: DbDep,
+    limit: LimitParam = PAGE_LIMIT,
+    before: BeforeParam = None,
+    q: QParam = None,
+    status_filter: StatusParam = None,
+    published: PublishedParam = None,
 ) -> Page[ImageOut]:
     try:
-        page = db.list_images(limit, before)
+        page = db.list_images(
+            limit, before, ListFilter(q=q or "", status=status_filter, published=published)
+        )
     except UnknownCursor:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, PAGE_GONE) from None
     counts = db.object_counts()
