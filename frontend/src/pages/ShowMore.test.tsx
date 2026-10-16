@@ -30,6 +30,13 @@ describe('ShowMore', () => {
     expect(screen.getByRole('link', { name: 'Show more' })).toBeTruthy()
   })
 
+  it('keeps the search and filters in the link so a followed page stays in the result set', () => {
+    render(
+      <ShowMore next="img-9" busy={false} error={null} onMore={() => {}} query={{ q: 'm 27', status: 'solved', published: null }} />,
+    )
+    expect(screen.getByRole('link', { name: 'Show more' }).getAttribute('href')).toBe('?q=m%2027&status=solved&before=img-9')
+  })
+
   it('renders nothing on the last page', () => {
     const { container } = render(<ShowMore next={null} busy={false} error={null} onMore={() => {}} />)
     expect(container.innerHTML).toBe('')
