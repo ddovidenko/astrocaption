@@ -33,7 +33,7 @@ export default function ImagesPage({
   refreshHealth: () => Promise<HealthOut | null>
 }) {
   // The search and chips live in the URL (SPEC § 5.5): linkable, and a reload keeps them.
-  const [query, changeQuery] = useListQuery()
+  const [query, changeQuery, currentQuery] = useListQuery()
   const [images, setImages] = useState<ImageOut[]>([])
   const [next, setNext] = useState<string | null>(null)
   const [config, setConfig] = useState<ConfigOut | null>(null)
@@ -62,12 +62,14 @@ export default function ImagesPage({
   }, [])
 
   // One refresh covers all three: a nova key added in config.json, or a config.json that
-  // just broke, must reach the banners as promptly as the image rows do.
+  // just broke, must reach the banners as promptly as the image rows do. It lists the query
+  // the URL names now, not the one of the render that handed it out: a card action or an
+  // upload can finish long after the owner typed a new search.
   const refresh = useCallback(async () => {
     const mine = ++seq.current
     try {
       const [page, cfg] = await Promise.all([
-        listFirst(Math.max(PAGE_LIMIT, shown.current), query),
+        listFirst(Math.max(PAGE_LIMIT, shown.current), currentQuery()),
         api.config(),
         refreshHealth(),
       ])
@@ -79,7 +81,7 @@ export default function ImagesPage({
     } catch (err) {
       if (mine === seq.current) setError(pageError(err))
     }
-  }, [applyPage, refreshHealth, query])
+  }, [applyPage, refreshHealth, currentQuery])
 
   // The config is fetched once; `refresh` and the poll keep it fresh after that. A search
   // does not change it, so the list below does not wait on it.
@@ -125,13 +127,13 @@ export default function ImagesPage({
   // of sight (or the page would say "No images match." right after it landed): the filters
   // go, and the URL change fetches the whole list; health comes along as a refresh would.
   const uploaded = useCallback(async () => {
-    if (!isFiltered(query)) {
+    if (!isFiltered(currentQuery())) {
       await refresh()
       return
     }
     changeQuery(EMPTY_QUERY)
     await refreshHealth()
-  }, [query, refresh, changeQuery, refreshHealth])
+  }, [currentQuery, refresh, changeQuery, refreshHealth])
 
   const showMore = useCallback(async () => {
     if (next === null) return

@@ -195,6 +195,61 @@ describe('GalleryPage', () => {
     expect(api.gallery).toHaveBeenLastCalledWith({ q: 'orion', before: 'img-1' })
   })
 
+  it('drops a Show more page that lands after the visitor searched for something else', async () => {
+    vi.useFakeTimers()
+    try {
+      let answerMore: (page: { items: GalleryItem[]; next: string | null }) => void = () => {}
+      vi.mocked(api.gallery)
+        .mockResolvedValueOnce({ items: [item], next: 'img-1' })
+        .mockImplementationOnce(() => new Promise((resolve) => { answerMore = resolve }))
+        .mockResolvedValueOnce({ items: [{ ...item, id: 'img-3', title: 'Andromeda' }], next: null })
+      render(
+        <MemoryRouter initialEntries={['/gallery']}>
+          <GalleryPage health={health()} />
+        </MemoryRouter>,
+      )
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      fireEvent.click(screen.getByRole('link', { name: 'Show more' }))
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Search the gallery' }), { target: { value: 'andromeda' } })
+      await act(async () => { await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS) })
+      expect(screen.getByRole('link', { name: /Andromeda/ })).toBeTruthy()
+      await act(async () => { answerMore({ items: [{ ...item, id: 'img-2', title: 'Pleiades' }], next: null }) })
+      expect(screen.queryByRole('link', { name: /Pleiades/ })).toBeNull()
+      expect(screen.getByRole('link', { name: /Andromeda/ })).toBeTruthy()
+      expect(screen.queryByRole('link', { name: 'Show more' })).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('drops a Show more restart that lands after the visitor searched for something else', async () => {
+    vi.useFakeTimers()
+    try {
+      let answerRestart: (page: { items: GalleryItem[]; next: string | null }) => void = () => {}
+      vi.mocked(api.gallery)
+        .mockResolvedValueOnce({ items: [item], next: 'img-1' })
+        .mockRejectedValueOnce(new ApiError(422, 'The page is gone.'))
+        .mockImplementationOnce(() => new Promise((resolve) => { answerRestart = resolve }))
+        .mockResolvedValueOnce({ items: [{ ...item, id: 'img-3', title: 'Andromeda' }], next: null })
+      render(
+        <MemoryRouter initialEntries={['/gallery']}>
+          <GalleryPage health={health()} />
+        </MemoryRouter>,
+      )
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      fireEvent.click(screen.getByRole('link', { name: 'Show more' }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Search the gallery' }), { target: { value: 'andromeda' } })
+      await act(async () => { await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS) })
+      expect(screen.getByRole('link', { name: /Andromeda/ })).toBeTruthy()
+      await act(async () => { answerRestart({ items: [item], next: null }) })
+      expect(screen.queryByRole('link', { name: /Orion/ })).toBeNull()
+      expect(screen.getByRole('link', { name: /Andromeda/ })).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('drops the answer of a search the visitor has already moved on from', async () => {
     let answerSlow: (page: { items: GalleryItem[]; next: null }) => void = () => {}
     vi.mocked(api.gallery)

@@ -234,6 +234,68 @@ describe('ImagesPage search and filters (#189)', () => {
     expect(titles()).toEqual(['fresh'])
   })
 
+  it('a card action that finishes after the search moved on refreshes the new search', async () => {
+    vi.mocked(api.listImages).mockResolvedValue({ items: [image('a', { published: true })], next: null })
+    vi.mocked(api.config).mockResolvedValue(config)
+    let finish: (img: ImageOut) => void = () => {}
+    vi.mocked(api.setPublished).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    mountAt('/')
+    await tick(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Unpublish' }))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search images' }), { target: { value: 'veil' } })
+    await tick(SEARCH_DEBOUNCE_MS)
+    expect(screen.getByTestId('url').textContent).toBe('?q=veil')
+    await act(async () => { finish(image('a', { published: false })) })
+    await tick(0)
+    // The refresh the action triggers must list what the URL says now, not what it said
+    // when the button was pressed: otherwise the whole library sits under "?q=veil" and the
+    // next Show more appends veil rows to it.
+    const calls = vi.mocked(api.listImages).mock.calls
+    expect(calls[calls.length - 1]![0]).toEqual({ limit: 24, q: 'veil', before: null })
+  })
+
+  it('an upload that finishes after a search began still clears it', async () => {
+    vi.mocked(api.listImages)
+      .mockResolvedValueOnce({ items: [], next: null })
+      .mockResolvedValueOnce({ items: [], next: null })
+      .mockResolvedValue({ items: [image('fresh', { solve_status: 'pending' })], next: null })
+    vi.mocked(api.config).mockResolvedValue(config)
+    let finish: (img: ImageOut) => void = () => {}
+    vi.mocked(api.upload).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    mountAt('/')
+    await tick(0)
+    const panel = screen.getByRole('heading', { name: 'Upload' }).closest('section')!
+    fireEvent.drop(panel, { dataTransfer: { files: [new File(['jpg'], 'fresh.jpg', { type: 'image/jpeg' })] } })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search images' }), { target: { value: 'm31' } })
+    await tick(SEARCH_DEBOUNCE_MS)
+    expect(screen.getByTestId('url').textContent).toBe('?q=m31')
+    await act(async () => { finish(image('fresh', { solve_status: 'pending' })) })
+    await tick(0)
+    expect(screen.getByTestId('url').textContent).toBe('')
+    expect(titles()).toEqual(['fresh'])
+  })
+
+  it('an upload that finishes after the owner cleared the filters still shows the new card', async () => {
+    vi.mocked(api.listImages)
+      .mockResolvedValueOnce({ items: [], next: null })
+      .mockResolvedValueOnce({ items: [], next: null })
+      .mockResolvedValue({ items: [image('fresh', { solve_status: 'pending' })], next: null })
+    vi.mocked(api.config).mockResolvedValue(config)
+    let finish: (img: ImageOut) => void = () => {}
+    vi.mocked(api.upload).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    mountAt('/?q=orion')
+    await tick(0)
+    const panel = screen.getByRole('heading', { name: 'Upload' }).closest('section')!
+    fireEvent.drop(panel, { dataTransfer: { files: [new File(['jpg'], 'fresh.jpg', { type: 'image/jpeg' })] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    await tick(0)
+    expect(screen.getByTestId('url').textContent).toBe('')
+    await act(async () => { finish(image('fresh', { solve_status: 'pending' })) })
+    await tick(0)
+    // Clearing an already clear URL changes nothing, so the page must refresh instead.
+    expect(titles()).toEqual(['fresh'])
+  })
+
   it('Show more carries the filters and appends inside the result set', async () => {
     vi.mocked(api.listImages)
       .mockResolvedValueOnce({ items: [image('a')], next: 'a' })

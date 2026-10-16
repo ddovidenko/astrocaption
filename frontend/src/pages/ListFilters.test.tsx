@@ -57,6 +57,19 @@ describe('ListFilters', () => {
     expect(box.value).toBe('')
   })
 
+  it('Clear inside the typing pause drops the pending search and empties the box', () => {
+    const onChange = vi.fn()
+    const query: ListQuery = { q: '', status: 'solved', published: null }
+    render(<ListFilters query={query} onChange={onChange} owner label="Search images" />)
+    const box = screen.getByRole('searchbox', { name: 'Search images' }) as HTMLInputElement
+    fireEvent.change(box, { target: { value: 'm3' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    expect(box.value).toBe('')
+    act(() => vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS))
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith(EMPTY_QUERY)
+  })
+
   it('caps the box at the length the server accepts, so typing alone can never be refused', () => {
     render(<ListFilters query={EMPTY_QUERY} onChange={() => {}} label="Search images" />)
     expect(screen.getByRole('searchbox', { name: 'Search images' }).getAttribute('maxlength')).toBe(String(SEARCH_MAX_LENGTH))

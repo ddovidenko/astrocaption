@@ -16,7 +16,7 @@ export default function GalleryPage({ health }: { health: HealthOut }) {
   const enabled = health.public_gallery_enabled
   const [params] = useSearchParams()
   const start = params.get('before')
-  const [query, changeQuery] = useListQuery()
+  const [query, changeQuery, currentQuery] = useListQuery()
   const [items, setItems] = useState<GalleryItem[] | null>(null)
   const [next, setNext] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -51,8 +51,15 @@ export default function GalleryPage({ health }: { health: HealthOut }) {
   const showMore = useCallback(async () => {
     if (next === null) return
     setMore({ busy: true, error: null })
+    // The URL moved on (a new search) while this page was in flight: the effect owns the list
+    // now, and this page belongs to the old search. Dropped, and the link stays for another tap.
+    const movedOn = () => currentQuery() !== query
     try {
       const result = await api.gallery(page(next))
+      if (movedOn()) {
+        setMore({ busy: false, error: null })
+        return
+      }
       setItems((shown) => [...(shown ?? []), ...result.items])
       setNext(result.next)
       setMore({ busy: false, error: null })
@@ -64,6 +71,10 @@ export default function GalleryPage({ health }: { health: HealthOut }) {
           .gallery(page(start))
           .catch(() => (start ? api.gallery(page(null)) : null))
           .catch(() => null)
+        if (movedOn()) {
+          setMore({ busy: false, error: null })
+          return
+        }
         if (result) {
           setItems(result.items)
           setNext(result.next)
@@ -73,7 +84,7 @@ export default function GalleryPage({ health }: { health: HealthOut }) {
       }
       setMore({ busy: false, error: describeError(err) })
     }
-  }, [next, start, page])
+  }, [next, start, page, query, currentQuery])
 
   if (!enabled) {
     return (

@@ -40,6 +40,14 @@ export default function ListFilters({
     timer.current = window.setTimeout(() => onChange({ q: value.trim() }), SEARCH_DEBOUNCE_MS)
   }
 
+  // Text typed inside the pause has not reached the query yet, so the box effect above would
+  // not empty it, and the timer would put it back onto the cleared URL.
+  function clear() {
+    window.clearTimeout(timer.current)
+    if (box.current) box.current.value = ''
+    onChange(EMPTY_QUERY)
+  }
+
   return (
     <div className="list-filters" role="search">
       <input
@@ -74,7 +82,7 @@ export default function ListFilters({
         </>
       )}
       {isFiltered(query) && (
-        <button type="button" className="secondary" onClick={() => onChange(EMPTY_QUERY)}>
+        <button type="button" className="secondary" onClick={clear}>
           Clear
         </button>
       )}
