@@ -60,14 +60,15 @@ one function used by both `list_images` and `list_published_images`; the gallery
 The search condition is
 
 ```sql
-(REPLACE(LOWER(title), ' ', '') LIKE ? ESCAPE '\'
+(instr(fold(title), ?) > 0
  OR EXISTS (SELECT 1 FROM objects o WHERE o.image_id = images.id
-            AND REPLACE(LOWER(o.catalog_names), ' ', '') LIKE ? ESCAPE '\'))
+            AND instr(fold_names(o.catalog_names), ?) > 0))
 ```
 
-with the pattern `%<normalised q>%` built by one helper (`normalise_query`) that lowercases,
-strips whitespace and escapes `\`, `%` and `_`. `catalog_names` is the stored JSON array
-string; a substring match over it is exactly "any name contains".
+where `fold` (Unicode case-fold, whitespace removed) and `fold_names` (`fold` of every name in
+the JSON cell, newline-separated) are Python functions registered on every connection, and the
+parameter is `fold(q)`. `instr`, not `LIKE`: a `%` or `_` in the query is literal, and
+`str.casefold` handles a Cyrillic title where SQLite's `LOWER` would not.
 
 Object counts and annotation hashes for the owner page stay library-wide fetches in this PR.
 No `count` of matches in the response: nothing displays it and it would be a second query.
