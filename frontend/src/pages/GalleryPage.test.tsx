@@ -250,6 +250,21 @@ describe('GalleryPage', () => {
     }
   })
 
+  it('kind and dates reach the API from the URL, and a chosen day drops the cursor', async () => {
+    vi.mocked(api.gallery).mockResolvedValue({ items: [item], next: null })
+    render(
+      <MemoryRouter initialEntries={['/gallery?kind=nebula&before=img-7']}>
+        <GalleryPage health={health()} />
+        <Url />
+      </MemoryRouter>,
+    )
+    expect(await screen.findByRole('link', { name: /Orion/ })).toBeTruthy()
+    expect(api.gallery).toHaveBeenCalledWith({ kind: 'nebula', before: 'img-7' })
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-10-31' } })
+    expect(await screen.findByText('?kind=nebula&until=2026-10-31')).toBeTruthy()
+    expect(api.gallery).toHaveBeenLastCalledWith({ kind: 'nebula', until: '2026-10-31', before: null })
+  })
+
   it('drops the answer of a search the visitor has already moved on from', async () => {
     let answerSlow: (page: { items: GalleryItem[]; next: null }) => void = () => {}
     vi.mocked(api.gallery)

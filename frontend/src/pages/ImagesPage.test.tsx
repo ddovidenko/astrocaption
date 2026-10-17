@@ -296,6 +296,21 @@ describe('ImagesPage search and filters (#189)', () => {
     expect(titles()).toEqual(['fresh'])
   })
 
+  it('kind and dates reach the API from the URL and ride on the Show more link', async () => {
+    vi.mocked(api.listImages).mockResolvedValue({ items: [image('a')], next: 'a' })
+    vi.mocked(api.config).mockResolvedValue(config)
+    mountAt('/?kind=nebula&since=2026-10-01&until=2026-10-31')
+    await tick(0)
+    expect(api.listImages).toHaveBeenCalledWith({ kind: 'nebula', since: '2026-10-01', until: '2026-10-31' })
+    expect(screen.getByRole('button', { name: 'Nebulae' }).getAttribute('aria-pressed')).toBe('true')
+    expect((screen.getByLabelText('From') as HTMLInputElement).value).toBe('2026-10-01')
+    expect(screen.getByRole('link', { name: 'Show more' }).getAttribute('href')).toBe('?kind=nebula&since=2026-10-01&until=2026-10-31&before=a')
+    fireEvent.click(screen.getByRole('button', { name: 'Galaxies' }))
+    await tick(0)
+    expect(screen.getByTestId('url').textContent).toBe('?kind=galaxy&since=2026-10-01&until=2026-10-31')
+    expect(api.listImages).toHaveBeenLastCalledWith({ kind: 'galaxy', since: '2026-10-01', until: '2026-10-31' })
+  })
+
   it('Show more carries the filters and appends inside the result set', async () => {
     vi.mocked(api.listImages)
       .mockResolvedValueOnce({ items: [image('a')], next: 'a' })
