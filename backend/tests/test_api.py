@@ -965,3 +965,30 @@ def test_objects_endpoint_reports_the_stored_kind(
             "UPDATE objects SET kind = 'cluster' WHERE image_id = ? AND id = 1", (image_id,)
         )
     assert client.get(f"/api/images/{image_id}/objects").json()[0]["kind"] == "cluster"
+
+
+def test_list_images_filters_by_kind_and_upload_day(client: TestClient, sample_jpeg: Path) -> None:
+    image_id = upload(client, sample_jpeg)["id"]
+    assert wait_for_status(client, image_id, {"solved", "failed"})["solve_status"] == "solved"
+    created = client.get(f"/api/images/{image_id}").json()["created_at"][:10]  # the UTC day
+
+    def ids(**params: object) -> list[str]:
+        return list_ids(client, "/api/images", **params)
+
+    assert ids(kind="nebula") == [image_id]  # M 42
+    assert ids(kind="star") == [image_id]  # nova's bright rows
+    assert ids(kind="galaxy") == [image_id]  # NGC 1924 and a PGC row from the local catalogue
+    assert ids(kind="cluster") == []
+    assert ids(since=created, until=created) == [image_id]
+    assert ids(until="2000-01-01") == []
+    assert ids(since="2999-01-01") == []
+    assert ids(kind="nebula", q="orion", since=created) == [image_id]
+    for bad in (
+        {"kind": "stars"},
+        {"since": "yesterday"},
+        {"until": "2026-13-01"},
+        {"since": "16/10/2026"},
+    ):
+        resp = client.get("/api/images", params=bad)
+        assert resp.status_code == 422, bad
+        assert "Traceback" not in resp.text and "/home/" not in resp.text

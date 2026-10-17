@@ -262,3 +262,21 @@ def test_gallery_is_404_everywhere_when_switched_off(
         ):
             resp = client.get(url)
             assert resp.status_code == 404 and resp.json() == {"detail": NOT_FOUND}, url
+
+
+def test_gallery_filters_by_kind_and_upload_day(
+    client: TestClient, anon_client: TestClient, sample_jpeg: Path
+) -> None:
+    published = published_image(client, sample_jpeg)
+    exported_image(client, sample_jpeg)  # unpublished: never listed, whatever the filter
+    created = published["created_at"][:10]
+
+    def ids(**params: object) -> list[str]:
+        return list_ids(anon_client, "/api/gallery", **params)
+
+    assert ids(kind="nebula") == [published["id"]]
+    assert ids(kind="cluster") == []  # the Orion field has nebulae, stars and two galaxies
+    assert ids(since=created, until=created) == [published["id"]]
+    assert ids(until="2000-01-01") == []
+    assert anon_client.get("/api/gallery", params={"kind": "planet"}).status_code == 422
+    assert anon_client.get("/api/gallery", params={"since": "soon"}).status_code == 422

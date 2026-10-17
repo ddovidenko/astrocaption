@@ -6,7 +6,7 @@ import os
 import uuid
 from collections import Counter
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, BinaryIO, Literal
 from urllib.parse import quote
@@ -29,6 +29,7 @@ from ..models import (
     ImageOut,
     ImageRecord,
     NamePreference,
+    ObjectKind,
     ObjectOut,
     Page,
     PublishRequest,
@@ -339,6 +340,9 @@ QParam = Annotated[str, Query(max_length=200)]
 #: `status` on the wire; `status_filter` in the handler, where `status` is fastapi's module.
 StatusParam = Annotated[ListStatus | None, Query(alias="status")]
 PublishedParam = Annotated[bool | None, Query()]
+#: Public filters (SPEC § 8): an object kind stored at insert, and upload days in UTC.
+KindParam = Annotated[ObjectKind | None, Query()]
+DateParam = Annotated[date | None, Query()]
 
 
 @router.get("")
@@ -350,10 +354,17 @@ async def list_images(
     q: QParam = "",
     status_filter: StatusParam = None,
     published: PublishedParam = None,
+    kind: KindParam = None,
+    since: DateParam = None,
+    until: DateParam = None,
 ) -> Page[ImageOut]:
     try:
         page = db.list_images(
-            limit, before, ListFilter(q=q, status=status_filter, published=published)
+            limit,
+            before,
+            ListFilter(
+                q=q, status=status_filter, published=published, kind=kind, since=since, until=until
+            ),
         )
     except UnknownCursor:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, PAGE_GONE) from None

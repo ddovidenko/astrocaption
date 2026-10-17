@@ -21,7 +21,7 @@ from ..db import PAGE_LIMIT, Database, ListFilter, UnknownCursor
 from ..models import GalleryItem, ImageRecord, Page
 from ..storage import export_exists, render_dir, slug_of
 from .deps import DbDep, SettingsDep
-from .images import PAGE_GONE, BeforeParam, LimitParam, QParam
+from .images import PAGE_GONE, BeforeParam, DateParam, KindParam, LimitParam, QParam
 
 log = logging.getLogger(__name__)
 
@@ -78,9 +78,14 @@ async def list_gallery(
     limit: LimitParam = PAGE_LIMIT,
     before: BeforeParam = None,
     q: QParam = "",
+    kind: KindParam = None,
+    since: DateParam = None,
+    until: DateParam = None,
 ) -> Page[GalleryItem]:
     try:
-        page = db.list_published_images(limit, before, ListFilter(q=q))
+        page = db.list_published_images(
+            limit, before, ListFilter(q=q, kind=kind, since=since, until=until)
+        )
     except UnknownCursor:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, PAGE_GONE) from None
     items: list[GalleryItem] = []
