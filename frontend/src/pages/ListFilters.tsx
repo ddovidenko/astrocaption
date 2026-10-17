@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { SEARCH_MAX_LENGTH } from '../api'
 import Chip from '../Chip'
+import { KIND_LABELS, KINDS } from '../editor/objectsFilter'
 import { EMPTY_QUERY, isFiltered, STATUS_LABELS, type ListQuery } from './listQuery'
 
 /** How long typing pauses before the search runs and lands in the URL. */
@@ -12,9 +13,10 @@ const PUBLISHED_LABELS: readonly [boolean, string][] = [
 ]
 
 /** The search box and filter chips above a list (SPEC § 5.5). The page owns the query (it
- *  lives in the URL); this only reports patches: the box's text after a short pause, a chip
- *  at once, Clear as the empty query. Within a group one chip is pressed at most, and pressing
- *  it again clears it. The owner's page gets the status and visibility groups; the gallery none. */
+ *  lives in the URL); this only reports patches: the box's text after a short pause, a chip or
+ *  a date at once, Clear as the empty query. Within a group one chip is pressed at most, and
+ *  pressing it again clears it. Everyone gets the kind chips and the upload-day range; the
+ *  owner's page adds the status and visibility groups. */
 export default function ListFilters({
   query,
   onChange,
@@ -28,11 +30,21 @@ export default function ListFilters({
 }) {
   // Uncontrolled, as the Objects tab's box is (#90): the DOM owns the text while the owner
   // types, and the query only writes it back when it changed elsewhere (Clear, back button).
+  // The date inputs follow the same rule: a half-typed date reads as '' and must not be
+  // overwritten by a controlled re-render mid-entry.
   const box = useRef<HTMLInputElement>(null)
+  const since = useRef<HTMLInputElement>(null)
+  const until = useRef<HTMLInputElement>(null)
   const timer = useRef<number | undefined>(undefined)
   useEffect(() => {
     if (box.current && box.current.value.trim() !== query.q) box.current.value = query.q
   }, [query.q])
+  useEffect(() => {
+    if (since.current && since.current.value !== (query.since ?? '')) since.current.value = query.since ?? ''
+  }, [query.since])
+  useEffect(() => {
+    if (until.current && until.current.value !== (query.until ?? '')) until.current.value = query.until ?? ''
+  }, [query.until])
   useEffect(() => () => window.clearTimeout(timer.current), [])
 
   function typed(value: string) {
@@ -81,6 +93,21 @@ export default function ListFilters({
           </div>
         </>
       )}
+      <div className="chips" role="group" aria-label="Object kind">
+        {KINDS.map((kind) => (
+          <Chip key={kind} pressed={query.kind === kind} onClick={() => onChange({ kind: query.kind === kind ? null : kind })}>
+            {KIND_LABELS[kind]}
+          </Chip>
+        ))}
+      </div>
+      <span className="date-range">
+        <label>
+          From <input ref={since} type="date" defaultValue={query.since ?? ''} onChange={(e) => onChange({ since: e.target.value || null })} />
+        </label>
+        <label>
+          To <input ref={until} type="date" defaultValue={query.until ?? ''} onChange={(e) => onChange({ until: e.target.value || null })} />
+        </label>
+      </span>
       {isFiltered(query) && (
         <button type="button" className="secondary" onClick={clear}>
           Clear
