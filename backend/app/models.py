@@ -65,6 +65,9 @@ class SolveObject(BaseModel):
     x: float
     y: float
     radius: float = 0.0
+    #: The Objects-tab bucket. None until stored: ``Database`` classifies at insert (schema 8)
+    #: and reads it back, so the editor's chips and the list's kind filter share one answer.
+    kind: ObjectKind | None = None
 
     def primary_name_for(self, preference: NamePreference = "popular") -> str:
         return primary_name(self.catalog_names, preference)
@@ -85,8 +88,8 @@ class SolveObject(BaseModel):
 
 
 ObjectKind = Literal["galaxy", "nebula", "cluster", "star", "other"]
-"""Objects-tab bucket, computed at read time from OpenNGC's type (see ``app.catalog.kind_for``)
-and nova's object type."""
+"""Objects-tab bucket, stored per object at insert (``objects.kind``, schema 8) from OpenNGC's
+type (see ``app.catalog.kind_for``) and nova's object type."""
 
 NamePreference = Literal["popular", "ngc_ic"]
 """Which catalogue designation becomes the label's primary line.
@@ -545,7 +548,7 @@ class ObjectOut(BaseModel):
     catalog_names: list[str]
     primary_name: str
     type: str
-    #: Objects-tab bucket, computed at read time: nova's ``bright``/``hd`` rows are ``star``, rows
+    #: The stored Objects-tab bucket (schema 8): nova's ``bright``/``hd`` rows are ``star``, rows
     #: OpenNGC classifies take its kind, everything else is ``other``.
     kind: ObjectKind
     x: float

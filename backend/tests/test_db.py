@@ -29,6 +29,7 @@ def test_migration_from_v1_adds_hints_column(tmp_path: Path) -> None:
         conn.execute("ALTER TABLE images DROP COLUMN solve_failure")
         conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
         conn.execute("ALTER TABLE images DROP COLUMN objects_catalog")  # added by 6
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")  # added by 8
         conn.execute("PRAGMA user_version = 1")
     db.init()
     with db.connect() as conn:
@@ -47,6 +48,7 @@ def test_migration_from_v2_adds_the_failure_kind_column(tmp_path: Path) -> None:
         conn.execute("ALTER TABLE images DROP COLUMN solve_failure")
         conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
         conn.execute("ALTER TABLE images DROP COLUMN objects_catalog")  # added by 6
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")  # added by 8
         conn.execute("PRAGMA user_version = 2")
     db.init()
     with db.connect() as conn:
@@ -64,6 +66,7 @@ def test_migration_from_v3_adds_the_exported_hash_column(tmp_path: Path) -> None
     with db.connect() as conn:  # rewind to the version-3 shape
         conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
         conn.execute("ALTER TABLE images DROP COLUMN objects_catalog")  # added by 6
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")  # added by 8
         conn.execute("PRAGMA user_version = 3")
     db.init()
     with db.connect() as conn:
@@ -83,6 +86,7 @@ def test_migration_from_v4_swaps_the_exported_version_column_for_the_hash(tmp_pa
         conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
         conn.execute("ALTER TABLE images ADD COLUMN exported_version INTEGER")
         conn.execute("ALTER TABLE images DROP COLUMN objects_catalog")  # added by 6
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")  # added by 8
         conn.execute("PRAGMA user_version = 4")
     db.init()
     with db.connect() as conn:
@@ -143,6 +147,7 @@ def test_migration_from_v6_keeps_a_current_export_current(settings: Settings) ->
                 " objects_catalog = '2026-10-13' WHERE id = ?",
                 (value, image_id),
             )
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")  # added by 8
         conn.execute("PRAGMA user_version = 6")
     db.init()
     cur, old = db.get_image("cur"), db.get_image("old")
@@ -588,6 +593,7 @@ def test_migration_from_v5_adds_the_objects_catalog_stamp(tmp_path: Path) -> Non
     db.init()
     with db.connect() as conn:  # rewind to the version-5 shape
         conn.execute("ALTER TABLE images DROP COLUMN objects_catalog")
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")  # added by 8
         conn.execute("PRAGMA user_version = 5")
     db.init()
     with db.connect() as conn:
@@ -742,3 +748,78 @@ def test_list_published_images_searches_and_an_owner_field_can_only_narrow(
     # The gallery's own conditions are ANDed first, so an owner field never widens the list.
     narrowed = db.list_published_images(filter=ListFilter(q="veil", published=False))
     assert narrowed.items == []
+
+
+def test_migration_from_v7_classifies_every_stored_object(tmp_path: Path) -> None:
+    """A database the previous build wrote has objects but no ``kind`` column. Schema 8 adds
+    it and fills it from the names table and nova's type, so the kind filter and the editor's
+    chips agree from the first start."""
+    db = Database(tmp_path / "x.sqlite")
+    db.init()
+    _with_objects(
+        db,
+        "field",
+        "2026-09-01T00:00:00Z",
+        [["NGC 224", "M 31"], ["NGC 1976", "M 42"], ["NGC 1912", "M 38"], ["Foo 1"]],
+    )
+    with db.connect() as conn:  # rewind to the version-7 shape
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")
+        conn.execute(
+            "INSERT INTO objects (image_id, id, catalog_names, type, x, y, radius)"
+            " VALUES ('field', 5, '[\"ι Ori\"]', 'bright', 1, 1, 0)"
+        )
+        conn.execute("PRAGMA user_version = 7")
+    db.init()
+    with db.connect() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        kinds = {
+            row["id"]: row["kind"]
+            for row in conn.execute("SELECT id, kind FROM objects WHERE image_id = 'field'")
+        }
+    assert kinds == {1: "galaxy", 2: "nebula", 3: "cluster", 4: "other", 5: "star"}
+    db.init()  # idempotent
+
+
+def test_migration_from_v7_with_no_objects_still_stamps(tmp_path: Path) -> None:
+    db = Database(tmp_path / "x.sqlite")
+    db.init()
+    with db.connect() as conn:
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")
+        conn.execute("PRAGMA user_version = 7")
+    db.init()
+    with db.connect() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        assert "kind" in {row["name"] for row in conn.execute("PRAGMA table_info(objects)")}
+
+
+def test_replace_objects_stores_the_kind_and_get_objects_reads_it(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    db.insert_image(_plain_image("a", "2026-09-01T00:00:00Z"))
+    db.replace_objects(
+        "a",
+        [
+            SolveObject(id=1, catalog_names=["NGC 224"], type="ngc", x=1.0, y=1.0, radius=1),
+            SolveObject(id=2, catalog_names=["ι Ori"], type="bright", x=1.0, y=1.0, radius=0),
+            SolveObject(id=3, catalog_names=["LDN 1"], type="ldn", x=1.0, y=1.0, radius=1),
+        ],
+    )
+    assert [o.kind for o in db.get_objects("a")] == ["galaxy", "star", "nebula"]
+    # The stored object is the one the Objects tab and the kind filter share.
+    with db.connect() as conn:
+        rows = conn.execute("SELECT id, kind FROM objects WHERE image_id = 'a' ORDER BY id")
+        assert [(r["id"], r["kind"]) for r in rows] == [(1, "galaxy"), (2, "star"), (3, "nebula")]
+
+
+def test_store_solve_result_stores_the_kind(settings: Settings) -> None:
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db, "solved")
+    ann = Annotations(image_id=rec.id, style=StyleConfig(), labels=[], version=1)
+    ok = db.store_solve_result(
+        rec.id,
+        [SolveObject(id=1, catalog_names=["NGC 1976", "M 42"], type="ngc", x=1.0, y=1.0, radius=1)],
+        ann,
+        {"solve_status": SolveStatus.SOLVED},
+    )
+    assert ok
+    assert [o.kind for o in db.get_objects(rec.id)] == ["nebula"]

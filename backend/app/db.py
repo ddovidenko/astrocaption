@@ -30,6 +30,7 @@ from .models import (
     utcnow_iso,
     validate_dropping_bad_fields,
 )
+from .objects import kind_of
 
 log = logging.getLogger(__name__)
 
@@ -121,7 +122,7 @@ def _filter_conditions(filter: ListFilter) -> tuple[list[str], list[object]]:
     return conds, values
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 # Statements that bring an existing database from version N-1 to N.
@@ -145,6 +146,33 @@ def _migrate_7_rehash_current_exports(conn: sqlite3.Connection) -> None:
     conn.execute("UPDATE images SET objects_catalog = NULL")
 
 
+def _migrate_8_classify_objects(conn: sqlite3.Connection) -> None:
+    """Schema 8 stores each object's Objects-tab kind (#189) so the list can filter on it. The
+    column defaults to ``other``; every existing row is classified once, by the same rule the
+    insert path uses."""
+    conn.execute("ALTER TABLE objects ADD COLUMN kind TEXT NOT NULL DEFAULT 'other'")
+    rows = conn.execute("SELECT image_id, id, catalog_names, type FROM objects").fetchall()
+    conn.executemany(
+        "UPDATE objects SET kind = ? WHERE image_id = ? AND id = ?",
+        [
+            (
+                kind_of(
+                    SolveObject(
+                        id=r["id"],
+                        catalog_names=json.loads(r["catalog_names"]),
+                        type=r["type"],
+                        x=0.0,
+                        y=0.0,
+                    )
+                ),
+                r["image_id"],
+                r["id"],
+            )
+            for r in rows
+        ],
+    )
+
+
 MIGRATIONS: dict[int, tuple[str | Callable[[sqlite3.Connection], None], ...]] = {
     2: ("ALTER TABLE images ADD COLUMN solve_hints_json TEXT",),
     3: ("ALTER TABLE images ADD COLUMN solve_failure TEXT",),
@@ -161,6 +189,8 @@ MIGRATIONS: dict[int, tuple[str | Callable[[sqlite3.Connection], None], ...]] = 
     # 7: the content hash covers the objects' names (#217); current exports are re-stamped and
     # the catalogue stamps cleared, so the backfill revisits every image once.
     7: (_migrate_7_rehash_current_exports,),
+    # 8: each object's kind is stored (#189), so the list filter and the editor's chips agree.
+    8: (_migrate_8_classify_objects,),
 }
 
 SCHEMA = """
@@ -199,6 +229,7 @@ CREATE TABLE IF NOT EXISTS objects (
     x             REAL NOT NULL,
     y             REAL NOT NULL,
     radius        REAL NOT NULL DEFAULT 0,
+    kind          TEXT NOT NULL DEFAULT 'other',
     PRIMARY KEY (image_id, id)
 );
 
@@ -374,7 +405,24 @@ def _row_to_object(row: sqlite3.Row) -> SolveObject:
         x=row["x"],
         y=row["y"],
         radius=row["radius"],
+        kind=row["kind"],
     )
+
+
+#: The objects table's insert, shared by the solve's write and ``replace_objects``.
+_INSERT_OBJECT = (
+    "INSERT INTO objects (image_id, id, catalog_names, type, x, y, radius, kind)"
+    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+)
+
+
+def _object_rows(image_id: str, objects: Iterable[SolveObject]) -> list[tuple[object, ...]]:
+    """One parameter tuple per object for ``_INSERT_OBJECT``; the kind is classified here, at
+    the only place a row is written, whatever the caller's ``kind`` says."""
+    return [
+        (image_id, o.id, json.dumps(o.catalog_names), o.type, o.x, o.y, o.radius, kind_of(o))
+        for o in objects
+    ]
 
 
 class Database:
@@ -545,14 +593,7 @@ class Database:
                     log.debug("store_solve_result: no row with id %s; nothing stored", image_id)
                     return False
                 conn.execute("DELETE FROM objects WHERE image_id = ?", (image_id,))
-                conn.executemany(
-                    "INSERT INTO objects (image_id, id, catalog_names, type, x, y, radius)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    [
-                        (image_id, o.id, json.dumps(o.catalog_names), o.type, o.x, o.y, o.radius)
-                        for o in objects
-                    ],
-                )
+                conn.executemany(_INSERT_OBJECT, _object_rows(image_id, objects))
                 conn.execute(
                     "INSERT INTO annotations (image_id, style_json, labels_json, version,"
                     " updated_at) VALUES (?, ?, ?, ?, ?)"
@@ -578,14 +619,7 @@ class Database:
         with self.connect() as conn:
             conn.execute("BEGIN")
             conn.execute("DELETE FROM objects WHERE image_id = ?", (image_id,))
-            conn.executemany(
-                "INSERT INTO objects (image_id, id, catalog_names, type, x, y, radius)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
-                [
-                    (image_id, o.id, json.dumps(o.catalog_names), o.type, o.x, o.y, o.radius)
-                    for o in objects
-                ],
-            )
+            conn.executemany(_INSERT_OBJECT, _object_rows(image_id, objects))
             conn.execute("COMMIT")
 
     def get_objects(self, image_id: str) -> list[SolveObject]:

@@ -948,3 +948,18 @@ def test_object_kind_follows_the_catalogue_source() -> None:
     assert out(["B 33"], "barnard") == "nebula"
     assert out(["ι Ori"], "bright") == "star"
     assert out(["NGC 1976", "M 42"], "ngc") == "nebula"
+
+
+def test_objects_endpoint_reports_the_stored_kind(
+    client: TestClient, sample_jpeg: Path, settings: Settings
+) -> None:
+    """The editor's chips read the column the kind filter uses, so the two cannot disagree. A
+    kind changed in the database (a names-table update applied by a later backfill) is what the
+    endpoint reports, not a recomputation."""
+    image_id = upload(client, sample_jpeg)["id"]
+    assert wait_for_status(client, image_id, {"solved", "failed"})["solve_status"] == "solved"
+    objects = client.get(f"/api/images/{image_id}/objects").json()
+    assert objects[0]["kind"] == "nebula"  # M 42, from the column
+    with Database(settings.db_path).connect() as conn:
+        conn.execute("UPDATE objects SET kind = 'cluster' WHERE image_id = ? AND id = 1", (image_id,))
+    assert client.get(f"/api/images/{image_id}/objects").json()[0]["kind"] == "cluster"
