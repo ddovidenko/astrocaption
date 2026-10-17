@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -823,3 +824,66 @@ def test_store_solve_result_stores_the_kind(settings: Settings) -> None:
     )
     assert ok
     assert [o.kind for o in db.get_objects(rec.id)] == ["nebula"]
+
+
+def test_list_images_kind_needs_a_stored_object_of_that_kind(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    _with_objects(db, "andromeda", "2026-09-01T00:00:00Z", [["NGC 224", "M 31"]])
+    db.replace_objects(  # the galaxy plus one of nova's stars (type "bright")
+        "andromeda",
+        [
+            SolveObject(
+                id=1, catalog_names=["NGC 224", "M 31"], type="ngc", x=1.0, y=1.0, radius=1
+            ),
+            SolveObject(id=2, catalog_names=["ι Ori"], type="bright", x=1.0, y=1.0, radius=0),
+        ],
+    )
+    _with_objects(db, "orion", "2026-09-02T00:00:00Z", [["NGC 1976", "M 42"]])
+    _with_objects(db, "unknown", "2026-09-03T00:00:00Z", [["Foo 1"]])
+    db.insert_image(_plain_image("no-objects", "2026-09-04T00:00:00Z"))
+    assert _ids(db, kind="galaxy") == ["andromeda"]
+    assert _ids(db, kind="nebula") == ["orion"]
+    assert _ids(db, kind="star") == ["andromeda"]  # nova's `bright` rows are stars
+    assert _ids(db, kind="other") == ["unknown"]  # a stored row of kind other, not "no row"
+    assert _ids(db, kind="cluster") == []
+    # Independent of the search: a nebula whose names contain "m 4".
+    assert _ids(db, kind="nebula", q="m 4") == ["orion"]
+    assert _ids(db, kind="galaxy", q="m 4") == []
+
+
+def test_list_images_date_range_is_inclusive_and_inverted_is_empty(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    db.insert_image(_plain_image("before", "2026-09-30T23:59:59+00:00"))
+    db.insert_image(_plain_image("first", "2026-10-01T00:00:00+00:00"))
+    db.insert_image(_plain_image("late", "2026-10-02T23:59:59+00:00"))
+    db.insert_image(_plain_image("after", "2026-10-03T00:00:00+00:00"))
+    assert _ids(db, since=date(2026, 10, 1)) == ["after", "late", "first"]
+    assert _ids(db, until=date(2026, 10, 2)) == ["late", "first", "before"]
+    # Both ends inclusive, to the last second of the `until` day.
+    assert _ids(db, since=date(2026, 10, 1), until=date(2026, 10, 2)) == ["late", "first"]
+    assert _ids(db, since=date(2026, 10, 2), until=date(2026, 10, 2)) == ["late"]
+    # Swapped pickers are an empty list, not an error.
+    assert _ids(db, since=date(2026, 10, 3), until=date(2026, 10, 1)) == []
+    # The stamp's spelling of UTC does not matter: "Z" sorts after any digit too.
+    db.insert_image(_plain_image("zulu", "2026-10-02T12:00:00Z"))
+    assert _ids(db, since=date(2026, 10, 2), until=date(2026, 10, 2)) == ["zulu", "late"]
+
+
+def test_list_published_images_narrows_by_kind_and_date_inside_the_gallery_rows(
+    tmp_path: Path,
+) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    _with_objects(db, "m31-unpub", "2026-10-01T00:00:00Z", [["NGC 224"]])
+    _with_objects(db, "m31-pub", "2026-10-02T00:00:00Z", [["NGC 224"]], True)
+    _with_objects(db, "m42-pub", "2026-10-03T00:00:00Z", [["NGC 1976"]], True)
+
+    def gallery(**filter: object) -> list[str]:
+        page = db.list_published_images(filter=ListFilter(**filter))  # type: ignore[arg-type]
+        return [r.id for r in page.items]
+
+    assert gallery(kind="galaxy") == ["m31-pub"]
+    assert gallery(since=date(2026, 10, 3)) == ["m42-pub"]
+    assert gallery(kind="galaxy", until=date(2026, 10, 1)) == []

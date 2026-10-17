@@ -13,6 +13,7 @@ import sqlite3
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal, NamedTuple
 
@@ -23,6 +24,7 @@ from .models import (
     Calibration,
     ImageRecord,
     Label,
+    ObjectKind,
     SolveHints,
     SolveObject,
     SolveStatus,
@@ -55,11 +57,16 @@ ListStatus = Literal["solving", "failed", "solved"]
 @dataclass(frozen=True)
 class ListFilter:
     """What narrows a paged list (SPEC § 8). An empty ``q`` and None filters mean "everything";
-    the gallery takes only ``q`` and ignores the owner's two."""
+    the gallery endpoint declares only the public fields (``q``, ``kind``, ``since``, ``until``)
+    and never sets the owner's two. ``since`` and ``until`` are upload days in UTC, both
+    inclusive."""
 
     q: str = ""
     status: ListStatus | None = None
     published: bool | None = None
+    kind: ObjectKind | None = None
+    since: date | None = None
+    until: date | None = None
 
 
 #: The whole list, unfiltered (the frozen dataclass makes one shared instance safe).
@@ -103,6 +110,9 @@ _SEARCH_CONDITION = (
     " AND instr(fold_names(o.catalog_names), ?) > 0))"
 )
 
+#: An image with at least one stored object of the kind (schema 8); none at all matches nothing.
+_KIND_CONDITION = "EXISTS (SELECT 1 FROM objects o WHERE o.image_id = images.id AND o.kind = ?)"
+
 
 def _filter_conditions(filter: ListFilter) -> tuple[list[str], list[object]]:
     """The WHERE fragments and their parameters for `filter`, in a fixed order."""
@@ -119,6 +129,18 @@ def _filter_conditions(filter: ListFilter) -> tuple[list[str], list[object]]:
     if filter.published is not None:
         conds.append("published = ?")
         values.append(1 if filter.published else 0)
+    if filter.kind is not None:
+        conds.append(_KIND_CONDITION)
+        values.append(filter.kind)
+    # created_at is an ISO stamp that starts with the day, so a plain string compare against
+    # "YYYY-MM-DD" bounds it; `until` is inclusive, hence "< the next day". Ordering stays on
+    # rowid (#214), these only select.
+    if filter.since is not None:
+        conds.append("created_at >= ?")
+        values.append(filter.since.isoformat())
+    if filter.until is not None:
+        conds.append("created_at < ?")
+        values.append((filter.until + timedelta(days=1)).isoformat())
     return conds, values
 
 

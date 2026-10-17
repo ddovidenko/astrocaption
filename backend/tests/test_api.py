@@ -961,5 +961,7 @@ def test_objects_endpoint_reports_the_stored_kind(
     objects = client.get(f"/api/images/{image_id}/objects").json()
     assert objects[0]["kind"] == "nebula"  # M 42, from the column
     with Database(settings.db_path).connect() as conn:
-        conn.execute("UPDATE objects SET kind = 'cluster' WHERE image_id = ? AND id = 1", (image_id,))
+        conn.execute(
+            "UPDATE objects SET kind = 'cluster' WHERE image_id = ? AND id = 1", (image_id,)
+        )
     assert client.get(f"/api/images/{image_id}/objects").json()[0]["kind"] == "cluster"
