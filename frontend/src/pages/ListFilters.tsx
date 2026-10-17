@@ -102,10 +102,12 @@ export default function ListFilters({
       </div>
       <span className="date-range">
         <label>
-          From <input ref={since} type="date" defaultValue={query.since ?? ''} onChange={(e) => onChange({ since: e.target.value || null })} />
+          <span className="date-word">From</span>
+          <input ref={since} type="date" defaultValue={query.since ?? ''} onChange={(e) => onChange({ since: e.target.value || null })} />
         </label>
         <label>
-          To <input ref={until} type="date" defaultValue={query.until ?? ''} onChange={(e) => onChange({ until: e.target.value || null })} />
+          <span className="date-word">To</span>
+          <input ref={until} type="date" defaultValue={query.until ?? ''} onChange={(e) => onChange({ until: e.target.value || null })} />
         </label>
       </span>
       {isFiltered(query) && (

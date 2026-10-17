@@ -198,6 +198,14 @@ body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
 .list-filters .date-range { display: inline-flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; }
 .list-filters .date-range label { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--muted); font-size: 0.85rem; }
 .list-filters input[type='date'] { padding: 0.3rem 0.5rem; color-scheme: dark; }
+/* A phone (#169): the first card's buttons must stay above the fold, so the two date inputs
+   share one line (the words From/To stay for screen readers) and the rows sit closer. */
+@media (max-width: 640px) {
+  .list-filters { gap: 0.4rem 0.75rem; }
+  .list-filters .date-range { gap: 0.4rem; }
+  .list-filters .date-range label { gap: 0; }
+  .list-filters .date-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
 .object-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.1rem; }
 .object-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 0.5rem; align-items: center; padding: 0.3rem 0.4rem; border-radius: 4px; font-size: 0.9rem; }
 .object-row:hover, .object-row:focus-within, .object-row.hovered { background: rgba(138, 180, 255, 0.12); }
