@@ -138,7 +138,9 @@ def _filter_conditions(filter: ListFilter) -> tuple[list[str], list[object]]:
     if filter.since is not None:
         conds.append("created_at >= ?")
         values.append(filter.since.isoformat())
-    if filter.until is not None:
+    # The last day a date can name (9999-12-31 on the wire) has no following day and bounds
+    # nothing.
+    if filter.until is not None and filter.until < date.max:
         conds.append("created_at < ?")
         values.append((filter.until + timedelta(days=1)).isoformat())
     return conds, values
@@ -650,6 +652,23 @@ class Database:
             conn.execute("DELETE FROM objects WHERE image_id = ?", (image_id,))
             conn.executemany(_INSERT_OBJECT, _object_rows(image_id, objects))
             conn.execute("COMMIT")
+
+    def reclassify_objects(self) -> int:
+        """Bring every stored ``kind`` in line with what ``kind_of`` says today and return how
+        many rows moved. Run at every start: a release that ships a new names table changes the
+        answer for some objects, and the editor's chips and the list filter read the column, so
+        nothing else would notice until a re-solve."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT image_id, id, catalog_names, type, kind FROM objects"
+            ).fetchall()
+            moved = [
+                (kind, r["image_id"], r["id"])
+                for r in rows
+                if (kind := _kind_of_row(r)) != r["kind"]
+            ]
+            conn.executemany("UPDATE objects SET kind = ? WHERE image_id = ? AND id = ?", moved)
+        return len(moved)
 
     def get_objects(self, image_id: str) -> list[SolveObject]:
         with self.connect() as conn:

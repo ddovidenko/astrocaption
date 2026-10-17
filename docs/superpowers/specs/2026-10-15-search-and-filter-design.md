@@ -107,8 +107,11 @@ No `count` of matches in the response: nothing displays it and it would be a sec
 - **Schema.** Migration 8 adds `objects.kind TEXT NOT NULL DEFAULT 'other'` and then a Python
   step that computes `kind_of` for every existing row from the bundled names table.
   `replace_objects` writes `kind` at insert; `GET /images/{id}/objects` reads it from the column
-  instead of recomputing. A names-table update in a later release reaches old rows through the
-  catalogue backfill, which already rewrites every image's objects when the catalogue changes.
+  instead of recomputing. A names-table update in a later release reaches old rows through a
+  startup pass (`Database.reclassify_objects`, before the catalogue backfill) that rewrites the
+  stored kind of every row whose classification changed; the backfill alone would not, since it
+  only visits images whose objects-catalogue stamp changed and keeps stored objects as they are
+  (found in review, 2026-10-17).
 - **`kind`** on both list endpoints: `galaxy`, `nebula`, `cluster`, `star` or `other`. Matches
   an image with at least one object of that kind (`EXISTS` on `objects.kind`). Independent of
   `q`: "nebula" plus "veil" is an image with a nebula whose title or any object name contains

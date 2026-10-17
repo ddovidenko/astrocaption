@@ -368,8 +368,9 @@ objects (per image, from nova and the local catalogue; rewritten only by a re-so
                        sharpless|lbn|barnard|ldn|pgc)
   x, y          float  (original pixels)
   radius        float
-  kind          text  (galaxy|nebula|cluster|star|other: the Objects-tab bucket, stored at insert
-                       and backfilled once by schema 8, so the list filter and the editor agree)
+  kind          text  (galaxy|nebula|cluster|star|other: the Objects-tab bucket, stored at insert,
+                       backfilled once by schema 8 and re-checked at every start against the
+                       bundled names table, so the list filter and the editor agree)
 
 annotations (per image; the editable layout)
   image_id
@@ -451,7 +452,7 @@ Owner (cookie session):
 - `POST /images/{id}/check` (check again: resume polling the stored nova job without uploading, #10).
   409 unless the row's `check_available` is true (a failed solve that timed out and still holds a
   submission id); `ImageOut.check_available` is what the card draws the button from.
-- `GET /images/{id}/objects` — each object carries `kind` (galaxy / nebula / cluster / star / other, stars from nova's type, catalogue objects from their source, the rest from OpenNGC at read time) beside `catalog_names` and `primary_name`.
+- `GET /images/{id}/objects` — each object carries `kind` (galaxy / nebula / cluster / star / other, stored at insert and re-checked at every start against the bundled names table: stars from nova's type, catalogue objects from their source, the rest from OpenNGC) beside `catalog_names` and `primary_name`.
 - `GET/PUT /images/{id}/annotations`. `PUT` is the editor's autosave (debounced 500 ms): body = {style, labels,
   version as loaded}; `labels` must list every one of the image's objects exactly once (disable a label, never drop
   it), else 409 `This image's objects changed; reload the editor.` (#115: a stale document, like a version mismatch;

@@ -185,7 +185,8 @@ the lookup cannot handle is logged and left as it was; the server starts regardl
 
 The first start after upgrading to a release with the kind filter also classifies every stored
 object once (the objects table gains a `kind` column; a moment per thousand objects), so the
-Images page and the gallery can filter by it.
+Images page and the gallery can filter by it; every later start re-checks those kinds against
+the bundled names table, so a release that updates the table needs no re-solve.
 
 The package is public: pulling needs no GitHub account or `docker login`. If you run a fork,
 its first release pushes a *private* package (GHCR starts every new package that way); make it

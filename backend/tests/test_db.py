@@ -911,3 +911,26 @@ def test_migration_from_v7_survives_a_corrupt_names_cell(
         rows = conn.execute("SELECT id, kind FROM objects WHERE image_id = 'field' ORDER BY id")
         assert [(r["id"], r["kind"]) for r in rows] == [(1, "galaxy"), (2, "other"), (3, "other")]
     assert sum("could not classify" in r.getMessage() for r in caplog.records) == 2
+
+
+def test_list_images_until_the_last_day_a_date_can_name_is_no_upper_bound(tmp_path: Path) -> None:
+    """``date.max`` is a valid ``until`` on the wire (``9999-12-31``) and has no following day:
+    it must list everything, not raise."""
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    db.insert_image(_plain_image("a", "2026-09-01T00:00:00Z"))
+    assert _ids(db, until=date.max) == ["a"]
+    assert _ids(db, since=date(2026, 9, 1), until=date.max) == ["a"]
+
+
+def test_reclassify_objects_updates_only_the_rows_whose_kind_changed(tmp_path: Path) -> None:
+    """A names-table update in a later release changes what ``kind_of`` says for some rows; the
+    startup pass brings the stored kinds back in line and reports how many moved."""
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    _with_objects(db, "a", "2026-09-01T00:00:00Z", [["NGC 224"], ["NGC 1976"]])
+    with db.connect() as conn:  # the stored answer of an older names table
+        conn.execute("UPDATE objects SET kind = 'other' WHERE image_id = 'a' AND id = 2")
+    assert db.reclassify_objects() == 1
+    assert [o.kind for o in db.get_objects("a")] == ["galaxy", "nebula"]
+    assert db.reclassify_objects() == 0
