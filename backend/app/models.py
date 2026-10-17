@@ -786,6 +786,10 @@ VALIDATION_MESSAGES: dict[str, str] = {
     "model_type": "must be an object",
     "model_attributes_type": "must be an object",
     "null_not_allowed": "cannot be null; leave the field out to keep the current value",
+    "date_type": "must be a day as YYYY-MM-DD",
+    "date_parsing": "must be a day as YYYY-MM-DD",
+    "date_from_datetime_parsing": "must be a day as YYYY-MM-DD",
+    "date_from_datetime_inexact": "must be a day as YYYY-MM-DD",
     "blank": "must not be blank",
     "position_hint_incomplete": "centre RA, Dec and radius must be given together",
 }

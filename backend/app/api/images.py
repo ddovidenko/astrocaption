@@ -455,9 +455,8 @@ def _object_out(o: SolveObject, preference: NamePreference) -> ObjectOut:
         catalog_names=o.catalog_names,
         primary_name=o.primary_name_for(preference),
         type=o.type,
-        # Stored at insert (schema 8) so the list's kind filter reports the same bucket; an
-        # object that never went through the database (none reaches here) is classified now.
-        kind=o.kind if o.kind is not None else kind_of(o),
+        # Stored at insert (schema 8), so the list's kind filter reports the same bucket.
+        kind=o.kind or kind_of(o),
         x=o.x,
         y=o.y,
         radius=o.radius,

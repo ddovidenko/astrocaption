@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { SEARCH_MAX_LENGTH } from '../api'
 import Chip from '../Chip'
 import { KIND_LABELS, KINDS } from '../editor/objectsFilter'
-import { EMPTY_QUERY, isFiltered, STATUS_LABELS, type ListQuery } from './listQuery'
+import { dayOf, EMPTY_QUERY, isFiltered, STATUS_LABELS, type ListQuery } from './listQuery'
 
 /** How long typing pauses before the search runs and lands in the URL. */
 export const SEARCH_DEBOUNCE_MS = 250
@@ -13,10 +13,11 @@ const PUBLISHED_LABELS: readonly [boolean, string][] = [
 ]
 
 /** The search box and filter chips above a list (SPEC § 5.5). The page owns the query (it
- *  lives in the URL); this only reports patches: the box's text after a short pause, a chip or
- *  a date at once, Clear as the empty query. Within a group one chip is pressed at most, and
- *  pressing it again clears it. Everyone gets the kind chips and the upload-day range; the
- *  owner's page adds the status and visibility groups. */
+ *  lives in the URL); this only reports patches: the box's text and the dates after a short
+ *  pause (typing a date emits a value per digit of the year), a chip at once, Clear as the
+ *  empty query. Within a group one chip is pressed at most, and pressing it again clears it.
+ *  Everyone gets the kind chips and the upload-day range; the owner's page adds the status and
+ *  visibility groups. */
 export default function ListFilters({
   query,
   onChange,
@@ -36,6 +37,7 @@ export default function ListFilters({
   const since = useRef<HTMLInputElement>(null)
   const until = useRef<HTMLInputElement>(null)
   const timer = useRef<number | undefined>(undefined)
+  const pending = useRef<Partial<ListQuery>>({})
   useEffect(() => {
     if (box.current && box.current.value.trim() !== query.q) box.current.value = query.q
   }, [query.q])
@@ -47,9 +49,15 @@ export default function ListFilters({
   }, [query.until])
   useEffect(() => () => window.clearTimeout(timer.current), [])
 
-  function typed(value: string) {
+  // Everything typed inside one pause lands as one patch.
+  function later(patch: Partial<ListQuery>) {
+    pending.current = { ...pending.current, ...patch }
     window.clearTimeout(timer.current)
-    timer.current = window.setTimeout(() => onChange({ q: value.trim() }), SEARCH_DEBOUNCE_MS)
+    timer.current = window.setTimeout(() => {
+      const patch = pending.current
+      pending.current = {}
+      onChange(patch)
+    }, SEARCH_DEBOUNCE_MS)
   }
 
   // Text typed inside the pause has not reached the query yet, so the box effect above would
@@ -58,6 +66,7 @@ export default function ListFilters({
   // shows its digits.
   function clear() {
     window.clearTimeout(timer.current)
+    pending.current = {}
     for (const input of [box, since, until]) if (input.current) input.current.value = ''
     onChange(EMPTY_QUERY)
   }
@@ -71,7 +80,7 @@ export default function ListFilters({
         placeholder={label}
         maxLength={SEARCH_MAX_LENGTH}
         defaultValue={query.q}
-        onChange={(e) => typed(e.target.value)}
+        onChange={(e) => later({ q: e.target.value.trim() })}
       />
       {owner && (
         <>
@@ -105,11 +114,11 @@ export default function ListFilters({
       <span className="date-range">
         <label>
           <span className="date-word">From</span>
-          <input ref={since} type="date" defaultValue={query.since ?? ''} onChange={(e) => onChange({ since: e.target.value || null })} />
+          <input ref={since} type="date" defaultValue={query.since ?? ''} onChange={(e) => later({ since: dayOf(e.target.value) })} />
         </label>
         <label>
           <span className="date-word">To</span>
-          <input ref={until} type="date" defaultValue={query.until ?? ''} onChange={(e) => onChange({ until: e.target.value || null })} />
+          <input ref={until} type="date" defaultValue={query.until ?? ''} onChange={(e) => later({ until: dayOf(e.target.value) })} />
         </label>
       </span>
       {isFiltered(query) && (

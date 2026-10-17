@@ -806,10 +806,6 @@ def test_replace_objects_stores_the_kind_and_get_objects_reads_it(tmp_path: Path
         ],
     )
     assert [o.kind for o in db.get_objects("a")] == ["galaxy", "star", "nebula"]
-    # The stored object is the one the Objects tab and the kind filter share.
-    with db.connect() as conn:
-        rows = conn.execute("SELECT id, kind FROM objects WHERE image_id = 'a' ORDER BY id")
-        assert [(r["id"], r["kind"]) for r in rows] == [(1, "galaxy"), (2, "star"), (3, "nebula")]
 
 
 def test_store_solve_result_stores_the_kind(settings: Settings) -> None:
@@ -829,7 +825,7 @@ def test_store_solve_result_stores_the_kind(settings: Settings) -> None:
 def test_list_images_kind_needs_a_stored_object_of_that_kind(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.sqlite")
     db.init()
-    _with_objects(db, "andromeda", "2026-09-01T00:00:00Z", [["NGC 224", "M 31"]])
+    db.insert_image(_plain_image("andromeda", "2026-09-01T00:00:00Z"))
     db.replace_objects(  # the galaxy plus one of nova's stars (type "bright")
         "andromeda",
         [

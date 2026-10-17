@@ -983,15 +983,21 @@ def test_list_images_filters_by_kind_and_upload_day(client: TestClient, sample_j
     assert ids(until="2000-01-01") == []
     assert ids(since="2999-01-01") == []
     assert ids(kind="nebula", q="orion", since=created) == [image_id]
+    resp = client.get("/api/images", params={"kind": "stars"})
+    assert resp.status_code == 422
+    assert resp.json()["detail"].startswith("kind: must be one of")
+    # A hand-edited date says what shape the API wants, not the generic "is not valid".
     for bad in (
-        {"kind": "stars"},
         {"since": "yesterday"},
         {"until": "2026-13-01"},
         {"since": "16/10/2026"},
+        {"until": "0000-01-01"},
     ):
         resp = client.get("/api/images", params=bad)
         assert resp.status_code == 422, bad
         assert "Traceback" not in resp.text and "/home/" not in resp.text
+        (param,) = bad
+        assert resp.json()["detail"] == f"{param}: must be a day as YYYY-MM-DD", bad
 
 
 def test_list_images_until_the_last_possible_day_is_not_an_error(client: TestClient) -> None:
@@ -1004,8 +1010,6 @@ def test_startup_reclassifies_stored_kinds_against_the_current_names_table(
 ) -> None:
     """The Objects tab and the kind filter read the stored kind; a names-table update ships with
     a release, so every start re-checks the stored kinds against it (no re-solve needed)."""
-    from tests.conftest import make_client, seed_image
-
     db = Database(settings.db_path)
     rec = seed_image(settings, db, "stale-kind")
     db.replace_objects(

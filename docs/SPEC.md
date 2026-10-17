@@ -204,7 +204,8 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
   owner's list adds status chips (Solving, Failed, Solved) and visibility chips (Published,
   Unpublished). Both lists add kind chips (Galaxies, Nebulae, Clusters, Stars, Other: an image
   with at least one object of that kind, as the Objects tab buckets them) and an upload-day
-  range (From, To: native date inputs, UTC days, both inclusive). The search and chips live in
+  range (From, To: native date inputs, UTC days, both inclusive; like the search box they
+  report after a short pause, since typing a year emits a value per digit). The search and chips live in
   the URL (`/gallery?q=veil`), so a result is
   linkable and a reload keeps it, and the Show more link carries them so a followed page stays
   inside the result set; changing a filter starts again from the top. An active search with no

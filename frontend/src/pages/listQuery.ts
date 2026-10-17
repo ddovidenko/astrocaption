@@ -1,5 +1,5 @@
 import type { ListStatus, ObjectKind, PageQuery } from '../api'
-import { KINDS } from '../editor/objectsFilter'
+import { KIND_LABELS } from '../editor/objectsFilter'
 
 /** The search and filters of a list page (SPEC § 5.5, § 8). The URL is its only home: both
  *  pages read it with `readListQuery` and write it back with `writeListQuery`, so a result is
@@ -28,13 +28,14 @@ function publishedOf(value: string | null): boolean | null {
 }
 
 function kindOf(value: string | null): ObjectKind | null {
-  return value !== null && (KINDS as readonly string[]).includes(value) ? (value as ObjectKind) : null
+  return value !== null && value in KIND_LABELS ? (value as ObjectKind) : null
 }
 
-/** A day as the API takes it; anything else (a hand-edited URL) reads as no bound. */
+/** A day as the API takes it; anything else (a hand-edited URL, a picker's five-digit year)
+ *  reads as no bound. */
 const DAY = /^\d{4}-\d{2}-\d{2}$/
 
-function dayOf(value: string | null): string | null {
+export function dayOf(value: string | null): string | null {
   return value !== null && DAY.test(value) ? value : null
 }
 

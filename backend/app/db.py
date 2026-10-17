@@ -13,7 +13,7 @@ import sqlite3
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from typing import Literal, NamedTuple
 
@@ -32,7 +32,7 @@ from .models import (
     utcnow_iso,
     validate_dropping_bad_fields,
 )
-from .objects import kind_of
+from .objects import classify, kind_of
 
 log = logging.getLogger(__name__)
 
@@ -118,10 +118,6 @@ def _filter_conditions(filter: ListFilter) -> tuple[list[str], list[object]]:
     """The WHERE fragments and their parameters for `filter`, in a fixed order."""
     conds: list[str] = []
     values: list[object] = []
-    needle = fold(filter.q)
-    if needle:
-        conds.append(_SEARCH_CONDITION)
-        values.extend((needle, needle))
     if filter.status is not None:
         cond, params = _STATUS_CONDITIONS[filter.status]
         conds.append(cond)
@@ -132,17 +128,21 @@ def _filter_conditions(filter: ListFilter) -> tuple[list[str], list[object]]:
     if filter.kind is not None:
         conds.append(_KIND_CONDITION)
         values.append(filter.kind)
-    # created_at is an ISO stamp that starts with the day, so a plain string compare against
-    # "YYYY-MM-DD" bounds it; `until` is inclusive, hence "< the next day". Ordering stays on
-    # rowid (#214), these only select.
+    # created_at is an ISO stamp that starts with the day, so string compares against
+    # "YYYY-MM-DD" bound it, both ends inclusive. Ordering stays on rowid (#214), these only
+    # select.
     if filter.since is not None:
         conds.append("created_at >= ?")
         values.append(filter.since.isoformat())
-    # The last day a date can name (9999-12-31 on the wire) has no following day and bounds
-    # nothing.
-    if filter.until is not None and filter.until < date.max:
-        conds.append("created_at < ?")
-        values.append((filter.until + timedelta(days=1)).isoformat())
+    if filter.until is not None:
+        conds.append("substr(created_at, 1, 10) <= ?")
+        values.append(filter.until.isoformat())
+    # Last: SQLite tests the terms in this order, and the search's two Python functions cost
+    # more per row than everything above.
+    needle = fold(filter.q)
+    if needle:
+        conds.append(_SEARCH_CONDITION)
+        values.extend((needle, needle))
     return conds, values
 
 
@@ -172,36 +172,38 @@ def _migrate_7_rehash_current_exports(conn: sqlite3.Connection) -> None:
 
 def _migrate_8_classify_objects(conn: sqlite3.Connection) -> None:
     """Schema 8 stores each object's Objects-tab kind (#189) so the list can filter on it. The
-    column defaults to ``other``; every existing row is classified once, by the same rule the
-    insert path uses."""
+    column defaults to ``other``; every existing row is classified once, by the same pass that
+    re-checks them at every start."""
     conn.execute("ALTER TABLE objects ADD COLUMN kind TEXT NOT NULL DEFAULT 'other'")
-    rows = conn.execute("SELECT image_id, id, catalog_names, type FROM objects").fetchall()
-    conn.executemany(
-        "UPDATE objects SET kind = ? WHERE image_id = ? AND id = ?",
-        [(_kind_of_row(r), r["image_id"], r["id"]) for r in rows],
-    )
+    _reclassify(conn)
+
+
+def _reclassify(conn: sqlite3.Connection) -> int:
+    """Rewrite every stored ``kind`` that differs from what `classify` says today and return how
+    many rows moved. The caller owns the transaction."""
+    rows = conn.execute("SELECT image_id, id, catalog_names, type, kind FROM objects").fetchall()
+    moved = [(kind, r["image_id"], r["id"]) for r in rows if (kind := _kind_of_row(r)) != r["kind"]]
+    conn.executemany("UPDATE objects SET kind = ? WHERE image_id = ? AND id = ?", moved)
+    return len(moved)
 
 
 def _kind_of_row(row: sqlite3.Row) -> ObjectKind:
-    """The kind of a stored object row, for the one-off backfill. A cell this code never writes
-    (not a JSON list of names, or an empty one) is ``other`` with a warning: one odd row must
-    not roll the migration back and keep the server from starting."""
+    """`classify` for a stored object row. A names cell this code never writes (not a JSON list
+    of names, or an empty one) is ``other`` with a warning: one odd row must not roll the
+    migration back and keep the server from starting."""
     try:
-        obj = SolveObject(
-            id=row["id"],
-            catalog_names=json.loads(row["catalog_names"]),
-            type=row["type"],
-            x=0.0,
-            y=0.0,
-        )
-    except (ValueError, ValidationError):
+        names = json.loads(row["catalog_names"])
+        if not isinstance(names, list) or not names or not all(isinstance(n, str) for n in names):
+            raise ValueError("not a list of names")
+    except ValueError:
         log.warning(
-            "schema 8: could not classify object %s of image %s; stored as other",
+            "object kinds: could not classify object %s of image %s (its names cell is not a"
+            " JSON list of names); stored as other",
             row["id"],
             row["image_id"],
         )
         return "other"
-    return kind_of(obj)
+    return classify(row["type"], names)
 
 
 MIGRATIONS: dict[int, tuple[str | Callable[[sqlite3.Connection], None], ...]] = {
@@ -654,21 +656,15 @@ class Database:
             conn.execute("COMMIT")
 
     def reclassify_objects(self) -> int:
-        """Bring every stored ``kind`` in line with what ``kind_of`` says today and return how
+        """Bring every stored ``kind`` in line with what `classify` says today and return how
         many rows moved. Run at every start: a release that ships a new names table changes the
         answer for some objects, and the editor's chips and the list filter read the column, so
         nothing else would notice until a re-solve."""
         with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT image_id, id, catalog_names, type, kind FROM objects"
-            ).fetchall()
-            moved = [
-                (kind, r["image_id"], r["id"])
-                for r in rows
-                if (kind := _kind_of_row(r)) != r["kind"]
-            ]
-            conn.executemany("UPDATE objects SET kind = ? WHERE image_id = ? AND id = ?", moved)
-        return len(moved)
+            conn.execute("BEGIN")
+            moved = _reclassify(conn)
+            conn.execute("COMMIT")
+        return moved
 
     def get_objects(self, image_id: str) -> list[SolveObject]:
         with self.connect() as conn:

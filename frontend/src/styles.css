@@ -203,7 +203,6 @@ body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
 @media (max-width: 640px) {
   .list-filters { gap: 0.4rem 0.75rem; }
   .list-filters .date-range { gap: 0.4rem; }
-  .list-filters .date-range label { gap: 0; }
   .list-filters .date-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
 .object-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.1rem; }

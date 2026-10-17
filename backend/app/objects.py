@@ -76,15 +76,21 @@ def objects_from_nova(
     ]
 
 
-def kind_of(obj: SolveObject) -> ObjectKind:
-    """The Objects tab bucket: stars by nova's type, catalogue objects by their source, the rest
-    by what the names table knows (SPEC § 6.3)."""
-    if obj.type in STAR_TYPES:
+def classify(type_: str, names: list[str]) -> ObjectKind:
+    """The Objects tab bucket of an object with nova's (or the catalogue's) ``type_`` and these
+    catalogue names: stars by nova's type, catalogue objects by their source, the rest by what
+    the names table knows (SPEC § 6.3)."""
+    if type_ in STAR_TYPES:
         return "star"
-    source_kind = KIND_BY_SOURCE.get(obj.type)
+    source_kind = KIND_BY_SOURCE.get(type_)
     if source_kind is not None:
         return source_kind
-    return kind_for(obj.catalog_names) or "other"
+    return kind_for(names) or "other"
+
+
+def kind_of(obj: SolveObject) -> ObjectKind:
+    """`classify` for a whole object."""
+    return classify(obj.type, obj.catalog_names)
 
 
 def objects_from_catalog(

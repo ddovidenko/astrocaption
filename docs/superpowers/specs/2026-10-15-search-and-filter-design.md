@@ -120,7 +120,9 @@ No `count` of matches in the response: nothing displays it and it would be a sec
 - **`since` and `until`**, each `YYYY-MM-DD`, on the upload date `created_at` in UTC, both ends
   inclusive. The server turns `until` into a strict less-than on the following day so the
   comparison is a plain string compare on the ISO stamp; ordering stays on rowid. A malformed
-  date is a 422. UI: two native `type="date"` inputs, From and To, in the same filter row (the
+  date is a 422. UI: two native `type="date"` inputs, From and To, in the same filter row,
+  reporting after the search box's pause (keyboard entry emits a complete value per digit of
+  the year, each of which would otherwise be a list request; decided in review, 2026-10-17) (the
   colour-dialog objection was about `input type=color`; native date inputs are consistent across
   Chrome, Safari and Firefox).
 - **The gallery gets both** kind chips and the date range; the owner page gets them beside
