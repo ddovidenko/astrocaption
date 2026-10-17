@@ -124,6 +124,20 @@ describe('ListFilters', () => {
     expect(onChange).toHaveBeenLastCalledWith({ since: null })
   })
 
+  it('Clear empties a date the query never received, as it does the box', () => {
+    // A date whose change has not reached the URL (or a half-typed one, which reads as '' but
+    // still shows its digits) stays in the picker unless Clear resets the DOM itself.
+    const onChange = vi.fn()
+    const { rerender } = render(<ListFilters query={{ ...EMPTY_QUERY, kind: 'star' }} onChange={onChange} label="Search the gallery" />)
+    const from = screen.getByLabelText('From') as HTMLInputElement
+    fireEvent.change(from, { target: { value: '2026-10-05' } })
+    expect(from.value).toBe('2026-10-05')
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    rerender(<ListFilters query={EMPTY_QUERY} onChange={onChange} label="Search the gallery" />)
+    expect(from.value).toBe('')
+    expect(onChange).toHaveBeenLastCalledWith(EMPTY_QUERY)
+  })
+
   it('Clear empties the dates with the rest', () => {
     const onChange = vi.fn()
     const { rerender } = render(

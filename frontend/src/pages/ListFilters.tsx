@@ -53,10 +53,12 @@ export default function ListFilters({
   }
 
   // Text typed inside the pause has not reached the query yet, so the box effect above would
-  // not empty it, and the timer would put it back onto the cleared URL.
+  // not empty it, and the timer would put it back onto the cleared URL. A half-typed date is
+  // the same: it reads as '' (so the query holds nothing to clear) while the picker still
+  // shows its digits.
   function clear() {
     window.clearTimeout(timer.current)
-    if (box.current) box.current.value = ''
+    for (const input of [box, since, until]) if (input.current) input.current.value = ''
     onChange(EMPTY_QUERY)
   }
 
