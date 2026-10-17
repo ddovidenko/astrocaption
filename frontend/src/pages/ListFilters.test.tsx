@@ -29,7 +29,7 @@ describe('ListFilters', () => {
   it('shows the chips to the owner only, one pressed per group, and a second press clears it', () => {
     // Each press reports a patch; the page merges it onto the URL as it is then.
     const onChange = vi.fn()
-    const query: ListQuery = { q: '', status: 'failed', published: null }
+    const query: ListQuery = { ...EMPTY_QUERY, status: 'failed' }
     const { rerender } = render(<ListFilters query={query} onChange={onChange} owner label="Search images" />)
     expect(pressed('Failed')).toBe('true')
     expect(pressed('Solved')).toBe('false')
@@ -59,7 +59,7 @@ describe('ListFilters', () => {
 
   it('Clear inside the typing pause drops the pending search and empties the box', () => {
     const onChange = vi.fn()
-    const query: ListQuery = { q: '', status: 'solved', published: null }
+    const query: ListQuery = { ...EMPTY_QUERY, status: 'solved' }
     render(<ListFilters query={query} onChange={onChange} owner label="Search images" />)
     const box = screen.getByRole('searchbox', { name: 'Search images' }) as HTMLInputElement
     fireEvent.change(box, { target: { value: 'm3' } })
