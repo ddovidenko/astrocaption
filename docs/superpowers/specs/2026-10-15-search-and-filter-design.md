@@ -107,8 +107,11 @@ No `count` of matches in the response: nothing displays it and it would be a sec
 - **Schema.** Migration 8 adds `objects.kind TEXT NOT NULL DEFAULT 'other'` and then a Python
   step that computes `kind_of` for every existing row from the bundled names table.
   `replace_objects` writes `kind` at insert; `GET /images/{id}/objects` reads it from the column
-  instead of recomputing. A names-table update in a later release reaches old rows through the
-  catalogue backfill, which already rewrites every image's objects when the catalogue changes.
+  instead of recomputing. A names-table update in a later release reaches old rows through a
+  startup pass (`Database.reclassify_objects`, before the catalogue backfill) that rewrites the
+  stored kind of every row whose classification changed; the backfill alone would not, since it
+  only visits images whose objects-catalogue stamp changed and keeps stored objects as they are
+  (found in review, 2026-10-17).
 - **`kind`** on both list endpoints: `galaxy`, `nebula`, `cluster`, `star` or `other`. Matches
   an image with at least one object of that kind (`EXISTS` on `objects.kind`). Independent of
   `q`: "nebula" plus "veil" is an image with a nebula whose title or any object name contains
@@ -117,7 +120,9 @@ No `count` of matches in the response: nothing displays it and it would be a sec
 - **`since` and `until`**, each `YYYY-MM-DD`, on the upload date `created_at` in UTC, both ends
   inclusive. The server turns `until` into a strict less-than on the following day so the
   comparison is a plain string compare on the ISO stamp; ordering stays on rowid. A malformed
-  date is a 422. UI: two native `type="date"` inputs, From and To, in the same filter row (the
+  date is a 422. UI: two native `type="date"` inputs, From and To, in the same filter row,
+  reporting after the search box's pause (keyboard entry emits a complete value per digit of
+  the year, each of which would otherwise be a list request; decided in review, 2026-10-17) (the
   colour-dialog objection was about `input type=color`; native date inputs are consistent across
   Chrome, Safari and Firefox).
 - **The gallery gets both** kind chips and the date range; the owner page gets them beside

@@ -37,7 +37,7 @@ form.auth { display: grid; gap: 0.75rem; max-width: 380px; }
 form.auth label { display: grid; gap: 0.3rem; color: var(--muted); font-size: 0.9rem; }
 form.auth button { justify-self: start; }
 form.auth .field-note { margin: 0; }
-input[type='text'], input[type='search'], input[type='number'], input[type='password'], select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem 0.65rem; font: inherit; }
+input[type='text'], input[type='search'], input[type='number'], input[type='password'], input[type='date'], select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem 0.65rem; font: inherit; }
 input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 input:disabled, select:disabled { opacity: 0.55; }
 input[type='number'] { width: 7rem; }
@@ -195,6 +195,19 @@ body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
 .chip[aria-pressed='true'] { background: rgba(255, 213, 74, 0.12); border-color: var(--accent); color: var(--text); }
 .list-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin-bottom: 1rem; }
 .list-filters input[type='search'] { flex: 1 1 14rem; min-width: 0; }
+.list-filters .date-range { display: inline-flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; }
+.list-filters .date-range label { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--muted); font-size: 0.85rem; }
+.list-filters input[type='date'] { padding: 0.3rem 0.5rem; color-scheme: dark; }
+/* A phone (#169): the first card's buttons must stay above the fold, so the two date inputs
+   share one line (the words From/To stay for screen readers) and the rows sit closer. */
+@media (max-width: 640px) {
+  .list-filters { gap: 0.4rem 0.75rem; }
+  .list-filters .date-range { gap: 0.4rem; }
+  .list-filters .date-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  /* The card's upload day would wrap the meta row onto a third line and push Delete under the
+     fold; it comes back on phones once the filters collapse (#229). */
+  .card .meta .upload-day { display: none; }
+}
 .object-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.1rem; }
 .object-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 0.5rem; align-items: center; padding: 0.3rem 0.4rem; border-radius: 4px; font-size: 0.9rem; }
 .object-row:hover, .object-row:focus-within, .object-row.hovered { background: rgba(138, 180, 255, 0.12); }
@@ -230,6 +243,7 @@ body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
 .gallery-frame .overlay { position: absolute; inset: 0; opacity: 0; transition: opacity 120ms ease; }
 .gallery-frame .overlay.revealed { opacity: 1; }
 .gallery-picture figcaption { padding: 0.5rem 0.25rem; font-weight: 600; overflow-wrap: anywhere; }
+.gallery-picture figcaption .day { display: block; color: var(--muted); font-weight: 400; font-size: 0.85rem; margin-top: 0.15rem; }
 .gallery-empty { color: var(--muted); }
 .show-more { display: flex; justify-content: center; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin: 0.25rem 0 0; }
 .show-more a[aria-disabled='true'] { opacity: 0.6; cursor: default; }

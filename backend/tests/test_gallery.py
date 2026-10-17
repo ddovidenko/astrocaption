@@ -115,8 +115,10 @@ def test_gallery_lists_published_images_newest_first_and_nothing_else(
         "preview_url",
         "annotated_preview_url",
         "export_url",
+        "created_at",
     }
     assert item["title"] == "Orion Field"
+    assert item["created_at"] == second["created_at"]  # the day the From/To filter selects on
     base = f"/api/gallery/{second['id']}/files/"
     assert item["thumb_url"] == f"{base}thumb"
     assert item["preview_url"] == f"{base}preview"
@@ -262,3 +264,21 @@ def test_gallery_is_404_everywhere_when_switched_off(
         ):
             resp = client.get(url)
             assert resp.status_code == 404 and resp.json() == {"detail": NOT_FOUND}, url
+
+
+def test_gallery_filters_by_kind_and_upload_day(
+    client: TestClient, anon_client: TestClient, sample_jpeg: Path
+) -> None:
+    published = published_image(client, sample_jpeg)
+    exported_image(client, sample_jpeg)  # unpublished: never listed, whatever the filter
+    created = published["created_at"][:10]
+
+    def ids(**params: object) -> list[str]:
+        return list_ids(anon_client, "/api/gallery", **params)
+
+    assert ids(kind="nebula") == [published["id"]]
+    assert ids(kind="cluster") == []  # the Orion field has nebulae, stars and two galaxies
+    assert ids(since=created, until=created) == [published["id"]]
+    assert ids(until="2000-01-01") == []
+    assert anon_client.get("/api/gallery", params={"kind": "planet"}).status_code == 422
+    assert anon_client.get("/api/gallery", params={"since": "soon"}).status_code == 422

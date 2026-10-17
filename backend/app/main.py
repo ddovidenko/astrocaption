@@ -93,6 +93,11 @@ def create_app(
         uploads.clear_partial_uploads(cfg)
         _headless_setup(source, setup_password)
         db.init()
+        # The stored object kinds follow this build's names table (#189): the editor's chips
+        # and the kind filter read them, so a release with a new table re-checks them here.
+        moved = await asyncio.to_thread(db.reclassify_objects)
+        if moved:
+            log.info("object kinds: %d row(s) reclassified against the bundled names table", moved)
         # Images solved before the local catalogue (or before its current version) gain its
         # objects now, before any request is served (#17): additive, never contacts nova.
         report = await asyncio.to_thread(catalog_backfill.run, db, cfg)

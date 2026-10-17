@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,7 @@ def test_migration_from_v1_adds_hints_column(tmp_path: Path) -> None:
         conn.execute("ALTER TABLE images DROP COLUMN solve_failure")
         conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
         conn.execute("ALTER TABLE images DROP COLUMN objects_catalog")  # added by 6
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")  # added by 8
         conn.execute("PRAGMA user_version = 1")
     db.init()
     with db.connect() as conn:
@@ -47,6 +49,7 @@ def test_migration_from_v2_adds_the_failure_kind_column(tmp_path: Path) -> None:
         conn.execute("ALTER TABLE images DROP COLUMN solve_failure")
         conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
         conn.execute("ALTER TABLE images DROP COLUMN objects_catalog")  # added by 6
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")  # added by 8
         conn.execute("PRAGMA user_version = 2")
     db.init()
     with db.connect() as conn:
@@ -64,6 +67,7 @@ def test_migration_from_v3_adds_the_exported_hash_column(tmp_path: Path) -> None
     with db.connect() as conn:  # rewind to the version-3 shape
         conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
         conn.execute("ALTER TABLE images DROP COLUMN objects_catalog")  # added by 6
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")  # added by 8
         conn.execute("PRAGMA user_version = 3")
     db.init()
     with db.connect() as conn:
@@ -83,6 +87,7 @@ def test_migration_from_v4_swaps_the_exported_version_column_for_the_hash(tmp_pa
         conn.execute("ALTER TABLE images DROP COLUMN exported_hash")
         conn.execute("ALTER TABLE images ADD COLUMN exported_version INTEGER")
         conn.execute("ALTER TABLE images DROP COLUMN objects_catalog")  # added by 6
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")  # added by 8
         conn.execute("PRAGMA user_version = 4")
     db.init()
     with db.connect() as conn:
@@ -143,6 +148,7 @@ def test_migration_from_v6_keeps_a_current_export_current(settings: Settings) ->
                 " objects_catalog = '2026-10-13' WHERE id = ?",
                 (value, image_id),
             )
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")  # added by 8
         conn.execute("PRAGMA user_version = 6")
     db.init()
     cur, old = db.get_image("cur"), db.get_image("old")
@@ -588,6 +594,7 @@ def test_migration_from_v5_adds_the_objects_catalog_stamp(tmp_path: Path) -> Non
     db.init()
     with db.connect() as conn:  # rewind to the version-5 shape
         conn.execute("ALTER TABLE images DROP COLUMN objects_catalog")
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")  # added by 8
         conn.execute("PRAGMA user_version = 5")
     db.init()
     with db.connect() as conn:
@@ -742,3 +749,184 @@ def test_list_published_images_searches_and_an_owner_field_can_only_narrow(
     # The gallery's own conditions are ANDed first, so an owner field never widens the list.
     narrowed = db.list_published_images(filter=ListFilter(q="veil", published=False))
     assert narrowed.items == []
+
+
+def test_migration_from_v7_classifies_every_stored_object(tmp_path: Path) -> None:
+    """A database the previous build wrote has objects but no ``kind`` column. Schema 8 adds
+    it and fills it from the names table and nova's type, so the kind filter and the editor's
+    chips agree from the first start."""
+    db = Database(tmp_path / "x.sqlite")
+    db.init()
+    _with_objects(
+        db,
+        "field",
+        "2026-09-01T00:00:00Z",
+        [["NGC 224", "M 31"], ["NGC 1976", "M 42"], ["NGC 1912", "M 38"], ["Foo 1"]],
+    )
+    with db.connect() as conn:  # rewind to the version-7 shape
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")
+        conn.execute(
+            "INSERT INTO objects (image_id, id, catalog_names, type, x, y, radius)"
+            " VALUES ('field', 5, '[\"ι Ori\"]', 'bright', 1, 1, 0)"
+        )
+        conn.execute("PRAGMA user_version = 7")
+    db.init()
+    with db.connect() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        kinds = {
+            row["id"]: row["kind"]
+            for row in conn.execute("SELECT id, kind FROM objects WHERE image_id = 'field'")
+        }
+    assert kinds == {1: "galaxy", 2: "nebula", 3: "cluster", 4: "other", 5: "star"}
+    db.init()  # idempotent
+
+
+def test_migration_from_v7_with_no_objects_still_stamps(tmp_path: Path) -> None:
+    db = Database(tmp_path / "x.sqlite")
+    db.init()
+    with db.connect() as conn:
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")
+        conn.execute("PRAGMA user_version = 7")
+    db.init()
+    with db.connect() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        assert "kind" in {row["name"] for row in conn.execute("PRAGMA table_info(objects)")}
+
+
+def test_replace_objects_stores_the_kind_and_get_objects_reads_it(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    db.insert_image(_plain_image("a", "2026-09-01T00:00:00Z"))
+    db.replace_objects(
+        "a",
+        [
+            SolveObject(id=1, catalog_names=["NGC 224"], type="ngc", x=1.0, y=1.0, radius=1),
+            SolveObject(id=2, catalog_names=["ι Ori"], type="bright", x=1.0, y=1.0, radius=0),
+            SolveObject(id=3, catalog_names=["LDN 1"], type="ldn", x=1.0, y=1.0, radius=1),
+        ],
+    )
+    assert [o.kind for o in db.get_objects("a")] == ["galaxy", "star", "nebula"]
+
+
+def test_store_solve_result_stores_the_kind(settings: Settings) -> None:
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db, "solved")
+    ann = Annotations(image_id=rec.id, style=StyleConfig(), labels=[], version=1)
+    ok = db.store_solve_result(
+        rec.id,
+        [SolveObject(id=1, catalog_names=["NGC 1976", "M 42"], type="ngc", x=1.0, y=1.0, radius=1)],
+        ann,
+        {"solve_status": SolveStatus.SOLVED},
+    )
+    assert ok
+    assert [o.kind for o in db.get_objects(rec.id)] == ["nebula"]
+
+
+def test_list_images_kind_needs_a_stored_object_of_that_kind(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    db.insert_image(_plain_image("andromeda", "2026-09-01T00:00:00Z"))
+    db.replace_objects(  # the galaxy plus one of nova's stars (type "bright")
+        "andromeda",
+        [
+            SolveObject(
+                id=1, catalog_names=["NGC 224", "M 31"], type="ngc", x=1.0, y=1.0, radius=1
+            ),
+            SolveObject(id=2, catalog_names=["ι Ori"], type="bright", x=1.0, y=1.0, radius=0),
+        ],
+    )
+    _with_objects(db, "orion", "2026-09-02T00:00:00Z", [["NGC 1976", "M 42"]])
+    _with_objects(db, "unknown", "2026-09-03T00:00:00Z", [["Foo 1"]])
+    db.insert_image(_plain_image("no-objects", "2026-09-04T00:00:00Z"))
+    assert _ids(db, kind="galaxy") == ["andromeda"]
+    assert _ids(db, kind="nebula") == ["orion"]
+    assert _ids(db, kind="star") == ["andromeda"]  # nova's `bright` rows are stars
+    assert _ids(db, kind="other") == ["unknown"]  # a stored row of kind other, not "no row"
+    assert _ids(db, kind="cluster") == []
+    # Independent of the search: a nebula whose names contain "m 4".
+    assert _ids(db, kind="nebula", q="m 4") == ["orion"]
+    assert _ids(db, kind="galaxy", q="m 4") == []
+
+
+def test_list_images_date_range_is_inclusive_and_inverted_is_empty(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    db.insert_image(_plain_image("before", "2026-09-30T23:59:59+00:00"))
+    db.insert_image(_plain_image("first", "2026-10-01T00:00:00+00:00"))
+    db.insert_image(_plain_image("late", "2026-10-02T23:59:59+00:00"))
+    db.insert_image(_plain_image("after", "2026-10-03T00:00:00+00:00"))
+    assert _ids(db, since=date(2026, 10, 1)) == ["after", "late", "first"]
+    assert _ids(db, until=date(2026, 10, 2)) == ["late", "first", "before"]
+    # Both ends inclusive, to the last second of the `until` day.
+    assert _ids(db, since=date(2026, 10, 1), until=date(2026, 10, 2)) == ["late", "first"]
+    assert _ids(db, since=date(2026, 10, 2), until=date(2026, 10, 2)) == ["late"]
+    # Swapped pickers are an empty list, not an error.
+    assert _ids(db, since=date(2026, 10, 3), until=date(2026, 10, 1)) == []
+    # The stamp's spelling of UTC does not matter: "Z" sorts after any digit too.
+    db.insert_image(_plain_image("zulu", "2026-10-02T12:00:00Z"))
+    assert _ids(db, since=date(2026, 10, 2), until=date(2026, 10, 2)) == ["zulu", "late"]
+
+
+def test_list_published_images_narrows_by_kind_and_date_inside_the_gallery_rows(
+    tmp_path: Path,
+) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    _with_objects(db, "m31-unpub", "2026-10-01T00:00:00Z", [["NGC 224"]])
+    _with_objects(db, "m31-pub", "2026-10-02T00:00:00Z", [["NGC 224"]], True)
+    _with_objects(db, "m42-pub", "2026-10-03T00:00:00Z", [["NGC 1976"]], True)
+
+    def gallery(**filter: object) -> list[str]:
+        page = db.list_published_images(filter=ListFilter(**filter))  # type: ignore[arg-type]
+        return [r.id for r in page.items]
+
+    assert gallery(kind="galaxy") == ["m31-pub"]
+    assert gallery(since=date(2026, 10, 3)) == ["m42-pub"]
+    assert gallery(kind="galaxy", until=date(2026, 10, 1)) == []
+
+
+def test_migration_from_v7_survives_a_corrupt_names_cell(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A cell this code never writes (not JSON, or an empty list) must not stop the server from
+    starting: that row is ``other``, with a warning, and the migration completes."""
+    db = Database(tmp_path / "x.sqlite")
+    db.init()
+    _with_objects(db, "field", "2026-09-01T00:00:00Z", [["NGC 224"]])
+    with db.connect() as conn:
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")
+        conn.execute(
+            "INSERT INTO objects (image_id, id, catalog_names, type, x, y, radius)"
+            " VALUES ('field', 2, 'not json', 'ngc', 1, 1, 0), ('field', 3, '[]', 'ngc', 1, 1, 0)"
+        )
+        conn.execute("PRAGMA user_version = 7")
+    with caplog.at_level(logging.WARNING, logger="app.db"):
+        db.init()
+    with db.connect() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        rows = conn.execute("SELECT id, kind FROM objects WHERE image_id = 'field' ORDER BY id")
+        assert [(r["id"], r["kind"]) for r in rows] == [(1, "galaxy"), (2, "other"), (3, "other")]
+    assert sum("could not classify" in r.getMessage() for r in caplog.records) == 2
+
+
+def test_list_images_until_the_last_day_a_date_can_name_is_no_upper_bound(tmp_path: Path) -> None:
+    """``date.max`` is a valid ``until`` on the wire (``9999-12-31``) and has no following day:
+    it must list everything, not raise."""
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    db.insert_image(_plain_image("a", "2026-09-01T00:00:00Z"))
+    assert _ids(db, until=date.max) == ["a"]
+    assert _ids(db, since=date(2026, 9, 1), until=date.max) == ["a"]
+
+
+def test_reclassify_objects_updates_only_the_rows_whose_kind_changed(tmp_path: Path) -> None:
+    """A names-table update in a later release changes what ``kind_of`` says for some rows; the
+    startup pass brings the stored kinds back in line and reports how many moved."""
+    db = Database(tmp_path / "t.sqlite")
+    db.init()
+    _with_objects(db, "a", "2026-09-01T00:00:00Z", [["NGC 224"], ["NGC 1976"]])
+    with db.connect() as conn:  # the stored answer of an older names table
+        conn.execute("UPDATE objects SET kind = 'other' WHERE image_id = 'a' AND id = 2")
+    assert db.reclassify_objects() == 1
+    assert [o.kind for o in db.get_objects("a")] == ["galaxy", "nebula"]
+    assert db.reclassify_objects() == 0

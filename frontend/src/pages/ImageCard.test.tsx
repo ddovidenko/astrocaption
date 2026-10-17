@@ -65,6 +65,15 @@ function renderCard(img: ImageOut, onChange = vi.fn(async () => {}), staleAfterS
   return onChange
 }
 
+describe('ImageCard', () => {
+  it('names the upload day, the day the From/To filters select on', () => {
+    renderCard(image())
+    const when = screen.getByText('uploaded 22 Sep 2026')
+    expect(when.tagName).toBe('TIME')
+    expect(when.getAttribute('datetime')).toBe('2026-09-22T10:00:00Z')
+  })
+})
+
 describe('ImageCard while a solve runs (#80)', () => {
   const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString()
 

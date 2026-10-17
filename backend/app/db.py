@@ -13,6 +13,7 @@ import sqlite3
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Literal, NamedTuple
 
@@ -23,6 +24,7 @@ from .models import (
     Calibration,
     ImageRecord,
     Label,
+    ObjectKind,
     SolveHints,
     SolveObject,
     SolveStatus,
@@ -30,6 +32,7 @@ from .models import (
     utcnow_iso,
     validate_dropping_bad_fields,
 )
+from .objects import classify, kind_of
 
 log = logging.getLogger(__name__)
 
@@ -54,11 +57,16 @@ ListStatus = Literal["solving", "failed", "solved"]
 @dataclass(frozen=True)
 class ListFilter:
     """What narrows a paged list (SPEC § 8). An empty ``q`` and None filters mean "everything";
-    the gallery takes only ``q`` and ignores the owner's two."""
+    the gallery endpoint declares only the public fields (``q``, ``kind``, ``since``, ``until``)
+    and never sets the owner's two. ``since`` and ``until`` are upload days in UTC, both
+    inclusive."""
 
     q: str = ""
     status: ListStatus | None = None
     published: bool | None = None
+    kind: ObjectKind | None = None
+    since: date | None = None
+    until: date | None = None
 
 
 #: The whole list, unfiltered (the frozen dataclass makes one shared instance safe).
@@ -102,15 +110,14 @@ _SEARCH_CONDITION = (
     " AND instr(fold_names(o.catalog_names), ?) > 0))"
 )
 
+#: An image with at least one stored object of the kind (schema 8); none at all matches nothing.
+_KIND_CONDITION = "EXISTS (SELECT 1 FROM objects o WHERE o.image_id = images.id AND o.kind = ?)"
+
 
 def _filter_conditions(filter: ListFilter) -> tuple[list[str], list[object]]:
     """The WHERE fragments and their parameters for `filter`, in a fixed order."""
     conds: list[str] = []
     values: list[object] = []
-    needle = fold(filter.q)
-    if needle:
-        conds.append(_SEARCH_CONDITION)
-        values.extend((needle, needle))
     if filter.status is not None:
         cond, params = _STATUS_CONDITIONS[filter.status]
         conds.append(cond)
@@ -118,10 +125,28 @@ def _filter_conditions(filter: ListFilter) -> tuple[list[str], list[object]]:
     if filter.published is not None:
         conds.append("published = ?")
         values.append(1 if filter.published else 0)
+    if filter.kind is not None:
+        conds.append(_KIND_CONDITION)
+        values.append(filter.kind)
+    # created_at is an ISO stamp that starts with the day, so string compares against
+    # "YYYY-MM-DD" bound it, both ends inclusive. Ordering stays on rowid (#214), these only
+    # select.
+    if filter.since is not None:
+        conds.append("created_at >= ?")
+        values.append(filter.since.isoformat())
+    if filter.until is not None:
+        conds.append("substr(created_at, 1, 10) <= ?")
+        values.append(filter.until.isoformat())
+    # Last: SQLite tests the terms in this order, and the search's two Python functions cost
+    # more per row than everything above.
+    needle = fold(filter.q)
+    if needle:
+        conds.append(_SEARCH_CONDITION)
+        values.extend((needle, needle))
     return conds, values
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 # Statements that bring an existing database from version N-1 to N.
@@ -145,6 +170,42 @@ def _migrate_7_rehash_current_exports(conn: sqlite3.Connection) -> None:
     conn.execute("UPDATE images SET objects_catalog = NULL")
 
 
+def _migrate_8_classify_objects(conn: sqlite3.Connection) -> None:
+    """Schema 8 stores each object's Objects-tab kind (#189) so the list can filter on it. The
+    column defaults to ``other``; every existing row is classified once, by the same pass that
+    re-checks them at every start."""
+    conn.execute("ALTER TABLE objects ADD COLUMN kind TEXT NOT NULL DEFAULT 'other'")
+    _reclassify(conn)
+
+
+def _reclassify(conn: sqlite3.Connection) -> int:
+    """Rewrite every stored ``kind`` that differs from what `classify` says today and return how
+    many rows moved. The caller owns the transaction."""
+    rows = conn.execute("SELECT image_id, id, catalog_names, type, kind FROM objects").fetchall()
+    moved = [(kind, r["image_id"], r["id"]) for r in rows if (kind := _kind_of_row(r)) != r["kind"]]
+    conn.executemany("UPDATE objects SET kind = ? WHERE image_id = ? AND id = ?", moved)
+    return len(moved)
+
+
+def _kind_of_row(row: sqlite3.Row) -> ObjectKind:
+    """`classify` for a stored object row. A names cell this code never writes (not a JSON list
+    of names, or an empty one) is ``other`` with a warning: one odd row must not roll the
+    migration back and keep the server from starting."""
+    try:
+        names = json.loads(row["catalog_names"])
+        if not isinstance(names, list) or not names or not all(isinstance(n, str) for n in names):
+            raise ValueError("not a list of names")
+    except ValueError:
+        log.warning(
+            "object kinds: could not classify object %s of image %s (its names cell is not a"
+            " JSON list of names); stored as other",
+            row["id"],
+            row["image_id"],
+        )
+        return "other"
+    return classify(row["type"], names)
+
+
 MIGRATIONS: dict[int, tuple[str | Callable[[sqlite3.Connection], None], ...]] = {
     2: ("ALTER TABLE images ADD COLUMN solve_hints_json TEXT",),
     3: ("ALTER TABLE images ADD COLUMN solve_failure TEXT",),
@@ -161,6 +222,8 @@ MIGRATIONS: dict[int, tuple[str | Callable[[sqlite3.Connection], None], ...]] = 
     # 7: the content hash covers the objects' names (#217); current exports are re-stamped and
     # the catalogue stamps cleared, so the backfill revisits every image once.
     7: (_migrate_7_rehash_current_exports,),
+    # 8: each object's kind is stored (#189), so the list filter and the editor's chips agree.
+    8: (_migrate_8_classify_objects,),
 }
 
 SCHEMA = """
@@ -199,6 +262,7 @@ CREATE TABLE IF NOT EXISTS objects (
     x             REAL NOT NULL,
     y             REAL NOT NULL,
     radius        REAL NOT NULL DEFAULT 0,
+    kind          TEXT NOT NULL DEFAULT 'other',
     PRIMARY KEY (image_id, id)
 );
 
@@ -374,7 +438,24 @@ def _row_to_object(row: sqlite3.Row) -> SolveObject:
         x=row["x"],
         y=row["y"],
         radius=row["radius"],
+        kind=row["kind"],
     )
+
+
+#: The objects table's insert, shared by the solve's write and ``replace_objects``.
+_INSERT_OBJECT = (
+    "INSERT INTO objects (image_id, id, catalog_names, type, x, y, radius, kind)"
+    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+)
+
+
+def _object_rows(image_id: str, objects: Iterable[SolveObject]) -> list[tuple[object, ...]]:
+    """One parameter tuple per object for ``_INSERT_OBJECT``; the kind is classified here, at
+    the only place a row is written, whatever the caller's ``kind`` says."""
+    return [
+        (image_id, o.id, json.dumps(o.catalog_names), o.type, o.x, o.y, o.radius, kind_of(o))
+        for o in objects
+    ]
 
 
 class Database:
@@ -545,14 +626,7 @@ class Database:
                     log.debug("store_solve_result: no row with id %s; nothing stored", image_id)
                     return False
                 conn.execute("DELETE FROM objects WHERE image_id = ?", (image_id,))
-                conn.executemany(
-                    "INSERT INTO objects (image_id, id, catalog_names, type, x, y, radius)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    [
-                        (image_id, o.id, json.dumps(o.catalog_names), o.type, o.x, o.y, o.radius)
-                        for o in objects
-                    ],
-                )
+                conn.executemany(_INSERT_OBJECT, _object_rows(image_id, objects))
                 conn.execute(
                     "INSERT INTO annotations (image_id, style_json, labels_json, version,"
                     " updated_at) VALUES (?, ?, ?, ?, ?)"
@@ -578,15 +652,19 @@ class Database:
         with self.connect() as conn:
             conn.execute("BEGIN")
             conn.execute("DELETE FROM objects WHERE image_id = ?", (image_id,))
-            conn.executemany(
-                "INSERT INTO objects (image_id, id, catalog_names, type, x, y, radius)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
-                [
-                    (image_id, o.id, json.dumps(o.catalog_names), o.type, o.x, o.y, o.radius)
-                    for o in objects
-                ],
-            )
+            conn.executemany(_INSERT_OBJECT, _object_rows(image_id, objects))
             conn.execute("COMMIT")
+
+    def reclassify_objects(self) -> int:
+        """Bring every stored ``kind`` in line with what `classify` says today and return how
+        many rows moved. Run at every start: a release that ships a new names table changes the
+        answer for some objects, and the editor's chips and the list filter read the column, so
+        nothing else would notice until a re-solve."""
+        with self.connect() as conn:
+            conn.execute("BEGIN")
+            moved = _reclassify(conn)
+            conn.execute("COMMIT")
+        return moved
 
     def get_objects(self, image_id: str) -> list[SolveObject]:
         with self.connect() as conn:

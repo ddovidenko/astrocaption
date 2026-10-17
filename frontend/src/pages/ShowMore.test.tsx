@@ -33,7 +33,7 @@ describe('ShowMore', () => {
 
   it('keeps the search and filters in the link so a followed page stays in the result set', () => {
     render(
-      <ShowMore next="img-9" busy={false} error={null} onMore={() => {}} query={{ q: 'm 27', status: 'solved', published: null }} />,
+      <ShowMore next="img-9" busy={false} error={null} onMore={() => {}} query={{ ...EMPTY_QUERY, q: 'm 27', status: 'solved' }} />,
     )
     expect(screen.getByRole('link', { name: 'Show more' }).getAttribute('href')).toBe('?q=m+27&status=solved&before=img-9')
   })
