@@ -115,8 +115,10 @@ def test_gallery_lists_published_images_newest_first_and_nothing_else(
         "preview_url",
         "annotated_preview_url",
         "export_url",
+        "created_at",
     }
     assert item["title"] == "Orion Field"
+    assert item["created_at"] == second["created_at"]  # the day the From/To filter selects on
     base = f"/api/gallery/{second['id']}/files/"
     assert item["thumb_url"] == f"{base}thumb"
     assert item["preview_url"] == f"{base}preview"

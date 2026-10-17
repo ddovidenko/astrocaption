@@ -6,6 +6,7 @@ export const galleryItem: GalleryItem = {
   title: 'Orion',
   width: 3000,
   height: 2000,
+  created_at: '2026-09-21T18:00:00Z',
   exported_at: '2026-09-22T10:05:00Z',
   thumb_url: '/api/gallery/img-1/files/thumb',
   preview_url: '/api/gallery/img-1/files/preview',

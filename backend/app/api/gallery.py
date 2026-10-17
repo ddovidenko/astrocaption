@@ -55,6 +55,7 @@ def gallery_item(rec: ImageRecord) -> GalleryItem:
         title=rec.title,
         width=rec.width,
         height=rec.height,
+        created_at=rec.created_at,
         exported_at=rec.exported_at,
         thumb_url=f"{base}/thumb",
         preview_url=f"{base}/preview",

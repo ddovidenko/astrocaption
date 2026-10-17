@@ -267,6 +267,7 @@ export interface GalleryItem {
   title: string
   width: number
   height: number
+  created_at: string
   exported_at: string
   thumb_url: string
   preview_url: string

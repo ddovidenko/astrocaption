@@ -580,6 +580,9 @@ class GalleryItem(BaseModel):
     title: str
     width: int
     height: int
+    #: The upload stamp: the card names its day, which is what the gallery's From/To filters
+    #: select on (#189).
+    created_at: str
     exported_at: str
     thumb_url: str
     preview_url: str

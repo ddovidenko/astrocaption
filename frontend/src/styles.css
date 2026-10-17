@@ -240,6 +240,7 @@ body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
 .gallery-frame .overlay { position: absolute; inset: 0; opacity: 0; transition: opacity 120ms ease; }
 .gallery-frame .overlay.revealed { opacity: 1; }
 .gallery-picture figcaption { padding: 0.5rem 0.25rem; font-weight: 600; overflow-wrap: anywhere; }
+.gallery-picture figcaption .day { display: block; color: var(--muted); font-weight: 400; font-size: 0.85rem; margin-top: 0.15rem; }
 .gallery-empty { color: var(--muted); }
 .show-more { display: flex; justify-content: center; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin: 0.25rem 0 0; }
 .show-more a[aria-disabled='true'] { opacity: 0.6; cursor: default; }

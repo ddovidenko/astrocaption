@@ -107,6 +107,19 @@ describe('GalleryPage', () => {
     expect(screen.queryByRole('link', { name: 'Show more' })).toBeNull()
   })
 
+  it('captions each card with its title and the upload day', async () => {
+    vi.mocked(api.gallery).mockResolvedValue({ items: [item], next: null })
+    render(
+      <MemoryRouter>
+        <GalleryPage health={health()} />
+      </MemoryRouter>,
+    )
+    const caption = (await screen.findByText('Orion')).closest('figcaption')!
+    const when = caption.querySelector('time')!
+    expect(when.textContent).toBe('21 Sep 2026')
+    expect(when.getAttribute('datetime')).toBe('2026-09-21T18:00:00Z')
+  })
+
   it('says when nothing is published', async () => {
     vi.mocked(api.gallery).mockResolvedValue({ items: [], next: null })
     render(

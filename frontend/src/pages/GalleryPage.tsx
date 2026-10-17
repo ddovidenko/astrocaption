@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { api, ApiError, describeError, type GalleryItem, type HealthOut, type PageQuery } from '../api'
+import { dayLabel } from '../day'
 import GalleryCard from './GalleryCard'
 import ListFilters from './ListFilters'
 import { isFiltered, toPageQuery } from './listQuery'
@@ -112,6 +113,9 @@ export default function GalleryPage({ health }: { health: HealthOut }) {
             frame="uniform"
           >
             {item.title}
+            <time className="day" dateTime={item.created_at}>
+              {dayLabel(item.created_at)}
+            </time>
           </GalleryCard>
         ))}
       </section>

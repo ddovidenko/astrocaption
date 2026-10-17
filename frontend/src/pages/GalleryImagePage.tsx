@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api, ApiError, describeError, type GalleryItem } from '../api'
+import { dayLabel } from '../day'
 import GalleryCard from './GalleryCard'
 
 const NOT_PUBLISHED = 'This image is not published.'
@@ -47,6 +48,9 @@ export default function GalleryImagePage() {
   return (
     <section className="gallery-view">
       <h2>{item.title}</h2>
+      <p className="meta">
+        <time dateTime={item.created_at}>uploaded {dayLabel(item.created_at)}</time>
+      </p>
       <GalleryCard item={item} plain={item.preview_url} annotated={item.annotated_preview_url} />
       <p className="actions">
         <a href={item.export_url}>

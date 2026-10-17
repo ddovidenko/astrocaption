@@ -26,7 +26,8 @@ test('publish, gallery hover, full view download, unpublish', async ({ page, bro
       const galleryCard = pub.locator('.gallery-card', { hasText: 'Orion' })
       await expect(galleryCard).toBeVisible()
       await expect(galleryCard.locator('figcaption')).toBeInViewport()
-      await expect(galleryCard.locator('figcaption')).toHaveText('Orion')
+      await expect(galleryCard.locator('figcaption')).toContainText('Orion')
+      await expect(galleryCard.locator('figcaption time')).toHaveText(/^\d{1,2} \w{3} \d{4}$/)
 
       const overlay = galleryCard.locator('img.overlay')
       await expect(overlay).toHaveCSS('opacity', '0')

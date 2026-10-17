@@ -214,7 +214,8 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
   Hover (or tap on touch) swaps the preview
   to the annotated preview. Click opens a full-size view (the 2048 px preview) with the same
   hover behaviour and a link to download the full-resolution annotated export. The unannotated
-  original is never public. Every grid card shares one 3:2 box (a portrait image is letterboxed
+  original is never public. Every card, on both lists and the full-size view, names its upload
+  day (UTC, the day the From/To range selects on). Every grid card shares one 3:2 box (a portrait image is letterboxed
   on black) and long titles wrap inside their card; only the full-size view uses the image's own
   proportions.
 - `public_gallery_enabled` (config, default true; env `ASTROCAPTION_PUBLIC_GALLERY`) switches
@@ -389,7 +390,7 @@ Public (no cookie; every miss is 404 `Image not found.`, whether the id is unkno
 unpublished or not currently solved, its export files are missing, or the gallery is switched off):
 - `GET /gallery?limit=24&before=<id>&q=<text>` → one page of published images newest first,
   `{items: GalleryItem[], next: <id> | null}`. `GalleryItem` is {id, title, width, height,
-  exported_at, thumb_url, preview_url, annotated_preview_url, export_url}; the URLs are all under
+  created_at, exported_at, thumb_url, preview_url, annotated_preview_url, export_url}; the URLs are all under
   `/api/gallery/{id}/files/…` and carry `?v=<exported_at>` where the file changes with an export.
   Newest first is insertion order, not the created-time stamp, so a host clock stepped backwards
   cannot reorder two uploads (#214). Paging is keyset on that order: `before` names the last

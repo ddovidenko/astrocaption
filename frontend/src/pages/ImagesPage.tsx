@@ -16,6 +16,7 @@ import {
   type Page,
   type SolveHints,
 } from '../api'
+import { dayLabel } from '../day'
 import { elapsed, exportOf, exportState, relativeTime } from '../exportStatus'
 import ConfirmInline from '../ConfirmInline'
 import ListFilters from './ListFilters'
@@ -518,6 +519,7 @@ export function ImageCard({
           <span>
             {image.width} × {image.height} px
           </span>
+          <time dateTime={image.created_at}>uploaded {dayLabel(image.created_at)}</time>
           {hasLayout(image) && <span>{image.object_count} objects</span>}
           {image.calibration && (
             <span>
