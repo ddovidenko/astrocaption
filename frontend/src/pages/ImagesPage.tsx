@@ -519,7 +519,9 @@ export function ImageCard({
           <span>
             {image.width} × {image.height} px
           </span>
-          <time dateTime={image.created_at}>uploaded {dayLabel(image.created_at)}</time>
+          <time className="upload-day" dateTime={image.created_at}>
+            uploaded {dayLabel(image.created_at)}
+          </time>
           {hasLayout(image) && <span>{image.object_count} objects</span>}
           {image.calibration && (
             <span>

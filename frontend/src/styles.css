@@ -204,6 +204,9 @@ body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
   .list-filters { gap: 0.4rem 0.75rem; }
   .list-filters .date-range { gap: 0.4rem; }
   .list-filters .date-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  /* The card's upload day would wrap the meta row onto a third line and push Delete under the
+     fold; it comes back on phones once the filters collapse (#229). */
+  .card .meta .upload-day { display: none; }
 }
 .object-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.1rem; }
 .object-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 0.5rem; align-items: center; padding: 0.3rem 0.4rem; border-radius: 4px; font-size: 0.9rem; }
