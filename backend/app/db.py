@@ -176,23 +176,30 @@ def _migrate_8_classify_objects(conn: sqlite3.Connection) -> None:
     rows = conn.execute("SELECT image_id, id, catalog_names, type FROM objects").fetchall()
     conn.executemany(
         "UPDATE objects SET kind = ? WHERE image_id = ? AND id = ?",
-        [
-            (
-                kind_of(
-                    SolveObject(
-                        id=r["id"],
-                        catalog_names=json.loads(r["catalog_names"]),
-                        type=r["type"],
-                        x=0.0,
-                        y=0.0,
-                    )
-                ),
-                r["image_id"],
-                r["id"],
-            )
-            for r in rows
-        ],
+        [(_kind_of_row(r), r["image_id"], r["id"]) for r in rows],
     )
+
+
+def _kind_of_row(row: sqlite3.Row) -> ObjectKind:
+    """The kind of a stored object row, for the one-off backfill. A cell this code never writes
+    (not a JSON list of names, or an empty one) is ``other`` with a warning: one odd row must
+    not roll the migration back and keep the server from starting."""
+    try:
+        obj = SolveObject(
+            id=row["id"],
+            catalog_names=json.loads(row["catalog_names"]),
+            type=row["type"],
+            x=0.0,
+            y=0.0,
+        )
+    except (ValueError, ValidationError):
+        log.warning(
+            "schema 8: could not classify object %s of image %s; stored as other",
+            row["id"],
+            row["image_id"],
+        )
+        return "other"
+    return kind_of(obj)
 
 
 MIGRATIONS: dict[int, tuple[str | Callable[[sqlite3.Connection], None], ...]] = {

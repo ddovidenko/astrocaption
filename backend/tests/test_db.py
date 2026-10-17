@@ -887,3 +887,27 @@ def test_list_published_images_narrows_by_kind_and_date_inside_the_gallery_rows(
     assert gallery(kind="galaxy") == ["m31-pub"]
     assert gallery(since=date(2026, 10, 3)) == ["m42-pub"]
     assert gallery(kind="galaxy", until=date(2026, 10, 1)) == []
+
+
+def test_migration_from_v7_survives_a_corrupt_names_cell(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A cell this code never writes (not JSON, or an empty list) must not stop the server from
+    starting: that row is ``other``, with a warning, and the migration completes."""
+    db = Database(tmp_path / "x.sqlite")
+    db.init()
+    _with_objects(db, "field", "2026-09-01T00:00:00Z", [["NGC 224"]])
+    with db.connect() as conn:
+        conn.execute("ALTER TABLE objects DROP COLUMN kind")
+        conn.execute(
+            "INSERT INTO objects (image_id, id, catalog_names, type, x, y, radius)"
+            " VALUES ('field', 2, 'not json', 'ngc', 1, 1, 0), ('field', 3, '[]', 'ngc', 1, 1, 0)"
+        )
+        conn.execute("PRAGMA user_version = 7")
+    with caplog.at_level(logging.WARNING, logger="app.db"):
+        db.init()
+    with db.connect() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        rows = conn.execute("SELECT id, kind FROM objects WHERE image_id = 'field' ORDER BY id")
+        assert [(r["id"], r["kind"]) for r in rows] == [(1, "galaxy"), (2, "other"), (3, "other")]
+    assert sum("could not classify" in r.getMessage() for r in caplog.records) == 2
