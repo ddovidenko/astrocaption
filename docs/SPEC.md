@@ -202,7 +202,10 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
   shown. A search box above both lists finds an image by its title or by any catalogue name of
   any object in it, case- and space-insensitively ("m27", "M 27" and "NGC 6960" all work); the
   owner's list adds status chips (Solving, Failed, Solved) and visibility chips (Published,
-  Unpublished). The search and chips live in the URL (`/gallery?q=veil`), so a result is
+  Unpublished). Both lists add kind chips (Galaxies, Nebulae, Clusters, Stars, Other: an image
+  with at least one object of that kind, as the Objects tab buckets them) and an upload-day
+  range (From, To: native date inputs, UTC days, both inclusive). The search and chips live in
+  the URL (`/gallery?q=veil`), so a result is
   linkable and a reload keeps it, and the Show more link carries them so a followed page stays
   inside the result set; changing a filter starts again from the top. An active search with no
   result says "Nothing matches." (owner: "No images match.") next to a Clear button. An upload
@@ -365,6 +368,8 @@ objects (per image, from nova and the local catalogue; rewritten only by a re-so
                        sharpless|lbn|barnard|ldn|pgc)
   x, y          float  (original pixels)
   radius        float
+  kind          text  (galaxy|nebula|cluster|star|other: the Objects-tab bucket, stored at insert
+                       and backfilled once by schema 8, so the list filter and the editor agree)
 
 annotations (per image; the editable layout)
   image_id
@@ -391,7 +396,10 @@ unpublished or not currently solved, its export files are missing, or the galler
   1–100, default 24. `q` (up to 200 characters) narrows the page to images whose title or any
   object's catalogue name contains the text after case-folding and removing whitespace, on both
   sides; blank is no filter. The cursor rule is unchanged, so `before` from a searched page
-  continues that search. A `before` that names no image is 422 `That page is no longer available;
+  continues that search. `kind` (galaxy|nebula|cluster|star|other) keeps images with at least
+  one stored object of that kind; `since` and `until` (`YYYY-MM-DD`) bound the upload day in
+  UTC, both inclusive, and an inverted range is simply empty. Any of these malformed is 422.
+  A `before` that names no image is 422 `That page is no longer available;
   reload the list.` A published row whose export files are missing is skipped but still counted,
   so a page can be short by one.
 - `GET /gallery/{id}` → one `GalleryItem`
@@ -432,10 +440,11 @@ Owner (cookie session):
   short); `POST /uploads/{id}/finish` → the same `ImageOut` as `POST /images`, 409 while a chunk is missing;
   `DELETE /uploads/{id}` drops a cancelled session. Sessions live under `data/uploads/.partial/<id>/`, are
   swept after a day and all at startup. An unknown id is 404 `That upload is no longer open; start it again.`
-- `GET /images?limit=24&before=<id>&q=<text>&status=<solving|failed|solved>&published=<bool>` →
+- `GET /images?limit=24&before=<id>&q=<text>&status=<solving|failed|solved>&published=<bool>&kind=<kind>&since=<day>&until=<day>` →
   `{items: ImageOut[], next}`, paged and searched exactly like `GET /gallery`; `status=solving`
-  is every row the page polls (`pending` too); the gallery accepts and ignores `status` and
-  `published`, so an owner filter can never widen what a visitor sees;
+  is every row the page polls (`pending` too); the gallery takes `q`, `kind`, `since` and
+  `until` like the owner's list, and accepts and ignores `status` and `published`, so an owner
+  filter can never widen what a visitor sees;
   `GET /images/{id}`, `DELETE /images/{id}`
 - `PUT /images/{id}/published` {published} → the updated image; 409 when publishing without an export (§ 5.5)
 - `POST /images/{id}/solve` (re-solve, optional hints: scale, downsample factor, centre + radius)

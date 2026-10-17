@@ -183,6 +183,10 @@ every solved image once more (a few seconds per hundred images, before the serve
 the new objects beside the existing labels; those images then show their export as out of date. An image
 the lookup cannot handle is logged and left as it was; the server starts regardless.
 
+The first start after upgrading to a release with the kind filter also classifies every stored
+object once (the objects table gains a `kind` column; a moment per thousand objects), so the
+Images page and the gallery can filter by it.
+
 The package is public: pulling needs no GitHub account or `docker login`. If you run a fork,
 its first release pushes a *private* package (GHCR starts every new package that way); make it
 public, or `docker login ghcr.io` on the server, before `docker compose pull` will work.
