@@ -361,6 +361,10 @@ make lint           # ruff + mypy + eslint + tsc
 make e2e            # browser smoke test, plus the Vite dev server through its /api proxy
 ```
 
+Open **http://localhost:5173**: that is the working tree, live-reloaded. Port 8000 serves the API and, when
+`backend/static` exists, the last built bundle (from `npm run build` or a docker build), which can be days behind
+the source you are editing.
+
 No local toolchain? The repo carries a devcontainer (`.devcontainer/devcontainer.json`: Python 3.14, Node 24,
 `make install` on create). Open it in a GitHub Codespace (*Code → Codespaces → Create*) or in VS Code's
 Dev Containers extension, then run `make dev` as above; Codespaces forwards port 5173 and opens it.
