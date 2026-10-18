@@ -142,10 +142,13 @@ async def gallery_file(image_id: str, kind: str, settings: SettingsDep, db: DbDe
 # fallback, which would otherwise answer both with the shell.
 public_router = APIRouter(include_in_schema=False)
 
-# The disallowed routes are owner routes that would only index as empty shells.
+# The preview-card image and the page's own data live under /api, and a bot that obeys
+# robots.txt (Twitterbot, LinkedIn, Google's renderer) drops a card image it may not fetch;
+# the longest matching rule wins, so the two Allow lines beat the Disallow. The disallowed
+# routes are owner routes that would only index as empty shells.
 ROBOTS = (
-    "User-agent: *\nDisallow: /api/\nDisallow: /login\nDisallow: /setup\n"
-    "Disallow: /config\nDisallow: /images/\n"
+    "User-agent: *\nAllow: /api/gallery/\nAllow: /api/health\nDisallow: /api/\n"
+    "Disallow: /login\nDisallow: /setup\nDisallow: /config\nDisallow: /images/\n"
 )
 
 

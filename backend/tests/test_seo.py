@@ -247,15 +247,20 @@ def test_misses_are_the_plain_shell_with_404(
             assert resp.status_code == 200 and "og:" not in resp.text, path
 
 
-def test_public_routes_are_404_shells_when_the_gallery_is_off(
+def test_gallery_routes_are_404_shells_when_the_gallery_is_off(
     tmp_path: Path, sample_jpeg: Path, fake_solver: Any
 ) -> None:
     with shell_client(tmp_path, fake_solver, public_gallery_enabled=False) as client:
         image = published_image(client, sample_jpeg)
-        for path in ("/", "/gallery", f"/gallery/{image['id']}"):
+        for path in ("/gallery", f"/gallery/{image['id']}"):
             resp = client.get(path)
             assert resp.status_code == 404, path
             assert "<title>Test Site</title>" in resp.text and "og:" not in resp.text
+        # The root is also the sign-in landing and the owner's own page: an uptime monitor
+        # pointed at it must not read "gallery off" as "site down".
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "<title>Test Site</title>" in resp.text and "og:" not in resp.text
 
 
 def test_absolute_urls_follow_the_proxy_scheme_only_when_trusted(
@@ -335,7 +340,11 @@ def test_robots_names_the_sitemap_and_keeps_crawlers_out_of_the_owner_routes(
         resp = client.get("/robots.txt", headers={"X-Forwarded-Proto": "https"})
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/plain")
+        # The preview-card image and the page's own data live under /api: a bot that obeys
+        # robots.txt (Twitterbot, LinkedIn, Google's renderer) must be let at those, and the
+        # longest matching rule wins, so the two Allow lines beat the Disallow.
         assert resp.text == (
-            "User-agent: *\nDisallow: /api/\nDisallow: /login\nDisallow: /setup\n"
-            "Disallow: /config\nDisallow: /images/\nSitemap: https://testserver/sitemap.xml\n"
+            "User-agent: *\nAllow: /api/gallery/\nAllow: /api/health\nDisallow: /api/\n"
+            "Disallow: /login\nDisallow: /setup\nDisallow: /config\nDisallow: /images/\n"
+            "Sitemap: https://testserver/sitemap.xml\n"
         )

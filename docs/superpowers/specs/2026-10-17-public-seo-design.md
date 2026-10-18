@@ -26,7 +26,8 @@ configurable description, structured data (JSON-LD), an image sitemap, `rel=prev
   follow-on.
 - **The base URL is the request's.** Scheme and host come from `request.url`, which the proxy
   middleware already corrects from `X-Forwarded-Proto` under `TRUST_PROXY=1`; the host is the
-  one the proxy passes through, as the documented nginx snippet does. No new setting. A forged
+  one the proxy passes through: Caddy by default, nginx only with `proxy_set_header Host $host`,
+  which the INSTALL snippet gains in this PR (found in review, 2026-10-17). No new setting. A forged
   `Host` header can only change the URLs in the forger's own response.
 - **The description names what the export shows.** The enabled labels' text, in label order, as
   the renderer prints it (`text_override` or the primary name under the style's name
@@ -43,9 +44,11 @@ configurable description, structured data (JSON-LD), an image sitemap, `rel=prev
   pointing at `/gallery`. The owner's Images page on the same URL is behind a session a crawler
   never has.
 - **A miss is a 404 shell.** An unknown or unpublished id, an id whose export files are missing,
-  and every public route while the gallery is off serve the plain shell with status 404: the app
-  still loads and shows its own message, and an engine drops the URL. Owner routes and files are
-  untouched and keep their 200.
+  and `/gallery` and `/gallery/{id}` while the gallery is off serve the plain shell with status
+  404: the app still loads and shows its own message, and an engine drops the URL. `/` stays 200
+  with the gallery off (it is also the sign-in landing and the owner's page; an uptime monitor
+  must not read "gallery off" as "site down"; decided in review, 2026-10-17). Owner routes and
+  files are untouched and keep their 200.
 
 ## Routes and the shell
 
@@ -103,6 +106,8 @@ this order:
 
   ```
   User-agent: *
+  Allow: /api/gallery/
+  Allow: /api/health
   Disallow: /api/
   Disallow: /login
   Disallow: /setup
@@ -111,7 +116,10 @@ this order:
   Sitemap: {base}/sitemap.xml
   ```
 
-  The disallowed routes are owner routes that would only index as empty shells.
+  The two Allow lines let a bot that obeys robots.txt (Twitterbot, LinkedIn, Google's renderer)
+  fetch the preview-card image and the page's own data; the longest matching rule wins (found in
+  review, 2026-10-17). The disallowed routes are owner routes that would only index as empty
+  shells.
 
 ## Frontend
 

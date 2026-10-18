@@ -126,7 +126,7 @@ def base_url(request: Request) -> str:
 
 def head_for(request: Request, path: str, settings: Settings, db: Database) -> tuple[int, Head]:
     """Status and head for a client route. Only the public gallery routes get tags; every
-    other route is the shell with the site title. A miss on a public route is 404 with the
+    other route is the shell with the site title. A miss on a gallery route is 404 with the
     plain head, the same body whether the id is unknown, unpublished or lacks files."""
     site = settings.site_title
     plain = Head(site, "")
@@ -135,7 +135,8 @@ def head_for(request: Request, path: str, settings: Settings, db: Database) -> t
     if not is_gallery and image_match is None:
         return 200, plain
     if not settings.public_gallery_enabled:
-        return 404, plain
+        # The root is also the sign-in landing and the owner's page: never a 404.
+        return (200 if path == "" else 404), plain
     base = base_url(request)
     if is_gallery:
         rows = db.published_images()

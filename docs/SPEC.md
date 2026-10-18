@@ -229,11 +229,14 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
   upload day), a canonical link, Open Graph tags with the annotated preview as the image, and a
   Twitter card. Any gallery URL with a query string (search, chips, dates, `before`) is canonical
   to the plain `/gallery`, with no `noindex`, so the chain stays followable and the index holds
-  one gallery. An unpublished or unknown id, a missing export, and every public route while the
-  gallery is off serve the plain shell with status 404. `/sitemap.xml` lists `/gallery` and
-  every published image with `lastmod` from its export time (empty with the gallery off);
-  `/robots.txt` names it and keeps crawlers out of `/api/` and the owner routes. The app sets the
-  same title on the full-size view when a visitor navigates to it in-app.
+  one gallery. An unpublished or unknown id, a missing export, and the gallery routes while the
+  gallery is off serve the plain shell with status 404 (`/` stays 200: it is also the sign-in
+  landing and the owner's page). `/sitemap.xml` lists `/gallery` and every published image with
+  `lastmod` from its export time (empty with the gallery off); `/robots.txt` names it and keeps
+  crawlers out of the owner routes and the owner API while allowing `/api/gallery/` and
+  `/api/health`, which the preview-card image and a rendering crawler need. Behind nginx the
+  proxy must forward `Host` (INSTALL), or every absolute link names the upstream address. The
+  app sets the same title on the full-size view when a visitor navigates to it in-app.
 
 ## 6. Editor — interactions
 
