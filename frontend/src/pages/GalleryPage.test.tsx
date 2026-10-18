@@ -313,14 +313,24 @@ describe('GalleryPage', () => {
 
 describe('GalleryImagePage', () => {
   function renderAt(path: string) {
-    render(
+    return render(
       <MemoryRouter initialEntries={[path]}>
         <Routes>
-          <Route path="/gallery/:id" element={<GalleryImagePage />} />
+          <Route path="/gallery/:id" element={<GalleryImagePage siteTitle="Sky" />} />
         </Routes>
       </MemoryRouter>,
     )
   }
+
+  it('names the image in the document title while it is open, as the server-filled shell does', async () => {
+    document.title = 'Sky'
+    vi.mocked(api.galleryImage).mockResolvedValue(item)
+    const { unmount } = renderAt('/gallery/img-1')
+    await screen.findByRole('link', { name: /^Download annotated image/ })
+    expect(document.title).toBe('Orion · Sky')
+    unmount()
+    expect(document.title).toBe('Sky')
+  })
 
   it('shows the picture, the download link and the size', async () => {
     vi.mocked(api.galleryImage).mockResolvedValue(item)

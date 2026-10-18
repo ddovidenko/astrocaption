@@ -6,11 +6,21 @@ import GalleryCard from './GalleryCard'
 
 const NOT_PUBLISHED = 'This image is not published.'
 
-/** One published image at preview size with the same hover swap, plus the download (§ 5.5). */
-export default function GalleryImagePage() {
+/** One published image at preview size with the same hover swap, plus the download (§ 5.5).
+ *  The document title names the image while the page is open, matching the title the server
+ *  fills into the shell for a direct load (#187). */
+export default function GalleryImagePage({ siteTitle }: { siteTitle: string }) {
   const { id = '' } = useParams()
   const [item, setItem] = useState<GalleryItem | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!item) return
+    document.title = `${item.title} · ${siteTitle}`
+    return () => {
+      document.title = siteTitle
+    }
+  }, [item, siteTitle])
 
   useEffect(() => {
     // No reset of item/error at the top: react-hooks/set-state-in-effect forbids calling
