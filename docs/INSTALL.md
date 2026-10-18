@@ -310,6 +310,11 @@ container-proxy shape publishes none. With the flag off, only uvicorn's default 
 forwarded headers are honoured from loopback peers (`FORWARDED_ALLOW_IPS`), which is the case
 for the `make dev` Vite proxy.
 
+The links the app writes for crawlers and link previews (the canonical URL, the preview-card
+image, `/sitemap.xml`) use the scheme and host of the request as the proxy passes them on:
+`X-Forwarded-Proto` for the scheme (so the flag matters here too: without it a proxied site
+advertises `http://` links) and the `Host` header, which the snippets above forward unchanged.
+
 ### Behind Cloudflare
 
 A proxied ("orange cloud") record works, with three things to know:
