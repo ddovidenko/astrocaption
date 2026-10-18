@@ -257,15 +257,18 @@ server {
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_read_timeout 300;
+        proxy_set_header Host $host;                     # nginx would send 127.0.0.1:8080 otherwise
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-For $remote_addr;   # replace, never append: the app reads the first entry
     }
 }
 ```
 
-Caddy sends both forwarded headers by default and replaces any a client supplied; nginx needs
-the two `proxy_set_header` lines (upgrading from a release before 0.1.0: add them, or the cookie
-stops being `Secure` behind nginx).
+Caddy sends the host and both forwarded headers by default and replaces any a client supplied;
+nginx needs the three `proxy_set_header` lines (upgrading from a release before 0.1.0: add the
+forwarded ones, or the cookie stops being `Secure` behind nginx; upgrading from a release before
+the sitemap: add the `Host` line, or the links the app writes for crawlers and preview cards
+name `127.0.0.1:8080` instead of your site).
 
 ### A proxy that is itself a container
 
@@ -309,6 +312,12 @@ it is harmless, but it is why the host-proxy shape publishes the port on loopbac
 container-proxy shape publishes none. With the flag off, only uvicorn's default applies:
 forwarded headers are honoured from loopback peers (`FORWARDED_ALLOW_IPS`), which is the case
 for the `make dev` Vite proxy.
+
+The links the app writes for crawlers and link previews (the canonical URL, the preview-card
+image, `/sitemap.xml`) use the scheme and host of the request as the proxy passes them on:
+`X-Forwarded-Proto` for the scheme (so the flag matters here too: without it a proxied site
+advertises `http://` links) and the `Host` header, which Caddy forwards by default and nginx
+only with the `proxy_set_header Host $host;` line of the snippet above.
 
 ### Behind Cloudflare
 

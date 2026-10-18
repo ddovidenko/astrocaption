@@ -50,6 +50,12 @@ class ImagePage(NamedTuple):
     next: str | None
 
 
+#: What makes a row a gallery row (SPEC § 5.5): published and currently solved. The list, the
+#: sitemap and the head tags share it so they cannot drift (#187).
+_GALLERY_CONDS = ("published = 1", "solve_status = ?")
+_GALLERY_VALUES = (SolveStatus.SOLVED.value,)
+_GALLERY_WHERE = " AND ".join(_GALLERY_CONDS)
+
 ListStatus = Literal["solving", "failed", "solved"]
 """The owner's status chip: ``solving`` is every row the Images page polls (pending too)."""
 
@@ -566,11 +572,29 @@ class Database:
         business (it declares only the public ones); here an owner field can only narrow."""
         conds, values = _filter_conditions(filter)
         return self._list_images(
-            limit,
-            before,
-            ["published = 1", "solve_status = ?", *conds],
-            [SolveStatus.SOLVED.value, *values],
+            limit, before, [*_GALLERY_CONDS, *conds], [*_GALLERY_VALUES, *values]
         )
+
+    def published_images(self, limit: int | None = None) -> list[ImageRecord]:
+        """The gallery's rows newest first, all of them or the newest ``limit``: the sitemap
+        and the head tags (#187)."""
+        sql = f"SELECT * FROM images WHERE {_GALLERY_WHERE} ORDER BY rowid DESC"
+        params: list[object] = [*_GALLERY_VALUES]
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+        with self.connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_row_to_image(r) for r in rows]
+
+    def count_published_images(self) -> int:
+        """How many gallery rows there are (files on disk not checked): the gallery page's
+        description (#187)."""
+        with self.connect() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM images WHERE {_GALLERY_WHERE}", _GALLERY_VALUES
+            ).fetchone()
+        return int(row[0])
 
     def images_needing_solve(self) -> list[ImageRecord]:
         with self.connect() as conn:

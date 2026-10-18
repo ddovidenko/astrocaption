@@ -150,7 +150,7 @@ export default function App() {
               path="/gallery/:id"
               element={
                 <Guard health={health} requireAuth={false}>
-                  <GalleryImagePage />
+                  <GalleryImagePage siteTitle={health.site_title} />
                 </Guard>
               }
             />

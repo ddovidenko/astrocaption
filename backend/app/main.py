@@ -8,16 +8,15 @@ import mimetypes
 import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-from . import __version__, catalog_backfill
+from . import __version__, catalog_backfill, spa
 from .api import auth, config, docs, fonts, gallery, health, images, uploads
 from .auth import (
     LoginLimiter,
@@ -45,6 +44,7 @@ API_ROUTERS = (
     docs.router,
     fonts.router,
     gallery.router,
+    gallery.public_router,  # /sitemap.xml and /robots.txt
     images.router,
     uploads.router,
 )
@@ -153,7 +153,7 @@ def create_app(
 
     if cfg.fonts_dir.is_dir():
         app.mount("/fonts", StaticFiles(directory=cfg.fonts_dir), name="fonts")
-    _mount_spa(app, cfg.static_dir)
+    spa.mount(app, cfg.static_dir)
     return app
 
 
@@ -242,23 +242,6 @@ def _headless_setup(source: SettingsSource, password: str | None) -> None:
         )
         return
     log.info("owner password set from ASTROCAPTION_PASSWORD")
-
-
-def _mount_spa(app: FastAPI, static_dir: Path) -> None:
-    """Serve the built frontend (if present) with an index.html fallback for client routes."""
-    index = static_dir / "index.html"
-    if not index.is_file():
-        return
-    root = static_dir.resolve()
-
-    @app.get("/{path:path}", include_in_schema=False)
-    async def spa(path: str, request: Request) -> FileResponse:
-        if path.startswith("api/"):
-            raise HTTPException(404)
-        candidate = (root / path).resolve() if path else index
-        if path and candidate.is_file() and candidate.is_relative_to(root):
-            return FileResponse(candidate)
-        return FileResponse(index)
 
 
 def build_app_from_env() -> FastAPI:

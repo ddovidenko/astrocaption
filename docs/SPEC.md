@@ -223,6 +223,20 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
   shows only the site title and a sign-in link.
 - Routes: signed out, `/` is the gallery; `/gallery` and `/gallery/:id` work signed in and out,
   so the owner sees exactly what visitors see; `/login` is unchanged.
+- Crawlers and link previews (#187): the server fills the shell's head for `/`, `/gallery` and
+  `/gallery/{id}` before the app runs: `<title>` (`{title} · {site title}` on an image page),
+  a description (the enabled labels' names as the export prints them, at most eight, then the
+  upload day), a canonical link, Open Graph tags with the annotated preview as the image, and a
+  Twitter card. Any gallery URL with a query string (search, chips, dates, `before`) is canonical
+  to the plain `/gallery`, with no `noindex`, so the chain stays followable and the index holds
+  one gallery. An unpublished or unknown id, a missing export, and the gallery routes while the
+  gallery is off serve the plain shell with status 404 (`/` stays 200: it is also the sign-in
+  landing and the owner's page). `/sitemap.xml` lists `/gallery` and every published image with
+  `lastmod` from its export time (empty with the gallery off); `/robots.txt` names it and keeps
+  crawlers out of the owner routes and the owner API while allowing `/api/gallery/` and
+  `/api/health`, which the preview-card image and a rendering crawler need. Behind nginx the
+  proxy must forward `Host` (INSTALL), or every absolute link names the upstream address. The
+  app sets the same title on the full-size view when a visitor navigates to it in-app.
 
 ## 6. Editor — interactions
 
@@ -488,7 +502,9 @@ Owner (cookie session):
   (`nova_api_key_set`) lives in `GET /config`. Image payloads carry `original_format` (JPEG/PNG/TIFF) and the
   nova status/job-log URLs.
 
-Public besides `/api/gallery`: `/api/health`, the font files under `/fonts/`, and the SPA shell.
+Public besides `/api/gallery`: `/api/health`, the font files under `/fonts/`, the SPA shell (with the
+head filled in on the public routes, § 5.5), `/sitemap.xml` (`application/xml`, `Cache-Control: public,
+no-cache`) and `/robots.txt`.
 
 *M1 note:* `PUT annotations` and `autoarrange` arrive with the editor in milestone 3.
 
