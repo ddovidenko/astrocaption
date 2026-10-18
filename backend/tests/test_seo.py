@@ -15,7 +15,7 @@ from app.models import Annotations, ImageRecord, Label, SolveObject, SolveStatus
 from app.seo import MAX_NAMES, Head, gallery_head, image_description, image_head, label_names
 from app.spa import ShellTemplate
 from tests.conftest import login, make_client, make_settings
-from tests.test_gallery import exported_image, published_image
+from tests.test_gallery import exported_image, published_image, set_published
 
 BASE = "https://sky.example.test"
 
@@ -284,4 +284,58 @@ def test_a_published_image_without_annotations_still_gets_tags(
         assert re.search(
             r'<meta name="description" content="Annotated astrophoto, uploaded \d{1,2} \w{3} \d{4}\." />',
             head,
+        )
+
+
+def test_sitemap_lists_the_gallery_and_every_published_image_newest_first(
+    tmp_path: Path, sample_jpeg: Path, fake_solver: Any
+) -> None:
+    with shell_client(tmp_path, fake_solver) as client:
+        exported_image(client, sample_jpeg)  # unpublished: absent
+        first = published_image(client, sample_jpeg)
+        second = published_image(client, sample_jpeg)
+        gone = published_image(client, sample_jpeg)
+        renders = app_state(client).settings_source.current().renders_dir
+        (renders / gone["id"] / "annotated.jpg").unlink()
+        resp = client.get("/sitemap.xml")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("application/xml")
+        assert resp.headers["cache-control"] == "public, no-cache"
+        locs = re.findall(r"<loc>(.*?)</loc>", resp.text)
+        assert locs == [
+            "http://testserver/gallery",
+            f"http://testserver/gallery/{second['id']}",
+            f"http://testserver/gallery/{first['id']}",
+        ]
+        mods = re.findall(r"<lastmod>(.*?)</lastmod>", resp.text)
+        assert mods == [second["exported_at"], first["exported_at"]]
+        assert resp.text.startswith(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        )
+
+        set_published(client, second["id"], False)
+        assert f"/gallery/{second['id']}" not in client.get("/sitemap.xml").text
+
+
+def test_sitemap_is_empty_when_the_gallery_is_off(
+    tmp_path: Path, sample_jpeg: Path, fake_solver: Any
+) -> None:
+    with shell_client(tmp_path, fake_solver, public_gallery_enabled=False) as client:
+        published_image(client, sample_jpeg)
+        resp = client.get("/sitemap.xml")
+        assert resp.status_code == 200
+        assert "<loc>" not in resp.text and "<urlset" in resp.text
+
+
+def test_robots_names_the_sitemap_and_keeps_crawlers_out_of_the_owner_routes(
+    tmp_path: Path, fake_solver: Any
+) -> None:
+    with shell_client(tmp_path, fake_solver, trust_proxy=True) as client:
+        resp = client.get("/robots.txt", headers={"X-Forwarded-Proto": "https"})
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/plain")
+        assert resp.text == (
+            "User-agent: *\nDisallow: /api/\nDisallow: /login\nDisallow: /setup\n"
+            "Disallow: /config\nDisallow: /images/\nSitemap: https://testserver/sitemap.xml\n"
         )

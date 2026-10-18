@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import logging
 from urllib.parse import quote
+from xml.sax.saxutils import escape as xml_escape
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 
 from ..config import Settings
 from ..db import PAGE_LIMIT, Database, ListFilter, UnknownCursor
 from ..models import GalleryItem, ImageRecord, Page
+from ..seo import base_url
 from ..storage import export_exists, render_dir, slug_of
 from .deps import DbDep, SettingsDep
 from .images import PAGE_GONE, BeforeParam, DateParam, KindParam, LimitParam, QParam
@@ -131,4 +133,47 @@ async def gallery_file(image_id: str, kind: str, settings: SettingsDep, db: DbDe
     filename = f"{slug_of(rec.title)}-annotated.jpg" if kind == "export" else None
     return FileResponse(
         path, media_type="image/jpeg", filename=filename, headers={"Cache-Control": CACHE}
+    )
+
+
+# Two public files outside /api and outside the gallery-off gate: with the gallery off the
+# sitemap is empty rather than a 404, so a crawler that already knows it sees "nothing here"
+# instead of an error it will retry (#187). main.py includes this router before the SPA
+# fallback, which would otherwise answer both with the shell.
+public_router = APIRouter(include_in_schema=False)
+
+# The disallowed routes are owner routes that would only index as empty shells.
+ROBOTS = (
+    "User-agent: *\nDisallow: /api/\nDisallow: /login\nDisallow: /setup\n"
+    "Disallow: /config\nDisallow: /images/\n"
+)
+
+
+@public_router.get("/sitemap.xml")
+async def sitemap(request: Request, settings: SettingsDep, db: DbDep) -> Response:
+    base = xml_escape(base_url(request))
+    urls: list[str] = []
+    if settings.public_gallery_enabled:
+        urls.append(f"  <url><loc>{base}/gallery</loc></url>")
+        for rec in db.published_images():
+            if not export_exists(settings, rec):
+                continue
+            assert rec.exported_at  # export_exists checked it
+            urls.append(
+                f"  <url><loc>{base}/gallery/{rec.id}</loc>"
+                f"<lastmod>{xml_escape(rec.exported_at)}</lastmod></url>"
+            )
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "".join(f"{url}\n" for url in urls)
+        + "</urlset>\n"
+    )
+    return Response(body, media_type="application/xml", headers={"Cache-Control": CACHE})
+
+
+@public_router.get("/robots.txt")
+async def robots(request: Request) -> PlainTextResponse:
+    return PlainTextResponse(
+        f"{ROBOTS}Sitemap: {base_url(request)}/sitemap.xml\n", headers={"Cache-Control": CACHE}
     )
