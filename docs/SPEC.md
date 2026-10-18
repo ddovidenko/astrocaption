@@ -504,7 +504,9 @@ Owner (cookie session):
 
 Public besides `/api/gallery`: `/api/health`, the font files under `/fonts/`, the SPA shell (with the
 head filled in on the public routes, § 5.5), `/sitemap.xml` (`application/xml`, `Cache-Control: public,
-no-cache`) and `/robots.txt`.
+no-cache`) and `/robots.txt`. Every public route answers HEAD like GET (status and headers, no body)
+for link checkers, crawlers and uptime monitors; `/index.html` is a 301 to `/` so the raw built file is
+never indexed, and `/api` with nothing after it is a 404 like any unknown API path.
 
 *M1 note:* `PUT annotations` and `autoarrange` arrive with the editor in milestone 3.
 

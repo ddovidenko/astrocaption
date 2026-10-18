@@ -55,6 +55,11 @@ def require_owner(request: Request, settings: SettingsDep) -> None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, UNAUTHORIZED_DETAIL)
 
 
+# The public routes (shell pages, sitemap, robots) answer HEAD as well as GET: FastAPI does not
+# add it, and a crawler or link checker probing with HEAD got 405 (#233).
+PUBLIC_METHODS = ["GET", "HEAD"]
+
+
 def base_url(request: Request) -> str:
     """Scheme and host as the request names them (the proxy middleware has already applied
     X-Forwarded-Proto under TRUST_PROXY), without the trailing slash (#187)."""

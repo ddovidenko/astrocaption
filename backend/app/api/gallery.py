@@ -21,7 +21,7 @@ from ..config import Settings
 from ..db import PAGE_LIMIT, Database, ListFilter, UnknownCursor
 from ..models import GalleryItem, ImageRecord, Page
 from ..storage import export_exists, render_dir, slug_of
-from .deps import DbDep, SettingsDep, base_url
+from .deps import PUBLIC_METHODS, DbDep, SettingsDep, base_url
 from .images import PAGE_GONE, BeforeParam, DateParam, KindParam, LimitParam, QParam
 
 log = logging.getLogger(__name__)
@@ -82,7 +82,10 @@ def _visible(settings: Settings, db: Database, image_id: str) -> ImageRecord:
     return rec
 
 
+# The public API answers HEAD too (#233), the way the file route has since #137: the second
+# decorator keeps the OpenAPI operation ids distinct.
 @router.get("")
+@router.head("", include_in_schema=False)
 async def list_gallery(
     settings: SettingsDep,
     db: DbDep,
@@ -114,13 +117,13 @@ async def list_gallery(
 
 
 @router.get("/{image_id}")
+@router.head("/{image_id}", include_in_schema=False)
 async def get_gallery_item(image_id: str, settings: SettingsDep, db: DbDep) -> GalleryItem:
     return gallery_item(_visible(settings, db, image_id))
 
 
-# GET and HEAD, like the owner's file route: a link checker or a crawler probing a gallery URL
-# gets 200 rather than 405 (#137). FileResponse serves a HEAD as headers only; the second route
-# keeps the OpenAPI operation ids distinct.
+# A link checker or a crawler probing a gallery URL gets 200 rather than 405 (#137); FileResponse
+# serves a HEAD as headers only.
 @router.get("/{image_id}/files/{kind}")
 @router.head("/{image_id}/files/{kind}", include_in_schema=False)
 async def gallery_file(image_id: str, kind: str, settings: SettingsDep, db: DbDep) -> FileResponse:
@@ -159,7 +162,7 @@ ROBOTS = (
 )
 
 
-@public_router.get("/sitemap.xml")
+@public_router.api_route("/sitemap.xml", methods=PUBLIC_METHODS)
 async def sitemap(request: Request, settings: SettingsDep, db: DbDep) -> Response:
     base = xml_escape(base_url(request))
     urls: list[str] = []
@@ -185,7 +188,7 @@ async def sitemap(request: Request, settings: SettingsDep, db: DbDep) -> Respons
     return Response(body, media_type="application/xml", headers={"Cache-Control": CACHE})
 
 
-@public_router.get("/robots.txt")
+@public_router.api_route("/robots.txt", methods=PUBLIC_METHODS)
 async def robots(request: Request) -> PlainTextResponse:
     return PlainTextResponse(
         f"{ROBOTS}Sitemap: {base_url(request)}/sitemap.xml\n", headers={"Cache-Control": CACHE}

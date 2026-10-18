@@ -381,6 +381,56 @@ def test_a_missing_hashed_asset_is_a_404_not_the_shell(tmp_path: Path, fake_solv
         assert client.get("/assets/index-OLDHASH.js").status_code == 404
 
 
+def test_head_answers_like_get_without_a_body(
+    tmp_path: Path, sample_jpeg: Path, fake_solver: Any
+) -> None:
+    # FastAPI does not add HEAD to a GET route; a link checker or a crawler probing with HEAD
+    # got 405 on every public route (#233). Pages, misses, the text routes and static files.
+    with shell_client(tmp_path, fake_solver) as (client, settings):
+        image = published_image(client, sample_jpeg)
+        (settings.static_dir / "favicon.ico").write_bytes(b"\0" * 16)
+        for path in (
+            "/",
+            "/gallery",
+            f"/gallery/{image['id']}",
+            "/gallery/nope",
+            "/login",
+            "/sitemap.xml",
+            "/robots.txt",
+            "/favicon.ico",
+            "/assets/index-OLDHASH.js",
+            # The public API too: robots.txt invites crawlers in, and a link-preview bot may probe
+            # the og:image URL with HEAD before fetching it.
+            "/api/health",
+            "/api/gallery",
+            f"/api/gallery/{image['id']}",
+            f"/api/gallery/{image['id']}/files/annotated-preview",
+        ):
+            get, head = client.get(path), client.head(path)
+            assert head.status_code == get.status_code, path
+            assert head.headers.get("content-type") == get.headers.get("content-type"), path
+            assert head.content == b"", path
+
+
+def test_index_html_redirects_to_the_filled_root(tmp_path: Path, fake_solver: Any) -> None:
+    # The built file served raw carries the placeholder title and no head tags: a crawler that
+    # follows /index.html would index a thin duplicate of / (#233).
+    with shell_client(tmp_path, fake_solver) as (client, _):
+        resp = client.get("/index.html?x=1", follow_redirects=False)
+        assert resp.status_code == 301
+        assert resp.headers["location"] == "/"
+        followed = client.get("/index.html")
+        assert followed.status_code == 200 and followed.url == "http://testserver/"
+        assert TITLE_PLACEHOLDER not in followed.text
+        assert '<link rel="canonical" href="http://testserver/gallery" />' in head_of(followed.text)
+
+
+def test_the_bare_api_path_is_a_404_not_the_shell(tmp_path: Path, fake_solver: Any) -> None:
+    with shell_client(tmp_path, fake_solver) as (client, _):
+        for path in ("/api", "/api/", "/api/nope"):
+            assert client.get(path).status_code == 404, path
+
+
 # --- sitemap and robots ---------------------------------------------------------------------
 
 
