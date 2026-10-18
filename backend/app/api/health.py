@@ -10,6 +10,7 @@ router = APIRouter(prefix="/api", tags=["health"])
 
 
 @router.get("/health")
+@router.head("/health", include_in_schema=False)  # uptime monitors probe with HEAD (#233)
 async def health(request: Request, settings: SettingsDep) -> HealthOut:
     return HealthOut(
         version=__version__,

@@ -7,6 +7,11 @@ placeholder and a ``<!--app-head-->`` marker before ``</head>``. Every page gets
 ``/gallery/{id}``) also get the tags ``seo`` builds at the marker. The shell is read once at
 mount; a shell without the two literals (the pytest stub, a hand-edited file) is served as it
 is, with a warning.
+
+Every route here answers HEAD as well as GET (FastAPI does not add it; a link checker or a
+crawler probing with HEAD got 405), ``/index.html`` redirects to ``/`` so the raw built file
+with its placeholder title is never indexed, and ``/api`` with nothing after it is a 404 like
+the rest of the unknown API paths (#233).
 """
 
 from __future__ import annotations
@@ -18,10 +23,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 
 from . import seo
-from .api.deps import DbDep, SettingsDep, base_url
+from .api.deps import PUBLIC_METHODS, DbDep, SettingsDep, base_url
 
 log = logging.getLogger(__name__)
 
@@ -90,7 +95,7 @@ def mount(app: FastAPI, static_dir: Path) -> None:
             return HTMLResponse(template.render(settings_title), status_code=miss)
         return HTMLResponse(template.render(found.title, found.tags))
 
-    @app.get("/", include_in_schema=False)
+    @app.api_route("/", methods=PUBLIC_METHODS, include_in_schema=False)
     async def root_page(request: Request, settings: SettingsDep, db: DbDep) -> HTMLResponse:
         # Also the sign-in landing and the owner's page: never a 404, even with the gallery off.
         def head() -> seo.Head | None:
@@ -98,14 +103,14 @@ def mount(app: FastAPI, static_dir: Path) -> None:
 
         return shell(request, settings.site_title, head, miss=200)
 
-    @app.get("/gallery", include_in_schema=False)
+    @app.api_route("/gallery", methods=PUBLIC_METHODS, include_in_schema=False)
     async def gallery_page(request: Request, settings: SettingsDep, db: DbDep) -> HTMLResponse:
         def head() -> seo.Head | None:
             return seo.gallery_head_for(settings, db, base_url(request))
 
         return shell(request, settings.site_title, head, miss=404)
 
-    @app.get("/gallery/{image_id}", include_in_schema=False)
+    @app.api_route("/gallery/{image_id}", methods=PUBLIC_METHODS, include_in_schema=False)
     async def image_page(
         image_id: str, request: Request, settings: SettingsDep, db: DbDep
     ) -> HTMLResponse:
@@ -114,10 +119,12 @@ def mount(app: FastAPI, static_dir: Path) -> None:
 
         return shell(request, settings.site_title, head, miss=404)
 
-    @app.get("/{path:path}", include_in_schema=False)
+    @app.api_route("/{path:path}", methods=PUBLIC_METHODS, include_in_schema=False)
     async def spa(path: str, settings: SettingsDep) -> Response:
-        if path.startswith("api/"):
+        if path == "api" or path.startswith("api/"):
             raise HTTPException(404)
+        if path == "index.html":
+            return RedirectResponse("/", status_code=301)
         if path:
             candidate = (static_root / path).resolve()
             if candidate.is_file() and candidate.is_relative_to(static_root):
