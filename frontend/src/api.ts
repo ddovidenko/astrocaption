@@ -239,14 +239,22 @@ export interface PageQuery {
   q?: string
   status?: ListStatus
   published?: boolean
+  /** An image with at least one object of this kind (SPEC § 8). */
+  kind?: ObjectKind
+  /** Upload days in UTC, `YYYY-MM-DD`, both inclusive. */
+  since?: string
+  until?: string
 }
 
-function paged(path: string, { limit, before, q, status, published }: PageQuery): string {
+function paged(path: string, { limit, before, q, status, published, kind, since, until }: PageQuery): string {
   const params = new URLSearchParams()
   if (limit !== undefined) params.set('limit', String(limit))
   if (q) params.set('q', q)
   if (status) params.set('status', status)
   if (published !== undefined) params.set('published', String(published))
+  if (kind) params.set('kind', kind)
+  if (since) params.set('since', since)
+  if (until) params.set('until', until)
   if (before) params.set('before', before)
   const query = params.toString()
   return query ? `${path}?${query}` : path
@@ -259,6 +267,7 @@ export interface GalleryItem {
   title: string
   width: number
   height: number
+  created_at: string
   exported_at: string
   thumb_url: string
   preview_url: string

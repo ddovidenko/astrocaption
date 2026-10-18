@@ -107,6 +107,19 @@ describe('GalleryPage', () => {
     expect(screen.queryByRole('link', { name: 'Show more' })).toBeNull()
   })
 
+  it('captions each card with its title and the upload day', async () => {
+    vi.mocked(api.gallery).mockResolvedValue({ items: [item], next: null })
+    render(
+      <MemoryRouter>
+        <GalleryPage health={health()} />
+      </MemoryRouter>,
+    )
+    const caption = (await screen.findByText('Orion')).closest('figcaption')!
+    const when = caption.querySelector('time')!
+    expect(when.textContent).toBe('21 Sep 2026')
+    expect(when.getAttribute('datetime')).toBe('2026-09-21T18:00:00Z')
+  })
+
   it('says when nothing is published', async () => {
     vi.mocked(api.gallery).mockResolvedValue({ items: [], next: null })
     render(
@@ -248,6 +261,21 @@ describe('GalleryPage', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('kind and dates reach the API from the URL, and a chosen day drops the cursor', async () => {
+    vi.mocked(api.gallery).mockResolvedValue({ items: [item], next: null })
+    render(
+      <MemoryRouter initialEntries={['/gallery?kind=nebula&before=img-7']}>
+        <GalleryPage health={health()} />
+        <Url />
+      </MemoryRouter>,
+    )
+    expect(await screen.findByRole('link', { name: /Orion/ })).toBeTruthy()
+    expect(api.gallery).toHaveBeenCalledWith({ kind: 'nebula', before: 'img-7' })
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-10-31' } })
+    expect(await screen.findByText('?kind=nebula&until=2026-10-31')).toBeTruthy()
+    expect(api.gallery).toHaveBeenLastCalledWith({ kind: 'nebula', until: '2026-10-31', before: null })
   })
 
   it('drops the answer of a search the visitor has already moved on from', async () => {

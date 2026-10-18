@@ -948,3 +948,76 @@ def test_object_kind_follows_the_catalogue_source() -> None:
     assert out(["B 33"], "barnard") == "nebula"
     assert out(["ι Ori"], "bright") == "star"
     assert out(["NGC 1976", "M 42"], "ngc") == "nebula"
+
+
+def test_objects_endpoint_reports_the_stored_kind(
+    client: TestClient, sample_jpeg: Path, settings: Settings
+) -> None:
+    """The editor's chips read the column the kind filter uses, so the two cannot disagree. A
+    kind changed in the database (as the startup pass does after a names-table update) is what
+    the endpoint reports, not a recomputation."""
+    image_id = upload(client, sample_jpeg)["id"]
+    assert wait_for_status(client, image_id, {"solved", "failed"})["solve_status"] == "solved"
+    objects = client.get(f"/api/images/{image_id}/objects").json()
+    assert objects[0]["kind"] == "nebula"  # M 42, from the column
+    with Database(settings.db_path).connect() as conn:
+        conn.execute(
+            "UPDATE objects SET kind = 'cluster' WHERE image_id = ? AND id = 1", (image_id,)
+        )
+    assert client.get(f"/api/images/{image_id}/objects").json()[0]["kind"] == "cluster"
+
+
+def test_list_images_filters_by_kind_and_upload_day(client: TestClient, sample_jpeg: Path) -> None:
+    image_id = upload(client, sample_jpeg)["id"]
+    assert wait_for_status(client, image_id, {"solved", "failed"})["solve_status"] == "solved"
+    created = client.get(f"/api/images/{image_id}").json()["created_at"][:10]  # the UTC day
+
+    def ids(**params: object) -> list[str]:
+        return list_ids(client, "/api/images", **params)
+
+    assert ids(kind="nebula") == [image_id]  # M 42
+    assert ids(kind="star") == [image_id]  # nova's bright rows
+    assert ids(kind="galaxy") == [image_id]  # NGC 1924 and a PGC row from the local catalogue
+    assert ids(kind="cluster") == []
+    assert ids(since=created, until=created) == [image_id]
+    assert ids(until="2000-01-01") == []
+    assert ids(since="2999-01-01") == []
+    assert ids(kind="nebula", q="orion", since=created) == [image_id]
+    resp = client.get("/api/images", params={"kind": "stars"})
+    assert resp.status_code == 422
+    assert resp.json()["detail"].startswith("kind: must be one of")
+    # A hand-edited date says what shape the API wants, not the generic "is not valid".
+    for bad in (
+        {"since": "yesterday"},
+        {"until": "2026-13-01"},
+        {"since": "16/10/2026"},
+        {"until": "0000-01-01"},
+    ):
+        resp = client.get("/api/images", params=bad)
+        assert resp.status_code == 422, bad
+        assert "Traceback" not in resp.text and "/home/" not in resp.text
+        (param,) = bad
+        assert resp.json()["detail"] == f"{param}: must be a day as YYYY-MM-DD", bad
+
+
+def test_list_images_until_the_last_possible_day_is_not_an_error(client: TestClient) -> None:
+    assert client.get("/api/images", params={"until": "9999-12-31"}).status_code == 200
+    assert client.get("/api/gallery", params={"until": "9999-12-31"}).status_code == 200
+
+
+def test_startup_reclassifies_stored_kinds_against_the_current_names_table(
+    settings: Settings, sample_jpeg: Path
+) -> None:
+    """The Objects tab and the kind filter read the stored kind; a names-table update ships with
+    a release, so every start re-checks the stored kinds against it (no re-solve needed)."""
+    db = Database(settings.db_path)
+    rec = seed_image(settings, db, "stale-kind")
+    db.replace_objects(
+        rec.id,
+        [SolveObject(id=1, catalog_names=["NGC 1976", "M 42"], type="ngc", x=1, y=1, radius=1)],
+    )
+    with db.connect() as conn:
+        conn.execute("UPDATE objects SET kind = 'other' WHERE image_id = ?", (rec.id,))
+    with make_client(settings, lambda: None) as fresh:
+        login(fresh)
+        assert fresh.get(f"/api/images/{rec.id}/objects").json()[0]["kind"] == "nebula"

@@ -202,7 +202,11 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
   shown. A search box above both lists finds an image by its title or by any catalogue name of
   any object in it, case- and space-insensitively ("m27", "M 27" and "NGC 6960" all work); the
   owner's list adds status chips (Solving, Failed, Solved) and visibility chips (Published,
-  Unpublished). The search and chips live in the URL (`/gallery?q=veil`), so a result is
+  Unpublished). Both lists add kind chips (Galaxies, Nebulae, Clusters, Stars, Other: an image
+  with at least one object of that kind, as the Objects tab buckets them) and an upload-day
+  range (From, To: native date inputs, UTC days, both inclusive; like the search box they
+  report after a short pause, since typing a year emits a value per digit). The search and chips live in
+  the URL (`/gallery?q=veil`), so a result is
   linkable and a reload keeps it, and the Show more link carries them so a followed page stays
   inside the result set; changing a filter starts again from the top. An active search with no
   result says "Nothing matches." (owner: "No images match.") next to a Clear button. An upload
@@ -210,7 +214,8 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
   Hover (or tap on touch) swaps the preview
   to the annotated preview. Click opens a full-size view (the 2048 px preview) with the same
   hover behaviour and a link to download the full-resolution annotated export. The unannotated
-  original is never public. Every grid card shares one 3:2 box (a portrait image is letterboxed
+  original is never public. Every card, on both lists and the full-size view, names its upload
+  day (UTC, the day the From/To range selects on). Every grid card shares one 3:2 box (a portrait image is letterboxed
   on black) and long titles wrap inside their card; only the full-size view uses the image's own
   proportions.
 - `public_gallery_enabled` (config, default true; env `ASTROCAPTION_PUBLIC_GALLERY`) switches
@@ -365,6 +370,9 @@ objects (per image, from nova and the local catalogue; rewritten only by a re-so
                        sharpless|lbn|barnard|ldn|pgc)
   x, y          float  (original pixels)
   radius        float
+  kind          text  (galaxy|nebula|cluster|star|other: the Objects-tab bucket, stored at insert,
+                       backfilled once by schema 8 and re-checked at every start against the
+                       bundled names table, so the list filter and the editor agree)
 
 annotations (per image; the editable layout)
   image_id
@@ -382,7 +390,7 @@ Public (no cookie; every miss is 404 `Image not found.`, whether the id is unkno
 unpublished or not currently solved, its export files are missing, or the gallery is switched off):
 - `GET /gallery?limit=24&before=<id>&q=<text>` → one page of published images newest first,
   `{items: GalleryItem[], next: <id> | null}`. `GalleryItem` is {id, title, width, height,
-  exported_at, thumb_url, preview_url, annotated_preview_url, export_url}; the URLs are all under
+  created_at, exported_at, thumb_url, preview_url, annotated_preview_url, export_url}; the URLs are all under
   `/api/gallery/{id}/files/…` and carry `?v=<exported_at>` where the file changes with an export.
   Newest first is insertion order, not the created-time stamp, so a host clock stepped backwards
   cannot reorder two uploads (#214). Paging is keyset on that order: `before` names the last
@@ -391,7 +399,10 @@ unpublished or not currently solved, its export files are missing, or the galler
   1–100, default 24. `q` (up to 200 characters) narrows the page to images whose title or any
   object's catalogue name contains the text after case-folding and removing whitespace, on both
   sides; blank is no filter. The cursor rule is unchanged, so `before` from a searched page
-  continues that search. A `before` that names no image is 422 `That page is no longer available;
+  continues that search. `kind` (galaxy|nebula|cluster|star|other) keeps images with at least
+  one stored object of that kind; `since` and `until` (`YYYY-MM-DD`) bound the upload day in
+  UTC, both inclusive, and an inverted range is simply empty. Any of these malformed is 422.
+  A `before` that names no image is 422 `That page is no longer available;
   reload the list.` A published row whose export files are missing is skipped but still counted,
   so a page can be short by one.
 - `GET /gallery/{id}` → one `GalleryItem`
@@ -432,17 +443,18 @@ Owner (cookie session):
   short); `POST /uploads/{id}/finish` → the same `ImageOut` as `POST /images`, 409 while a chunk is missing;
   `DELETE /uploads/{id}` drops a cancelled session. Sessions live under `data/uploads/.partial/<id>/`, are
   swept after a day and all at startup. An unknown id is 404 `That upload is no longer open; start it again.`
-- `GET /images?limit=24&before=<id>&q=<text>&status=<solving|failed|solved>&published=<bool>` →
+- `GET /images?limit=24&before=<id>&q=<text>&status=<solving|failed|solved>&published=<bool>&kind=<kind>&since=<day>&until=<day>` →
   `{items: ImageOut[], next}`, paged and searched exactly like `GET /gallery`; `status=solving`
-  is every row the page polls (`pending` too); the gallery accepts and ignores `status` and
-  `published`, so an owner filter can never widen what a visitor sees;
+  is every row the page polls (`pending` too); the gallery takes `q`, `kind`, `since` and
+  `until` like the owner's list, and accepts and ignores `status` and `published`, so an owner
+  filter can never widen what a visitor sees;
   `GET /images/{id}`, `DELETE /images/{id}`
 - `PUT /images/{id}/published` {published} → the updated image; 409 when publishing without an export (§ 5.5)
 - `POST /images/{id}/solve` (re-solve, optional hints: scale, downsample factor, centre + radius)
 - `POST /images/{id}/check` (check again: resume polling the stored nova job without uploading, #10).
   409 unless the row's `check_available` is true (a failed solve that timed out and still holds a
   submission id); `ImageOut.check_available` is what the card draws the button from.
-- `GET /images/{id}/objects` — each object carries `kind` (galaxy / nebula / cluster / star / other, stars from nova's type, catalogue objects from their source, the rest from OpenNGC at read time) beside `catalog_names` and `primary_name`.
+- `GET /images/{id}/objects` — each object carries `kind` (galaxy / nebula / cluster / star / other, stored at insert and re-checked at every start against the bundled names table: stars from nova's type, catalogue objects from their source, the rest from OpenNGC) beside `catalog_names` and `primary_name`.
 - `GET/PUT /images/{id}/annotations`. `PUT` is the editor's autosave (debounced 500 ms): body = {style, labels,
   version as loaded}; `labels` must list every one of the image's objects exactly once (disable a label, never drop
   it), else 409 `This image's objects changed; reload the editor.` (#115: a stale document, like a version mismatch;
