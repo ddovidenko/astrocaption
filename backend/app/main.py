@@ -44,6 +44,7 @@ API_ROUTERS = (
     docs.router,
     fonts.router,
     gallery.router,
+    gallery.public_router,  # /sitemap.xml and /robots.txt
     images.router,
     uploads.router,
 )
@@ -149,9 +150,6 @@ def create_app(
 
     for router in API_ROUTERS:
         app.include_router(router)
-    # /sitemap.xml and /robots.txt: public files, so not in API_ROUTERS (which the auth test
-    # walks for owner gating), and registered before the SPA fallback that would shadow them.
-    app.include_router(gallery.public_router)
 
     if cfg.fonts_dir.is_dir():
         app.mount("/fonts", StaticFiles(directory=cfg.fonts_dir), name="fonts")

@@ -1,5 +1,5 @@
 """Head tags for the public routes (#187): what a crawler or a link-preview bot reads before
-the SPA runs. Pure builders here; ``head_for`` picks the route.
+the SPA runs. Pure builders, plus the two lookups ``spa.py``'s routes call.
 
 This is the one public module that reads annotations and objects, and only for a published
 image: the description names the enabled labels as the export prints them, which the public
@@ -10,22 +10,24 @@ from __future__ import annotations
 
 import html
 import logging
-import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from urllib.parse import quote
 
-from fastapi import Request
+from pydantic import ValidationError
 
+from .api.gallery import gallery_item, visible_image
 from .config import Settings
 from .db import Database
 from .models import Annotations, ImageRecord, SolveObject
-from .render import label_text
+from .render import ALIAS_SEP, label_text
 from .storage import PREVIEW_MAX_PX, export_exists, fit_within
 
 log = logging.getLogger(__name__)
 
 MAX_NAMES = 8
+#: How many of the newest gallery rows the gallery page tries for its card image: the first
+#: with its files on disk wins, so a render dir emptied by hand does not cost the card.
+NEWEST_CANDIDATES = 3
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 
@@ -61,7 +63,7 @@ def image_description(names: list[str], created_at: str) -> str:
     tail = f"Annotated astrophoto, uploaded {day_label(created_at)}."
     if not names:
         return tail
-    shown = " · ".join(names[:MAX_NAMES])
+    shown = ALIAS_SEP.join(names[:MAX_NAMES])
     if len(names) > MAX_NAMES:
         shown += f" and {len(names) - MAX_NAMES} more"
     return f"{shown}. {tail}"
@@ -72,11 +74,9 @@ def _meta(attr: str, name: str, value: str) -> str:
 
 
 def _image_tags(base: str, rec: ImageRecord) -> str:
-    assert rec.exported_at  # the callers check export_exists first
     w, h = fit_within(rec.width, rec.height, PREVIEW_MAX_PX)
-    url = f"{base}/api/gallery/{rec.id}/files/annotated-preview?v={quote(rec.exported_at)}"
     return (
-        _meta("property", "og:image", url)
+        _meta("property", "og:image", base + gallery_item(rec).annotated_preview_url)
         + _meta("property", "og:image:width", str(w))
         + _meta("property", "og:image:height", str(h))
         + _meta("name", "twitter:card", "summary_large_image")
@@ -115,40 +115,34 @@ def gallery_head(base: str, site_title: str, count: int, newest: ImageRecord | N
     return Head(title=site_title, tags=tags)
 
 
-_IMAGE_PATH = re.compile(r"^gallery/([^/]+)$")
-
-
-def base_url(request: Request) -> str:
-    """Scheme and host as the request names them (the proxy middleware has already applied
-    X-Forwarded-Proto under TRUST_PROXY), without the trailing slash."""
-    return str(request.base_url).rstrip("/")
-
-
-def head_for(request: Request, path: str, settings: Settings, db: Database) -> tuple[int, Head]:
-    """Status and head for a client route. Only the public gallery routes get tags; every
-    other route is the shell with the site title. A miss on a gallery route is 404 with the
-    plain head, the same body whether the id is unknown, unpublished or lacks files."""
-    site = settings.site_title
-    plain = Head(site, "")
-    is_gallery = path in ("", "gallery")
-    image_match = _IMAGE_PATH.match(path)
-    if not is_gallery and image_match is None:
-        return 200, plain
+def gallery_head_for(settings: Settings, db: Database, base: str) -> Head | None:
+    """The gallery page's head, or None while the gallery is off."""
     if not settings.public_gallery_enabled:
-        # The root is also the sign-in landing and the owner's page: never a 404.
-        return (200 if path == "" else 404), plain
-    base = base_url(request)
-    if is_gallery:
-        rows = db.published_images()
-        newest = next((r for r in rows if export_exists(settings, r)), None)
-        return 200, gallery_head(base, site, len(rows), newest)
-    assert image_match is not None  # the only other way in
-    rec = db.get_image(image_match.group(1))
-    if rec is None or not rec.published or not export_exists(settings, rec):
-        return 404, plain
+        return None
+    newest = None
+    for rec in db.published_images(limit=NEWEST_CANDIDATES):
+        if export_exists(settings, rec):
+            newest = rec
+            break
+        log.warning("head tags: skipping published image %s: its export files are missing", rec.id)
+    return gallery_head(base, settings.site_title, db.count_published_images(), newest)
+
+
+def image_head_for(settings: Settings, db: Database, base: str, image_id: str) -> Head | None:
+    """An image page's head, or None when a visitor may not see the image (the gallery is
+    off, or the id is unknown, unpublished or without its files: one answer for all)."""
+    if not settings.public_gallery_enabled:
+        return None
+    rec = visible_image(settings, db, image_id)
+    if rec is None:
+        return None
     try:
         names = label_names(db.get_annotations(rec.id), db.get_objects(rec.id))
-    except Exception:  # a corrupt row must not take the page down; the export still shows
-        log.warning("head tags: could not read the labels of image %s", rec.id, exc_info=True)
+    except (ValueError, TypeError, ValidationError):  # a corrupt objects row (#187)
+        log.error(
+            "head tags: image %s has an unreadable objects row; its description names no "
+            "labels until the row is repaired",
+            rec.id,
+        )
         names = []
-    return 200, image_head(base, site, rec, names)
+    return image_head(base, settings.site_title, rec, names)

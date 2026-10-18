@@ -20,9 +20,8 @@ from fastapi.responses import FileResponse, PlainTextResponse, Response
 from ..config import Settings
 from ..db import PAGE_LIMIT, Database, ListFilter, UnknownCursor
 from ..models import GalleryItem, ImageRecord, Page
-from ..seo import base_url
 from ..storage import export_exists, render_dir, slug_of
-from .deps import DbDep, SettingsDep
+from .deps import DbDep, SettingsDep, base_url
 from .images import PAGE_GONE, BeforeParam, DateParam, KindParam, LimitParam, QParam
 
 log = logging.getLogger(__name__)
@@ -66,10 +65,19 @@ def gallery_item(rec: ImageRecord) -> GalleryItem:
     )
 
 
-def _visible(settings: Settings, db: Database, image_id: str) -> ImageRecord:
-    """The record a visitor may see, or the one 404."""
+def visible_image(settings: Settings, db: Database, image_id: str) -> ImageRecord | None:
+    """The record a visitor may see, or None: published, solved, with its export files. The
+    one rule for the API, the files and the page's head tags (#187)."""
     rec = db.get_image(image_id)
     if rec is None or not rec.published or not export_exists(settings, rec):
+        return None
+    return rec
+
+
+def _visible(settings: Settings, db: Database, image_id: str) -> ImageRecord:
+    """The record a visitor may see, or the one 404."""
+    rec = visible_image(settings, db, image_id)
+    if rec is None:
         raise _not_found()
     return rec
 
@@ -138,8 +146,7 @@ async def gallery_file(image_id: str, kind: str, settings: SettingsDep, db: DbDe
 
 # Two public files outside /api and outside the gallery-off gate: with the gallery off the
 # sitemap is empty rather than a 404, so a crawler that already knows it sees "nothing here"
-# instead of an error it will retry (#187). main.py includes this router before the SPA
-# fallback, which would otherwise answer both with the shell.
+# instead of an error it will retry (#187).
 public_router = APIRouter(include_in_schema=False)
 
 # The preview-card image and the page's own data live under /api, and a bot that obeys
@@ -160,6 +167,9 @@ async def sitemap(request: Request, settings: SettingsDep, db: DbDep) -> Respons
         urls.append(f"  <url><loc>{base}/gallery</loc></url>")
         for rec in db.published_images():
             if not export_exists(settings, rec):
+                log.warning(
+                    "sitemap: skipping published image %s: its export files are missing", rec.id
+                )
                 continue
             assert rec.exported_at  # export_exists checked it
             urls.append(

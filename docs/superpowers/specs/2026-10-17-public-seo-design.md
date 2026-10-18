@@ -54,16 +54,27 @@ configurable description, structured data (JSON-LD), an image sitemap, `rel=prev
 
 `_mount_spa` (main.py) becomes a small module, `app/spa.py`:
 
-- `ShellTemplate.load(static_dir)` reads `index.html` once, removes the first
-  `<title>…</title>` and splits at the first `</head>`. `render(title, extra_tags)` returns the
-  page with `<title>{title}</title>` and the tags inserted before `</head>`. A shell without a
-  `</head>` is served verbatim (the pytest stub `<html>spa</html>` stays valid).
-- The fallback route serves files under the static root as today. For a client route it asks
-  `seo.head_for(request, path, settings, db)` for `(status, title, tags)`; the default is
-  `(200, site_title, "")`. Only `/`, `/gallery` and `/gallery/{id}` produce tags.
-- Two new public routes on the gallery router's module, outside the `/api` prefix and outside
-  the router's gallery-off gate: `GET /sitemap.xml` and `GET /robots.txt`. They are registered
-  before the SPA fallback so the catch-all never shadows them.
+- `frontend/index.html` carries two literals Vite copies into the build: the title placeholder
+  `<title>AstroCaption</title>` and a `<!--app-head-->` marker before `</head>`.
+  `ShellTemplate.load(static_dir)` reads `index.html` once; `render(title, tags)` replaces the
+  two. A shell without them is served verbatim with a warning at start (the pytest stub, a
+  hand-edited file), so a misbuilt shell cannot fail the start but is not silent either.
+- Three explicit routes before the catch-all, with the usual FastAPI dependencies: `GET /`,
+  `GET /gallery` and `GET /gallery/{image_id}` ask `seo.gallery_head_for` or
+  `seo.image_head_for` for a `Head | None` and serve the shell with the tags, or the plain
+  shell with 404 when the lookup says the visitor may not see the page (200 for `/`). A lookup
+  that raises (a database fault) is logged with its traceback and answered with the plain shell
+  and 200: the shell is also the sign-in page, and the app then shows the API's own error. The
+  catch-all serves files under the static root, a 404 for a missing `assets/` file (a stale
+  bundle must not get the shell as JavaScript), and the plain shell for every other client
+  route. So `/gallery/` and `/gallery/{id}/x` are plain shells, never a partial match.
+- `GET /sitemap.xml` and `GET /robots.txt` live on a second router in the gallery module
+  (`public_router`, no prefix, no gallery-off gate), included with the API routers.
+- The image rule is one function, `gallery.visible_image` (published, solved, files on disk),
+  used by the API's 404 and by the head tags, and the `og:image` URL is `gallery_item`'s.
+- The gallery head runs two cheap queries, a count and the newest three rows, and takes the
+  first of those three with its files on disk as the card image (flat cost at any library
+  size); the sitemap reads every row. Both log a skipped row the way the list does.
 
 `seo.py` holds the tag logic and is the one public module that reads annotations and objects,
 for published images only (the gallery router's docstring is amended to say so).
@@ -126,8 +137,9 @@ this order:
 - `GalleryImagePage` sets `document.title` to `{title} · {site title}` once the item loads and
   restores the site title on unmount, so in-app navigation matches the server-rendered title.
   The site title comes from `health` as today (App.tsx sets the default).
-- `frontend/index.html` is unchanged except that its `<title>` is now a placeholder the server
-  replaces; Vite's dev server still shows "AstroCaption" because it serves the file itself.
+- `frontend/index.html` keeps its `<title>AstroCaption</title>` as the placeholder the server
+  replaces and gains the `<!--app-head-->` marker; Vite's dev server still shows "AstroCaption"
+  because it serves the file itself.
 
 Under `make dev` Vite serves the shell, so the tags are visible only from the backend's own
 port after a frontend build: `npm --prefix frontend run build`, restart the unit, then
@@ -138,8 +150,9 @@ covers the same path.
 
 - A miss is the 404 shell (above). The response body is the same shell a 200 gets, minus the
   tags: nothing leaks whether the id exists, is unpublished or lacks files.
-- Annotations or objects that cannot be read for a published image (a corrupt row) log a
-  warning and fall back to the no-label description; the page is still served with its tags.
+- Objects that cannot be read for a published image (a corrupt row) log an error and fall
+  back to the no-label description; the page is still served with its tags. Any other failure
+  of a head lookup serves the plain shell with 200 and a logged traceback (above).
 - The sitemap and robots routes have no failure mode beyond the database being unreadable,
   which is the existing 500 path.
 

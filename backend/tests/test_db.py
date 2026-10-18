@@ -943,3 +943,5 @@ def test_published_images_are_the_gallery_rows_newest_first(tmp_path: Path) -> N
     db.insert_image(_plain_image("fourth", "2026-01-04T00:00:00Z", published=True))
     db.update_image("second", {"solve_status": SolveStatus.SOLVING})
     assert [r.id for r in db.published_images()] == ["fourth", "first"]
+    assert [r.id for r in db.published_images(limit=1)] == ["fourth"]
+    assert db.count_published_images() == 2

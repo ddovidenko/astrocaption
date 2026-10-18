@@ -53,3 +53,9 @@ def require_owner(request: Request, settings: SettingsDep) -> None:
     """Router-level gate for every owner route (SPEC § 8)."""
     if not is_authenticated(request, settings):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, UNAUTHORIZED_DETAIL)
+
+
+def base_url(request: Request) -> str:
+    """Scheme and host as the request names them (the proxy middleware has already applied
+    X-Forwarded-Proto under TRUST_PROXY), without the trailing slash (#187)."""
+    return str(request.base_url).rstrip("/")
