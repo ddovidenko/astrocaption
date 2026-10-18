@@ -353,6 +353,13 @@ export function describeError(err: unknown): string {
   return 'Something went wrong.'
 }
 
+/** A list page's `before` names an image that is gone (deleted, or unpublished for a visitor):
+ *  the API answers 410, apart from the 422 of a malformed parameter, so the page can start
+ *  over rather than show the sentence (SPEC § 8, #227). */
+export function isPageGone(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 410
+}
+
 /** The message a page should show for `err`, or null when the shell is already redirecting
  *  because the session was lost. */
 export function pageError(err: unknown): string | null {

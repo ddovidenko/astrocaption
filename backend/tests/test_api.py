@@ -136,10 +136,11 @@ def test_list_images_is_paged(client: TestClient, sample_jpeg: Path) -> None:
     second = client.get("/api/images", params={"limit": 2, "before": first["next"]}).json()
     assert [i["id"] for i in second["items"]] == [ids[0]]
     assert second["next"] is None
-    # The cursor row was deleted meanwhile: plain language, and the page starts over.
+    # The cursor row was deleted meanwhile: plain language, and 410 rather than the 422 of a
+    # malformed parameter, so the page knows to start over rather than show the sentence (#227).
     client.delete(f"/api/images/{ids[1]}")
     resp = client.get("/api/images", params={"limit": 2, "before": ids[1]})
-    assert resp.status_code == 422
+    assert resp.status_code == 410
     assert resp.json() == {"detail": "That page is no longer available; reload the list."}
     assert client.get("/api/images", params={"limit": 0}).status_code == 422
     assert client.get("/api/images", params={"limit": 101}).status_code == 422

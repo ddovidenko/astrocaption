@@ -339,6 +339,8 @@ async def ingest_upload(
     return image_out(rec, settings, 0, None)
 
 
+# 410, not the 422 of a malformed parameter: the list page falls back to the top on a gone
+# cursor and shows anything else as it is (#227).
 PAGE_GONE = "That page is no longer available; reload the list."
 
 LimitParam = Annotated[int, Query(ge=1, le=100)]
@@ -375,7 +377,7 @@ async def list_images(
             ),
         )
     except UnknownCursor:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, PAGE_GONE) from None
+        raise HTTPException(status.HTTP_410_GONE, PAGE_GONE) from None
     decorations = db.page_decorations([rec.id for rec in page.items])
     return Page(
         items=[

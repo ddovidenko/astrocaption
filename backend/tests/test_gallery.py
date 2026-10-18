@@ -141,7 +141,8 @@ def test_gallery_is_paged_and_a_skipped_row_still_moves_the_cursor(
     assert first["next"] == gone["id"]
     second = anon_client.get("/api/gallery", params={"limit": 2, "before": first["next"]}).json()
     assert ([i["id"] for i in second["items"]], second["next"]) == ([oldest["id"]], None)
-    assert anon_client.get("/api/gallery", params={"before": "nope"}).status_code == 422
+    assert anon_client.get("/api/gallery", params={"before": "nope"}).status_code == 410  # #227
+    assert anon_client.get("/api/gallery", params={"before": ""}).status_code == 422  # malformed
 
 
 def test_gallery_search_finds_a_title_or_an_object_name_and_ignores_owner_filters(
