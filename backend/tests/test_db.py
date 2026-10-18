@@ -9,7 +9,16 @@ from pathlib import Path
 import pytest
 
 from app.config import Settings
-from app.db import SCHEMA_VERSION, Database, ListFilter, UnknownCursor, fold, fold_names, hash_of
+from app.db import (
+    SCHEMA_VERSION,
+    Database,
+    ListFilter,
+    PageDecoration,
+    UnknownCursor,
+    fold,
+    fold_names,
+    hash_of,
+)
 from app.models import (
     Annotations,
     ImageRecord,
@@ -118,7 +127,7 @@ def test_content_hash_covers_the_objects_names(settings: Settings) -> None:
     before = db.annotations_hash(rec.id)
     stored = db.get_annotations(rec.id)
     assert stored is not None and before is not None
-    assert stored.content_hash == before == db.annotations_hashes([rec.id])[rec.id]
+    assert stored.content_hash == before == db.page_decorations([rec.id])[rec.id].content_hash
     assert before == hash_of(ann, objects)
     renamed = [objects[0].model_copy(update={"catalog_names": ["NGC 1924", "PGC 17319"]})]
     db.replace_objects(rec.id, renamed)
@@ -956,17 +965,22 @@ def test_published_images_are_the_gallery_rows_newest_first(tmp_path: Path) -> N
     assert light[1] == first.model_copy(update={"wcs_text": None})  # every other column is there
 
 
-def test_object_counts_and_annotations_hashes_follow_the_given_ids(tmp_path: Path) -> None:
-    # The list endpoint decorates one page of rows; the two helpers used to scan the whole
-    # library on every request (#226).
+def test_page_decorations_follow_the_given_ids(tmp_path: Path) -> None:
+    # The list endpoint decorates one page of rows with each image's object count and content
+    # hash; the two helpers it replaced scanned the whole library on every request (#226).
     db = Database(tmp_path / "x.sqlite")
     db.init()
     for image_id in ("a", "b", "c"):
         db.insert_image(_plain_image(image_id, "2026-01-01T00:00:00Z"))
     _solved_with_names(db, "a", ["NGC 224"])
     _solved_with_names(db, "b", ["NGC 1976", "M 42"])
-    assert db.object_counts(["a", "c"]) == {"a": 1}
-    assert db.object_counts([]) == {}
-    assert db.annotations_hashes(["a", "c"]) == {"a": db.annotations_hash("a")}
-    assert db.annotations_hashes([]) == {}
-    assert set(db.annotations_hashes(["a", "b"])) == {"a", "b"}
+    with db.connect() as conn:  # objects without a saved annotations row still count
+        conn.execute("DELETE FROM annotations WHERE image_id = 'b'")
+    hash_a = db.annotations_hash("a")
+    assert hash_a is not None
+    assert db.page_decorations(["a", "b", "c"]) == {
+        "a": PageDecoration(object_count=1, content_hash=hash_a),
+        "b": PageDecoration(object_count=1, content_hash=None),
+    }
+    assert db.page_decorations(["c"]) == {}
+    assert db.page_decorations([]) == {}

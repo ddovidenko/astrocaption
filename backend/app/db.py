@@ -10,7 +10,7 @@ import hashlib
 import json
 import logging
 import sqlite3
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
@@ -50,25 +50,24 @@ class ImagePage(NamedTuple):
     next: str | None
 
 
+class PageDecoration(NamedTuple):
+    """What the list endpoint adds to one of its rows (#226)."""
+
+    object_count: int
+    #: The stored annotations' ``content_hash``, or None while the image has none saved.
+    content_hash: str | None
+
+
 #: What makes a row a gallery row (SPEC § 5.5): published and currently solved. The list, the
 #: sitemap and the head tags share it so they cannot drift (#187).
 _GALLERY_CONDS = ("published = 1", "solve_status = ?")
 _GALLERY_VALUES = (SolveStatus.SOLVED.value,)
 _GALLERY_WHERE = " AND ".join(_GALLERY_CONDS)
 
-# Every images column but the WCS header, which can run to kilobytes a row and which the
-# sitemap and the head tags never read (#226). ``_row_to_image`` validates the rows, so a
-# column that goes missing from this list fails the tests that read the light rows.
-_LIGHT_COLUMNS = (
-    "id, created_at, updated_at, title, original_name, original_path, preview_path, thumb_path,"
-    " width, height, solve_status, solve_error, solve_failure, solve_scale, nova_submission_id,"
-    " nova_job_id, calibration_json, solve_hints_json, published, exported_at, exported_hash,"
-    " objects_catalog"
-)
 
-
-def _marks(values: Sequence[object]) -> str:
-    """``?, ?, ?`` for an ``IN`` clause over ``values``."""
+def _marks(values: list[str]) -> str:
+    """``?, ?, ?`` for an ``IN`` clause over ``values`` (a list, so a lone string cannot be
+    mistaken for its characters)."""
     return ", ".join("?" for _ in values)
 
 
@@ -306,6 +305,9 @@ JSON_COLUMNS: dict[str, tuple[str, type[BaseModel]]] = {
 IMAGE_COLUMNS: tuple[str, ...] = tuple(
     JSON_COLUMNS[name][0] if name in JSON_COLUMNS else name for name in ImageRecord.model_fields
 )
+# Every column but the WCS header, which can run to kilobytes a row and which the sitemap and
+# the head tags never read (#226). The rows come back as ImageRecords with ``wcs_text`` None.
+_LIGHT_COLUMNS = ", ".join(c for c in IMAGE_COLUMNS if c != "wcs_text")
 
 
 def _parse_json_column[T: BaseModel](row: sqlite3.Row, column: str, model: type[T]) -> T | None:
@@ -720,42 +722,38 @@ class Database:
             ).fetchone()
         return int(row[0])
 
-    def object_counts(self, image_ids: Sequence[str]) -> dict[str, int]:
-        """Objects per image for ``image_ids`` (one page of the list, #226); images without
-        objects are absent."""
-        if not image_ids:
-            return {}
-        with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT image_id, COUNT(*) AS n FROM objects"
-                f" WHERE image_id IN ({_marks(image_ids)}) GROUP BY image_id",
-                tuple(image_ids),
-            )
-            return {r["image_id"]: int(r["n"]) for r in rows}
-
-    def annotations_hashes(self, image_ids: Sequence[str]) -> dict[str, str]:
-        """``content_hash`` of the stored annotations rows for ``image_ids``, by image id (one
-        page of the list, #226); images without annotations are absent."""
+    def page_decorations(self, image_ids: list[str]) -> dict[str, PageDecoration]:
+        """Object count and annotations hash for ``image_ids``, one page of the list (#226), in
+        one connection and one pass over the objects; images with neither are absent. The old
+        pair of helpers scanned the whole library for every page."""
         if not image_ids:
             return {}
         marks, params = _marks(image_ids), tuple(image_ids)
         with self.connect() as conn:
-            rows = conn.execute(
-                f"SELECT image_id, style_json, labels_json FROM annotations WHERE image_id IN ({marks})",
-                params,
-            )
+            annotations = {
+                r["image_id"]: (r["style_json"], r["labels_json"])
+                for r in conn.execute(
+                    "SELECT image_id, style_json, labels_json FROM annotations"
+                    f" WHERE image_id IN ({marks})",
+                    params,
+                )
+            }
             names: dict[str, list[str]] = {}
             for r in conn.execute(
                 f"SELECT image_id, catalog_names FROM objects WHERE image_id IN ({marks}) ORDER BY id",
                 params,
             ):
                 names.setdefault(r["image_id"], []).append(r["catalog_names"])
-            return {
-                r["image_id"]: content_hash(
-                    r["style_json"], r["labels_json"], "\n".join(names.get(r["image_id"], []))
-                )
-                for r in rows
-            }
+        out: dict[str, PageDecoration] = {}
+        for image_id in set(annotations) | set(names):
+            stored = annotations.get(image_id)
+            digest = (
+                content_hash(stored[0], stored[1], "\n".join(names.get(image_id, [])))
+                if stored
+                else None
+            )
+            out[image_id] = PageDecoration(len(names.get(image_id, [])), digest)
+        return out
 
     def annotations_hash(self, image_id: str) -> str | None:
         """One row's ``content_hash`` without decoding its document (``image_out`` needs no more)."""
