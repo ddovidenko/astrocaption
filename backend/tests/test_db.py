@@ -930,3 +930,16 @@ def test_reclassify_objects_updates_only_the_rows_whose_kind_changed(tmp_path: P
     assert db.reclassify_objects() == 1
     assert [o.kind for o in db.get_objects("a")] == ["galaxy", "nebula"]
     assert db.reclassify_objects() == 0
+
+
+def test_published_images_are_the_gallery_rows_newest_first(tmp_path: Path) -> None:
+    # The sitemap's rows (#187): published and currently solved, newest first by insertion,
+    # no page. The second row is published but solving, the third unpublished.
+    db = Database(tmp_path / "x.sqlite")
+    db.init()
+    db.insert_image(_plain_image("first", "2026-01-01T00:00:00Z", published=True))
+    db.insert_image(_plain_image("second", "2026-01-02T00:00:00Z", published=True))
+    db.insert_image(_plain_image("third", "2026-01-03T00:00:00Z"))
+    db.insert_image(_plain_image("fourth", "2026-01-04T00:00:00Z", published=True))
+    db.update_image("second", {"solve_status": SolveStatus.SOLVING})
+    assert [r.id for r in db.published_images()] == ["fourth", "first"]

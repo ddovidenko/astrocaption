@@ -572,6 +572,15 @@ class Database:
             [SolveStatus.SOLVED.value, *values],
         )
 
+    def published_images(self) -> list[ImageRecord]:
+        """Every gallery row, newest first, no page: the sitemap and the head tags (#187)."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM images WHERE published = 1 AND solve_status = ? ORDER BY rowid DESC",
+                (SolveStatus.SOLVED.value,),
+            ).fetchall()
+        return [_row_to_image(r) for r in rows]
+
     def images_needing_solve(self) -> list[ImageRecord]:
         with self.connect() as conn:
             rows = conn.execute(
