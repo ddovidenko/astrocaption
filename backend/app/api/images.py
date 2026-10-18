@@ -17,7 +17,15 @@ from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ..config import Settings, SettingsSource
-from ..db import PAGE_LIMIT, Database, ListFilter, ListStatus, UnknownCursor, hash_of
+from ..db import (
+    PAGE_LIMIT,
+    Database,
+    ListFilter,
+    ListStatus,
+    PageDecoration,
+    UnknownCursor,
+    hash_of,
+)
 from ..fonts import list_fonts, resolved_style
 from ..layout import autoplace, default_style
 from ..models import (
@@ -368,11 +376,10 @@ async def list_images(
         )
     except UnknownCursor:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, PAGE_GONE) from None
-    counts = db.object_counts()
-    hashes = db.annotations_hashes()
+    decorations = db.page_decorations([rec.id for rec in page.items])
     return Page(
         items=[
-            image_out(rec, settings, counts.get(rec.id, 0), hashes.get(rec.id))
+            image_out(rec, settings, *decorations.get(rec.id, PageDecoration(0, None)))
             for rec in page.items
         ],
         next=page.next,

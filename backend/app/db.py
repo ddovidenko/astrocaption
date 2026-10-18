@@ -50,11 +50,26 @@ class ImagePage(NamedTuple):
     next: str | None
 
 
+class PageDecoration(NamedTuple):
+    """What the list endpoint adds to one of its rows (#226)."""
+
+    object_count: int
+    #: The stored annotations' ``content_hash``, or None while the image has none saved.
+    content_hash: str | None
+
+
 #: What makes a row a gallery row (SPEC § 5.5): published and currently solved. The list, the
 #: sitemap and the head tags share it so they cannot drift (#187).
 _GALLERY_CONDS = ("published = 1", "solve_status = ?")
 _GALLERY_VALUES = (SolveStatus.SOLVED.value,)
 _GALLERY_WHERE = " AND ".join(_GALLERY_CONDS)
+
+
+def _marks(values: list[str]) -> str:
+    """``?, ?, ?`` for an ``IN`` clause over ``values`` (a list, so a lone string cannot be
+    mistaken for its characters)."""
+    return ", ".join("?" for _ in values)
+
 
 ListStatus = Literal["solving", "failed", "solved"]
 """The owner's status chip: ``solving`` is every row the Images page polls (pending too)."""
@@ -290,6 +305,9 @@ JSON_COLUMNS: dict[str, tuple[str, type[BaseModel]]] = {
 IMAGE_COLUMNS: tuple[str, ...] = tuple(
     JSON_COLUMNS[name][0] if name in JSON_COLUMNS else name for name in ImageRecord.model_fields
 )
+# Every column but the WCS header, which can run to kilobytes a row and which the sitemap and
+# the head tags never read (#226). The rows come back as ImageRecords with ``wcs_text`` None.
+_LIGHT_COLUMNS = ", ".join(c for c in IMAGE_COLUMNS if c != "wcs_text")
 
 
 def _parse_json_column[T: BaseModel](row: sqlite3.Row, column: str, model: type[T]) -> T | None:
@@ -577,8 +595,8 @@ class Database:
 
     def published_images(self, limit: int | None = None) -> list[ImageRecord]:
         """The gallery's rows newest first, all of them or the newest ``limit``: the sitemap
-        and the head tags (#187)."""
-        sql = f"SELECT * FROM images WHERE {_GALLERY_WHERE} ORDER BY rowid DESC"
+        and the head tags (#187). Without the WCS header (#226)."""
+        sql = f"SELECT {_LIGHT_COLUMNS} FROM images WHERE {_GALLERY_WHERE} ORDER BY rowid DESC"
         params: list[object] = [*_GALLERY_VALUES]
         if limit is not None:
             sql += " LIMIT ?"
@@ -704,24 +722,38 @@ class Database:
             ).fetchone()
         return int(row[0])
 
-    def object_counts(self) -> dict[str, int]:
+    def page_decorations(self, image_ids: list[str]) -> dict[str, PageDecoration]:
+        """Object count and annotations hash for ``image_ids``, one page of the list (#226), in
+        one connection and one pass over the objects; images with neither are absent. The old
+        pair of helpers scanned the whole library for every page."""
+        if not image_ids:
+            return {}
+        marks, params = _marks(image_ids), tuple(image_ids)
         with self.connect() as conn:
-            rows = conn.execute("SELECT image_id, COUNT(*) AS n FROM objects GROUP BY image_id")
-            return {r["image_id"]: int(r["n"]) for r in rows}
-
-    def annotations_hashes(self) -> dict[str, str]:
-        """``content_hash`` of every stored annotations row, by image id (for the list endpoint)."""
-        with self.connect() as conn:
-            rows = conn.execute("SELECT image_id, style_json, labels_json FROM annotations")
-            names: dict[str, list[str]] = {}
-            for r in conn.execute("SELECT image_id, catalog_names FROM objects ORDER BY id"):
-                names.setdefault(r["image_id"], []).append(r["catalog_names"])
-            return {
-                r["image_id"]: content_hash(
-                    r["style_json"], r["labels_json"], "\n".join(names.get(r["image_id"], []))
+            annotations = {
+                r["image_id"]: (r["style_json"], r["labels_json"])
+                for r in conn.execute(
+                    "SELECT image_id, style_json, labels_json FROM annotations"
+                    f" WHERE image_id IN ({marks})",
+                    params,
                 )
-                for r in rows
             }
+            names: dict[str, list[str]] = {}
+            for r in conn.execute(
+                f"SELECT image_id, catalog_names FROM objects WHERE image_id IN ({marks}) ORDER BY id",
+                params,
+            ):
+                names.setdefault(r["image_id"], []).append(r["catalog_names"])
+        out: dict[str, PageDecoration] = {}
+        for image_id in set(annotations) | set(names):
+            stored = annotations.get(image_id)
+            digest = (
+                content_hash(stored[0], stored[1], "\n".join(names.get(image_id, [])))
+                if stored
+                else None
+            )
+            out[image_id] = PageDecoration(len(names.get(image_id, [])), digest)
+        return out
 
     def annotations_hash(self, image_id: str) -> str | None:
         """One row's ``content_hash`` without decoding its document (``image_out`` needs no more)."""
