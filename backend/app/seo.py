@@ -9,13 +9,21 @@ export already shows.
 from __future__ import annotations
 
 import html
+import logging
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import quote
 
+from fastapi import Request
+
+from .config import Settings
+from .db import Database
 from .models import Annotations, ImageRecord, SolveObject
 from .render import label_text
-from .storage import PREVIEW_MAX_PX, fit_within
+from .storage import PREVIEW_MAX_PX, export_exists, fit_within
+
+log = logging.getLogger(__name__)
 
 MAX_NAMES = 8
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -105,3 +113,41 @@ def gallery_head(base: str, site_title: str, count: int, newest: ImageRecord | N
     if newest is not None:
         tags += _image_tags(base, newest)
     return Head(title=site_title, tags=tags)
+
+
+_IMAGE_PATH = re.compile(r"^gallery/([^/]+)$")
+
+
+def base_url(request: Request) -> str:
+    """Scheme and host as the request names them (the proxy middleware has already applied
+    X-Forwarded-Proto under TRUST_PROXY), without the trailing slash."""
+    return str(request.base_url).rstrip("/")
+
+
+def head_for(request: Request, path: str, settings: Settings, db: Database) -> tuple[int, Head]:
+    """Status and head for a client route. Only the public gallery routes get tags; every
+    other route is the shell with the site title. A miss on a public route is 404 with the
+    plain head, the same body whether the id is unknown, unpublished or lacks files."""
+    site = settings.site_title
+    plain = Head(site, "")
+    is_gallery = path in ("", "gallery")
+    image_match = _IMAGE_PATH.match(path)
+    if not is_gallery and image_match is None:
+        return 200, plain
+    if not settings.public_gallery_enabled:
+        return 404, plain
+    base = base_url(request)
+    if is_gallery:
+        rows = db.published_images()
+        newest = next((r for r in rows if export_exists(settings, r)), None)
+        return 200, gallery_head(base, site, len(rows), newest)
+    assert image_match is not None  # the only other way in
+    rec = db.get_image(image_match.group(1))
+    if rec is None or not rec.published or not export_exists(settings, rec):
+        return 404, plain
+    try:
+        names = label_names(db.get_annotations(rec.id), db.get_objects(rec.id))
+    except Exception:  # a corrupt row must not take the page down; the export still shows
+        log.warning("head tags: could not read the labels of image %s", rec.id, exc_info=True)
+        names = []
+    return 200, image_head(base, site, rec, names)

@@ -17,6 +17,8 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
+from . import seo
+
 _TITLE = re.compile(r"<title>.*?</title>\s*", re.DOTALL)
 _HEAD_END = "</head>"
 
@@ -25,7 +27,8 @@ _HEAD_END = "</head>"
 class ShellTemplate:
     before: str  # up to the insertion point (the first </head>), the original <title> removed
     after: str  # from </head> on; empty when the shell has no head (then `before` is all of it)
-    indent: str  # the whitespace before </head>, so inserted tags line up with the built head
+    indent: str  # the last head tag's indent, so inserted tags line up with the built ones
+    close: str  # the whitespace that preceded </head> on its own line
 
     @classmethod
     def load(cls, static_dir: Path) -> ShellTemplate | None:
@@ -35,20 +38,23 @@ class ShellTemplate:
         text = index.read_text(encoding="utf-8")
         cut = text.find(_HEAD_END)
         if cut < 0:
-            return cls(text, "", "")
+            return cls(text, "", "", "")
         head = _TITLE.sub("", text[:cut], count=1)
         line_start = head.rfind("\n") + 1
-        indent = head[line_start:]
-        if indent.strip():  # </head> shares its line with other markup: insert right there
-            line_start, indent = len(head), ""
-        return cls(head[:line_start], text[cut:], indent)
+        if head[line_start:].strip():  # </head> shares its line with markup: insert right there
+            return cls(head, text[cut:], "", "")
+        # The inserted lines take the indent of the last tag above them, like Vite's own.
+        lines = head[:line_start].splitlines()
+        last = next((line for line in reversed(lines) if line.strip()), "")
+        indent = last[: len(last) - len(last.lstrip())]
+        return cls(head[:line_start], text[cut:], indent, head[line_start:])
 
     def render(self, title: str, tags: str = "") -> str:
         if not self.after:
             return self.before
         block = f"<title>{html.escape(title)}</title>\n{tags}"
         indented = "".join(f"{self.indent}{line}\n" for line in block.splitlines())
-        return f"{self.before}{indented}{self.indent}{self.after}"
+        return f"{self.before}{indented}{self.close}{self.after}"
 
 
 def mount(app: FastAPI, static_dir: Path) -> None:
@@ -66,5 +72,6 @@ def mount(app: FastAPI, static_dir: Path) -> None:
             candidate = (root / path).resolve()
             if candidate.is_file() and candidate.is_relative_to(root):
                 return FileResponse(candidate)
-        settings = request.app.state.settings_source.current()
-        return HTMLResponse(template.render(settings.site_title))
+        state = request.app.state
+        status, head = seo.head_for(request, path, state.settings_source.current(), state.db)
+        return HTMLResponse(template.render(head.title, head.tags), status_code=status)
