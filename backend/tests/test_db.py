@@ -118,7 +118,8 @@ def test_content_hash_covers_the_objects_names(settings: Settings) -> None:
     before = db.annotations_hash(rec.id)
     stored = db.get_annotations(rec.id)
     assert stored is not None and before is not None
-    assert stored.content_hash == before == db.annotations_hashes()[rec.id] == hash_of(ann, objects)
+    assert stored.content_hash == before == db.annotations_hashes([rec.id])[rec.id]
+    assert before == hash_of(ann, objects)
     renamed = [objects[0].model_copy(update={"catalog_names": ["NGC 1924", "PGC 17319"]})]
     db.replace_objects(rec.id, renamed)
     after = db.annotations_hash(rec.id)
@@ -945,3 +946,27 @@ def test_published_images_are_the_gallery_rows_newest_first(tmp_path: Path) -> N
     assert [r.id for r in db.published_images()] == ["fourth", "first"]
     assert [r.id for r in db.published_images(limit=1)] == ["fourth"]
     assert db.count_published_images() == 2
+    # The rows leave the WCS header behind: the sitemap reads every published row and needs
+    # none of it (#226). The single-row read still carries it.
+    db.update_image("first", {"wcs_text": "SIMPLE  = T"})
+    first = db.get_image("first")
+    assert first is not None and first.wcs_text == "SIMPLE  = T"
+    light = db.published_images()
+    assert [r.wcs_text for r in light] == [None, None]
+    assert light[1] == first.model_copy(update={"wcs_text": None})  # every other column is there
+
+
+def test_object_counts_and_annotations_hashes_follow_the_given_ids(tmp_path: Path) -> None:
+    # The list endpoint decorates one page of rows; the two helpers used to scan the whole
+    # library on every request (#226).
+    db = Database(tmp_path / "x.sqlite")
+    db.init()
+    for image_id in ("a", "b", "c"):
+        db.insert_image(_plain_image(image_id, "2026-01-01T00:00:00Z"))
+    _solved_with_names(db, "a", ["NGC 224"])
+    _solved_with_names(db, "b", ["NGC 1976", "M 42"])
+    assert db.object_counts(["a", "c"]) == {"a": 1}
+    assert db.object_counts([]) == {}
+    assert db.annotations_hashes(["a", "c"]) == {"a": db.annotations_hash("a")}
+    assert db.annotations_hashes([]) == {}
+    assert set(db.annotations_hashes(["a", "b"])) == {"a", "b"}

@@ -10,7 +10,7 @@ import hashlib
 import json
 import logging
 import sqlite3
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
@@ -55,6 +55,22 @@ class ImagePage(NamedTuple):
 _GALLERY_CONDS = ("published = 1", "solve_status = ?")
 _GALLERY_VALUES = (SolveStatus.SOLVED.value,)
 _GALLERY_WHERE = " AND ".join(_GALLERY_CONDS)
+
+# Every images column but the WCS header, which can run to kilobytes a row and which the
+# sitemap and the head tags never read (#226). ``_row_to_image`` validates the rows, so a
+# column that goes missing from this list fails the tests that read the light rows.
+_LIGHT_COLUMNS = (
+    "id, created_at, updated_at, title, original_name, original_path, preview_path, thumb_path,"
+    " width, height, solve_status, solve_error, solve_failure, solve_scale, nova_submission_id,"
+    " nova_job_id, calibration_json, solve_hints_json, published, exported_at, exported_hash,"
+    " objects_catalog"
+)
+
+
+def _marks(values: Sequence[object]) -> str:
+    """``?, ?, ?`` for an ``IN`` clause over ``values``."""
+    return ", ".join("?" for _ in values)
+
 
 ListStatus = Literal["solving", "failed", "solved"]
 """The owner's status chip: ``solving`` is every row the Images page polls (pending too)."""
@@ -577,8 +593,8 @@ class Database:
 
     def published_images(self, limit: int | None = None) -> list[ImageRecord]:
         """The gallery's rows newest first, all of them or the newest ``limit``: the sitemap
-        and the head tags (#187)."""
-        sql = f"SELECT * FROM images WHERE {_GALLERY_WHERE} ORDER BY rowid DESC"
+        and the head tags (#187). Without the WCS header (#226)."""
+        sql = f"SELECT {_LIGHT_COLUMNS} FROM images WHERE {_GALLERY_WHERE} ORDER BY rowid DESC"
         params: list[object] = [*_GALLERY_VALUES]
         if limit is not None:
             sql += " LIMIT ?"
@@ -704,17 +720,35 @@ class Database:
             ).fetchone()
         return int(row[0])
 
-    def object_counts(self) -> dict[str, int]:
+    def object_counts(self, image_ids: Sequence[str]) -> dict[str, int]:
+        """Objects per image for ``image_ids`` (one page of the list, #226); images without
+        objects are absent."""
+        if not image_ids:
+            return {}
         with self.connect() as conn:
-            rows = conn.execute("SELECT image_id, COUNT(*) AS n FROM objects GROUP BY image_id")
+            rows = conn.execute(
+                "SELECT image_id, COUNT(*) AS n FROM objects"
+                f" WHERE image_id IN ({_marks(image_ids)}) GROUP BY image_id",
+                tuple(image_ids),
+            )
             return {r["image_id"]: int(r["n"]) for r in rows}
 
-    def annotations_hashes(self) -> dict[str, str]:
-        """``content_hash`` of every stored annotations row, by image id (for the list endpoint)."""
+    def annotations_hashes(self, image_ids: Sequence[str]) -> dict[str, str]:
+        """``content_hash`` of the stored annotations rows for ``image_ids``, by image id (one
+        page of the list, #226); images without annotations are absent."""
+        if not image_ids:
+            return {}
+        marks, params = _marks(image_ids), tuple(image_ids)
         with self.connect() as conn:
-            rows = conn.execute("SELECT image_id, style_json, labels_json FROM annotations")
+            rows = conn.execute(
+                f"SELECT image_id, style_json, labels_json FROM annotations WHERE image_id IN ({marks})",
+                params,
+            )
             names: dict[str, list[str]] = {}
-            for r in conn.execute("SELECT image_id, catalog_names FROM objects ORDER BY id"):
+            for r in conn.execute(
+                f"SELECT image_id, catalog_names FROM objects WHERE image_id IN ({marks}) ORDER BY id",
+                params,
+            ):
                 names.setdefault(r["image_id"], []).append(r["catalog_names"])
             return {
                 r["image_id"]: content_hash(

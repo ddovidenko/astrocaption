@@ -368,8 +368,9 @@ async def list_images(
         )
     except UnknownCursor:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, PAGE_GONE) from None
-    counts = db.object_counts()
-    hashes = db.annotations_hashes()
+    ids = [rec.id for rec in page.items]
+    counts = db.object_counts(ids)
+    hashes = db.annotations_hashes(ids)
     return Page(
         items=[
             image_out(rec, settings, counts.get(rec.id, 0), hashes.get(rec.id))
