@@ -61,6 +61,20 @@ def test_template_fills_the_title_and_the_marker_at_the_marker_indent(tmp_path: 
     assert '<link rel="icon" href="/favicon.ico" />\n  </head>' in template.render("Sky")
 
 
+def test_template_breaks_head_lines_on_newlines_only(tmp_path: Path) -> None:
+    # A title with U+2028 (or NEL, \v, \f) would be split by splitlines(); the character must
+    # stay inside its quoted attribute, on one line.
+    template = ShellTemplate.load(write_shell(tmp_path))
+    assert template is not None
+    page = template.render(
+        "Sky", '<meta name="description" content="a\u2028b" />\n<meta name="b" />\n'
+    )
+    assert (
+        '\n    <meta name="description" content="a\u2028b" />\n    <meta name="b" />\n  </head>'
+        in page
+    )
+
+
 def test_the_built_shell_carries_the_placeholder_and_the_marker() -> None:
     # frontend/index.html and spa.py agree on two literals; Vite copies them into the build.
     template = ShellTemplate.load(REPO_ROOT / "frontend")

@@ -57,7 +57,10 @@ class ShellTemplate:
         page = self.text.replace(TITLE_PLACEHOLDER, f"<title>{html.escape(title)}</title>", 1)
         if not tags:  # the marker's whole line goes, not just the marker
             return page.replace(f"{self.indent}{HEAD_MARKER}\n", "", 1).replace(HEAD_MARKER, "", 1)
-        return page.replace(HEAD_MARKER, f"\n{self.indent}".join(tags.splitlines()), 1)
+        # Only "\n" ends a head line: splitlines() would also break on U+2028, NEL, \v, \f
+        # inside a quoted value.
+        lines = tags.rstrip("\n").split("\n")
+        return page.replace(HEAD_MARKER, f"\n{self.indent}".join(lines), 1)
 
 
 def mount(app: FastAPI, static_dir: Path) -> None:
