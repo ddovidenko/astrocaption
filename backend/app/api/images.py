@@ -41,6 +41,7 @@ from ..models import (
     ObjectOut,
     Page,
     PublishRequest,
+    RenameRequest,
     SolveHints,
     SolveObject,
     SolveStatus,
@@ -412,6 +413,23 @@ async def set_published(
         raise HTTPException(status.HTTP_409_CONFLICT, PUBLISH_NEEDS_EXPORT)
     if rec.published != body.published:  # a no-op must not bump updated_at
         db.update_image(image_id, {"published": body.published})
+        rec = _get_or_404(db, image_id)
+    return _image_out_for(db, settings, rec)
+
+
+@router.put("/{image_id}/title")
+async def rename_image(
+    image_id: str, body: RenameRequest, settings: SettingsDep, db: DbDep
+) -> ImageOut:
+    """Everything that shows the title reads the row (cards, editor header, gallery and its
+    served head tags, the search, the export's download name), so a rename touches nothing
+    else (#231)."""
+    rec = _get_or_404(db, image_id)
+    if rec.title != body.title:  # a no-op must not bump updated_at
+        # While a solve is queued or running, updated_at is the solve's clock (the abandonment
+        # guard, the card's "stuck" rule), so the name lands without the stamp; the solve's own
+        # end stamps the row. A rename right after an upload is the common case.
+        db.update_image(image_id, {"title": body.title}, stamp=not rec.busy)
         rec = _get_or_404(db, image_id)
     return _image_out_for(db, settings, rec)
 

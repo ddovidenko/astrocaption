@@ -408,14 +408,18 @@ def _load_labels(raw_json: str, image_id: str) -> list[Label]:
     return labels
 
 
-def _image_update(image_id: str, fields: Mapping[str, object]) -> tuple[str, dict[str, object]]:
+def _image_update(
+    image_id: str, fields: Mapping[str, object], stamp: bool = True
+) -> tuple[str, dict[str, object]]:
     """The ``UPDATE images`` statement and its parameters for ``fields`` plus a fresh
-    ``updated_at``; unknown columns are refused before anything is sent to SQLite."""
+    ``updated_at`` (unless ``stamp`` is off: a rename while a solve runs leaves the solve's
+    clock alone, #231); unknown columns are refused before anything is sent to SQLite."""
     values = _encode(fields)
     unknown = set(values) - set(IMAGE_COLUMNS)
     if unknown:
         raise ValueError(f"unknown image columns: {sorted(unknown)}")
-    values["updated_at"] = utcnow_iso()
+    if stamp:
+        values["updated_at"] = utcnow_iso()
     assignments = ", ".join(f"{k} = :{k}" for k in values)
     values["id"] = image_id
     return f"UPDATE images SET {assignments} WHERE id = :id", values
@@ -641,9 +645,10 @@ class Database:
             ).fetchall()
         return [_row_to_image(r) for r in rows]
 
-    def update_image(self, image_id: str, fields: Mapping[str, object]) -> None:
-        """Update the given record fields; ``updated_at`` is always refreshed."""
-        sql, values = _image_update(image_id, fields)
+    def update_image(self, image_id: str, fields: Mapping[str, object], stamp: bool = True) -> None:
+        """Update the given record fields; ``updated_at`` is refreshed unless ``stamp`` is off
+        (see ``_image_update``)."""
+        sql, values = _image_update(image_id, fields, stamp)
         with self.connect() as conn:
             cur = conn.execute(sql, values)
         if cur.rowcount == 0:
