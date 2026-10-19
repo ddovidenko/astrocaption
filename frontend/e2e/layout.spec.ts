@@ -75,7 +75,17 @@ test.describe('phone width', () => {
       await expect(page.locator('article.card', { hasText: 'Orion' })).toBeVisible()
       await expectNoHorizontalOverflow(page, 'images page')
       await expect(page.getByRole('button', { name: 'Log out' })).toBeInViewport({ ratio: 1 })
+      // The filter groups collapse behind a Filters button on a phone (#229); the search box stays.
+      await expect(page.getByRole('searchbox', { name: 'Search images' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Nebulae' })).toBeHidden()
+      await page.getByRole('button', { name: 'Filters' }).click()
+      await expect(page.getByRole('button', { name: 'Nebulae' })).toBeVisible()
+      await expectNoHorizontalOverflow(page, 'images page, filters open')
+      await page.getByRole('button', { name: 'Filters' }).click()
+      await expect(page.getByRole('button', { name: 'Nebulae' })).toBeHidden()
       const phoneCard = page.locator('article.card', { hasText: 'Orion' })
+      // With the groups collapsed there is room for the card's upload day again.
+      await expect(phoneCard.locator('.upload-day')).toBeVisible()
       await expect(phoneCard.getByRole('button', { name: 'Delete' })).toBeInViewport({ ratio: 1 })
       await phoneCard.getByRole('button', { name: 'Delete' }).click()
       await expect(phoneCard.getByRole('button', { name: 'Cancel' })).toBeInViewport({ ratio: 1 })
