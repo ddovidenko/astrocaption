@@ -213,7 +213,11 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
   page is gone (its image deleted or unpublished), the cursor leaves the URL and the list starts
   from the top. An upload drops the cursor as it drops the filters. An active search with no
   result says "Nothing matches." (owner: "No images match.") next to a Clear button. An upload
-  clears the owner's search and chips, so the new (pending, unpublished) card is in view.
+  clears the owner's search and chips, so the new (pending, unpublished) card is in view. The
+  bar is one panel: the search box, then the labelled groups (Kind, and the owner's Status and
+  Visibility) and the Uploaded range, two native date inputs joined into one control. On a phone
+  (≤ 640 px) the groups collapse behind a Filters button that counts what is set (the search box
+  stays), so the first card's buttons stay above the fold; the collapse does not open by itself.
   Hover (or tap on touch) swaps the preview
   to the annotated preview. Click opens a full-size view (the 2048 px preview) with the same
   hover behaviour and a link to download the full-resolution annotated export. The unannotated

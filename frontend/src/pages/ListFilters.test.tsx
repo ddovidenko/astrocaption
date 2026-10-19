@@ -91,7 +91,7 @@ describe('ListFilters', () => {
     render(<ListFilters query={query} onChange={onChange} label="Search the gallery" />)
     expect(pressed('Nebulae')).toBe('true')
     expect(pressed('Galaxies')).toBe('false')
-    expect(screen.getByRole('group', { name: 'Object kind' })).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'Kind' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Galaxies' }))
     expect(onChange).toHaveBeenLastCalledWith({ kind: 'galaxy' })
     fireEvent.click(screen.getByRole('button', { name: 'Nebulae' }))
@@ -177,5 +177,32 @@ describe('ListFilters', () => {
     expect((screen.getByLabelText('From') as HTMLInputElement).value).toBe('')
     expect((screen.getByLabelText('To') as HTMLInputElement).value).toBe('')
     expect(pressed('Stars')).toBe('false')
+  })
+
+  it('a Filters button opens and closes the groups (a phone collapses them) and counts what is set', () => {
+    // The CSS hides the groups under 640 px until the bar is open; here only the state is visible.
+    const query: ListQuery = { ...EMPTY_QUERY, q: 'orion', kind: 'nebula', since: '2026-10-01' }
+    const { rerender } = render(<ListFilters query={query} onChange={() => {}} label="Search the gallery" />)
+    const bar = screen.getByRole('search')
+    // The search box stays in view, so the count is the chips and dates only, not the text.
+    const toggle = screen.getByRole('button', { name: 'Filters, 2 active' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(bar.classList.contains('open')).toBe(false)
+    expect(toggle.getAttribute('aria-controls')).toBe(screen.getByRole('button', { name: 'Nebulae' }).closest('.filter-groups')!.id)
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(bar.classList.contains('open')).toBe(true)
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+
+    rerender(<ListFilters query={EMPTY_QUERY} onChange={() => {}} label="Search the gallery" />)
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeTruthy()
+  })
+
+  it('names each chip group and the date range so the bar reads as labelled groups', () => {
+    render(<ListFilters query={EMPTY_QUERY} onChange={() => {}} owner label="Search images" />)
+    for (const name of ['Status', 'Visibility', 'Kind', 'Uploaded']) {
+      expect(screen.getByRole('group', { name })).toBeTruthy()
+    }
   })
 })
