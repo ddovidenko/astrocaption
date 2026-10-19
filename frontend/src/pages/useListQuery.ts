@@ -45,14 +45,11 @@ export function useListQuery(): {
     [setParams],
   )
   const dropStart = useCallback(() => {
-    // The URL moved on meanwhile and took the cursor with it: nothing to drop, and a same-URL
-    // replace would only re-run the load effects.
-    if (!latest.current.has('before')) return
-    const next = new URLSearchParams(latest.current)
-    next.delete('before')
-    latest.current = next
-    setParams(next, { replace: true })
-  }, [setParams])
+    // `writeListQuery` drops the cursor on every write, so an empty patch is exactly that. When
+    // the URL moved on meanwhile and took the cursor with it there is nothing to drop, and a
+    // rewrite could still reorder the parameters and re-run the load effects for nothing.
+    if (latest.current.has('before')) change({})
+  }, [change])
   const current = useCallback(() => live.current, [])
   return { query, start, change, current, dropStart }
 }

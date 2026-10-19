@@ -172,8 +172,9 @@ export default function ImagesPage({
       // The cursor image was deleted meanwhile (another tab): the list is stale, start it over
       // from the page the URL names. Any other failure is shown as it is (#227).
       if (isPageGone(err)) {
+        // The link stays busy meanwhile: a second tap would send the same gone cursor again.
+        await refresh()
         setMore({ busy: false, error: null })
-        void refresh()
         return
       }
       setMore({ busy: false, error: pageError(err) })
@@ -263,11 +264,20 @@ async function listFirst(count: number, where: ListLocation): Promise<Page<Image
   const items: ImageOut[] = []
   let before: string | null = where.start
   do {
-    const page: Page<ImageOut> = await api.listImages({
-      ...toPageQuery(where.query),
-      limit: Math.min(100, count - items.length),
-      before,
-    })
+    let page: Page<ImageOut>
+    try {
+      page = await api.listImages({
+        ...toPageQuery(where.query),
+        limit: Math.min(100, count - items.length),
+        before,
+      })
+    } catch (err) {
+      // Only the first request speaks for the start the URL names. A chained cursor (the row a
+      // page ended on) deleted between two requests of the walk is not that: the cards so far
+      // stand, and the link keeps the cursor, so the next tap starts the list over.
+      if (isPageGone(err) && before !== where.start) return { items, next: before }
+      throw err
+    }
     items.push(...page.items)
     before = page.next
   } while (before !== null && items.length < count)

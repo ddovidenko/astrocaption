@@ -142,6 +142,10 @@ def test_gallery_is_paged_and_a_skipped_row_still_moves_the_cursor(
     second = anon_client.get("/api/gallery", params={"limit": 2, "before": first["next"]}).json()
     assert ([i["id"] for i in second["items"]], second["next"]) == ([oldest["id"]], None)
     assert anon_client.get("/api/gallery", params={"before": "nope"}).status_code == 410  # #227
+    # An unpublished image is no row of the gallery, so its id is the same 410 as an unknown one:
+    # a visitor cannot tell from the cursor whether a private id exists.
+    private = exported_image(client, sample_jpeg)
+    assert anon_client.get("/api/gallery", params={"before": private["id"]}).status_code == 410
     assert anon_client.get("/api/gallery", params={"before": ""}).status_code == 422  # malformed
 
 

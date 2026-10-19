@@ -419,9 +419,11 @@ unpublished or not currently solved, its export files are missing, or the galler
   continues that search. `kind` (galaxy|nebula|cluster|star|other) keeps images with at least
   one stored object of that kind; `since` and `until` (`YYYY-MM-DD`) bound the upload day in
   UTC, both inclusive, and an inverted range is simply empty. Any of these malformed is 422.
-  A `before` that names no image is 410 `That page is no longer available;
-  reload the list.` (not 422, so a page can tell a gone cursor from a malformed parameter). A published row whose export files are missing is skipped but still counted,
-  so a page can be short by one.
+  A `before` that names no row of the list being paged (deleted, outside its filters, or, for a
+  visitor, unpublished) is 410 `That page is no longer available; reload the list.` (not 422, so a
+  page can tell a gone cursor from a malformed parameter). An unpublished id gets the same answer as
+  an unknown one, so the cursor cannot confirm that a private id exists. A published row whose
+  export files are missing is skipped but still counted, so a page can be short by one.
 - `GET /gallery/{id}` → one `GalleryItem`
 - `GET /gallery/{id}/files/{thumb|preview|annotated-preview|export}` → the file, `Cache-Control:
   public, no-cache`; `export` is an attachment named `<slug>-annotated.jpg`; an unknown kind is

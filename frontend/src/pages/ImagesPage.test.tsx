@@ -399,4 +399,45 @@ describe('ImagesPage followed Show more page (#227)', () => {
     expect(api.listImages).toHaveBeenLastCalledWith({ limit: 24, before: 'a' })
     expect(titles()).toEqual(['c'])
   })
+
+  it('the Show more link stays busy until the restart after a gone cursor has landed', async () => {
+    let release!: (page: Awaited<ReturnType<typeof api.listImages>>) => void
+    vi.mocked(api.listImages)
+      .mockResolvedValueOnce({ items: [image('b')], next: 'b' })
+      .mockRejectedValueOnce(gone())
+      .mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+    vi.mocked(api.config).mockResolvedValue(config)
+    mountAt('/?before=a')
+    await tick(0)
+    fireEvent.click(screen.getByRole('link', { name: 'Show more' }))
+    await tick(0)
+    // A second tap here would send the same gone cursor again, so the link is held busy.
+    expect(screen.getByRole('link', { name: 'Loading…' }).getAttribute('aria-disabled')).toBe('true')
+    release({ items: [image('c')], next: null })
+    await tick(0)
+    expect(screen.queryByRole('link', { name: 'Loading…' })).toBeNull()
+    expect(titles()).toEqual(['c'])
+  })
+
+  it('a refresh whose walk loses a chained cursor keeps the start and the cards it has', async () => {
+    const many = Array.from({ length: 101 }, (_, n) => image(`i${n}`, { published: n === 0 }))
+    vi.mocked(api.listImages)
+      .mockResolvedValueOnce({ items: many, next: 'i100' })
+      // The refresh walks the 101 shown cards in two requests; the row the first one ends on
+      // is deleted in between, so the second one answers 410 although the start is fine.
+      .mockResolvedValueOnce({ items: many.slice(0, 100), next: 'i99' })
+      .mockRejectedValueOnce(gone())
+    vi.mocked(api.config).mockResolvedValue(config)
+    vi.mocked(api.setPublished).mockResolvedValue(image('i0', { published: false }))
+    mountAt('/?before=a')
+    await tick(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Unpublish' }))
+    await tick(0)
+    expect(api.listImages).toHaveBeenCalledTimes(3)
+    expect(api.listImages).toHaveBeenNthCalledWith(2, { limit: 100, before: 'a' })
+    expect(api.listImages).toHaveBeenNthCalledWith(3, { limit: 1, before: 'i99' })
+    expect(screen.getByTestId('url').textContent).toBe('?before=a')
+    expect(screen.queryByText(/no longer available/)).toBeNull()
+    expect(titles()).toHaveLength(100)
+  })
 })
