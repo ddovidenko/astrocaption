@@ -110,6 +110,9 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
 - Review ritual before a milestone PR: `/code-review high`, then a silent-failure pass
   (pr-review-toolkit agent) on the diff, then `/simplify`; fix, re-run `make lint test`, and let the
   owner smoke-test on `make dev` before committing.
+- Under `make dev` the working tree is served by Vite on **:5173**. Port 8000 is the API alone plus whatever
+  `backend/static` holds, which is the last `npm run build` (or docker build) output, not the branch you are on.
+  Smoke-test frontend changes on :5173; a result on :8000 that matches the old behaviour is the stale bundle.
 - `make install` refuses to run `npm ci` while the `astrocaption-dev` unit is active (Vite would keep serving
   stale bundle hashes: 504 "Outdated Optimize Dep", blank page, no error). Stop the unit first, or
   `make install FORCE=1` to have it restarted afterwards. Same fix if you ever see those 504s:
