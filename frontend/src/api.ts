@@ -582,6 +582,8 @@ export const api = {
   /** 409 (ApiError.status) = the image has no export yet; show err.message. */
   setPublished: (id: string, published: boolean) =>
     request<ImageOut>(`/api/images/${id}/published`, json('PUT', { published })),
+  /** 422 (ApiError.status) = empty or over 200 characters; show err.message. */
+  rename: (id: string, title: string) => request<ImageOut>(`/api/images/${id}/title`, json('PUT', { title })),
   // Public: no session. A 404 means unpublished, unknown, or the gallery is switched off.
   gallery: (page: PageQuery = {}) =>
     request<Page<GalleryItem>>(paged('/api/gallery', page), undefined, { sessionAware: false }),

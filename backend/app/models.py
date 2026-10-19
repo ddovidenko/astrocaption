@@ -564,6 +564,23 @@ class PublishRequest(BaseModel):
     published: bool
 
 
+class RenameRequest(BaseModel):
+    """``PUT /images/{id}/title`` (#231): the new title, trimmed, 1–200 characters (the cap the
+    site title and the search share)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(max_length=200)
+
+    @field_validator("title")
+    @classmethod
+    def _named(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Give the image a name.")
+        return value
+
+
 class Page[T](BaseModel):
     """One page of a newest-first list (SPEC § 8). ``next`` is the last item's id, to be sent back
     as ``before`` for the page after it; None when there is none."""

@@ -9,7 +9,7 @@ import Url from './testUrl'
 
 vi.mock('../api', async (importOriginal) => {
   const real = await importOriginal<typeof import('../api')>()
-  return { ...real, api: { ...real.api, listImages: vi.fn(), config: vi.fn(), image: vi.fn(), setPublished: vi.fn(), upload: vi.fn() } }
+  return { ...real, api: { ...real.api, listImages: vi.fn(), config: vi.fn(), image: vi.fn(), setPublished: vi.fn(), rename: vi.fn(), upload: vi.fn() } }
 })
 
 beforeEach(() => {
@@ -23,6 +23,7 @@ afterEach(() => {
   vi.mocked(api.config).mockReset()
   vi.mocked(api.image).mockReset()
   vi.mocked(api.setPublished).mockReset()
+  vi.mocked(api.rename).mockReset()
   vi.mocked(api.upload).mockReset()
 })
 
@@ -439,5 +440,59 @@ describe('ImagesPage followed Show more page (#227)', () => {
     expect(screen.getByTestId('url').textContent).toBe('?before=a')
     expect(screen.queryByText(/no longer available/)).toBeNull()
     expect(titles()).toHaveLength(100)
+  })
+})
+
+describe('ImageCard rename (#231)', () => {
+  function mountOne(title = 'a') {
+    vi.mocked(api.listImages).mockResolvedValueOnce({ items: [image('a', { title })], next: null })
+    vi.mocked(api.config).mockResolvedValue(config)
+    mount()
+  }
+
+  it('the heading is the control: clicking the name opens a box with it; Save sends the trimmed name and the card shows it', async () => {
+    mountOne()
+    await tick(0)
+    // The name sits inside the heading, so the list of titles stays clean of any glyph.
+    expect(titles()).toEqual(['a'])
+    expect(screen.getByRole('heading', { level: 3 }).contains(screen.getByRole('button', { name: 'Rename a' }))).toBe(true)
+    vi.mocked(api.listImages).mockResolvedValue({ items: [image('a', { title: 'Orion Belt' })], next: null })
+    vi.mocked(api.rename).mockResolvedValue(image('a', { title: 'Orion Belt' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Rename a' }))
+    const box = screen.getByRole('textbox', { name: 'New name' }) as HTMLInputElement
+    expect(box.value).toBe('a')
+    expect(screen.queryByRole('heading', { level: 3 })).toBeNull()
+    fireEvent.change(box, { target: { value: '  Orion Belt ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await tick(0)
+    expect(api.rename).toHaveBeenCalledWith('a', 'Orion Belt')
+    expect(titles()).toEqual(['Orion Belt'])
+    expect(screen.queryByRole('textbox', { name: 'New name' })).toBeNull()
+  })
+
+  it('Cancel and Escape put the heading back without a request', async () => {
+    mountOne()
+    await tick(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Rename a' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'New name' }), { target: { value: 'typo' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(titles()).toEqual(['a'])
+    fireEvent.click(screen.getByRole('button', { name: 'Rename a' }))
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'New name' }), { key: 'Escape' })
+    expect(titles()).toEqual(['a'])
+    expect(api.rename).not.toHaveBeenCalled()
+  })
+
+  it('a refused rename shows its sentence on the card and keeps the box for a second try', async () => {
+    mountOne()
+    await tick(0)
+    vi.mocked(api.rename).mockRejectedValue(new ApiError(422, 'Give the image a name.'))
+    vi.mocked(api.listImages).mockResolvedValue({ items: [image('a')], next: null })
+    fireEvent.click(screen.getByRole('button', { name: 'Rename a' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'New name' }), { target: { value: 'x' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await tick(0)
+    expect(screen.getByText('Give the image a name.')).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: 'New name' })).toBeTruthy()
   })
 })

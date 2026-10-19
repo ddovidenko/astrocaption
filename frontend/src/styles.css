@@ -54,6 +54,13 @@ a.button { text-decoration: none; display: inline-block; font-family: inherit; f
    anywhere rather than let it set the column width. The gallery caption does the same below. */
 .card h3, .gallery-view h2 { overflow-wrap: anywhere; }
 .card h3 { margin: 0 0 0.25rem; }
+.card h3 .title-button { all: unset; font: inherit; color: inherit; cursor: text; overflow-wrap: anywhere; border-radius: 3px; }
+.card h3 .title-button::after { content: ' \270E'; font-size: 0.8em; color: var(--muted); opacity: 0.45; transition: opacity 0.15s, color 0.15s; }
+.card h3 .title-button:hover::after, .card h3 .title-button:focus-visible::after { opacity: 1; color: var(--accent); }
+.card h3 .title-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card h3 .title-button:disabled { cursor: default; }
+.card .rename { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0 0 0.5rem; }
+.card .rename input { flex: 1 1 12rem; min-width: 0; }
 .meta { color: var(--muted); font-size: 0.9rem; display: flex; flex-wrap: wrap; gap: 0.75rem; }
 /* The two nova links wrap as one unit, never one per line. */
 .nova-links { display: inline-flex; gap: 0.75rem; white-space: nowrap; }

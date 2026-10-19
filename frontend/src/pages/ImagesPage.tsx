@@ -458,6 +458,14 @@ export function ImageCard({
   const [scale, setScale] = useState(1)
   const [lastExport, setLastExport] = useState<ExportOut | null>(null)
   const [confirming, setConfirming] = useState(false)
+  // Rename (#231): null while the heading shows, else the box's text. Only Save (or Enter)
+  // commits and only Cancel (or Escape) reverts; a lost focus does neither.
+  const [draft, setDraft] = useState<string | null>(null)
+  const renaming = draft !== null
+  const box = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (renaming) box.current?.select()
+  }, [renaming])
 
   /** Runs one card action and then refreshes the list — including after a refusal, because a
    *  409 usually means the row already moved on (a solve started elsewhere, the image was
@@ -540,7 +548,45 @@ export function ImageCard({
   return (
     <article className="card">
       <div>
-        <h3 title={image.title}>{image.title}</h3>
+        {draft === null ? (
+          <h3 title={image.title}>
+            {/* The name is the control (#231): a button in heading clothes, a faint pencil after it
+                as the hint, so the action row stays for the rarer actions. */}
+            <button type="button" className="title-button" aria-label={`Rename ${image.title}`} onClick={() => setDraft(image.title)} disabled={working}>
+              {image.title}
+            </button>
+          </h3>
+        ) : (
+          <form
+            className="rename"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void run(async () => {
+                await api.rename(image.id, draft.trim())
+                setDraft(null)
+              })
+            }}
+          >
+            <input
+              ref={box}
+              type="text"
+              aria-label="New name"
+              value={draft}
+              maxLength={200}
+              disabled={working}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setDraft(null)
+              }}
+            />
+            <button type="submit" disabled={working || draft.trim() === ''}>
+              Save
+            </button>
+            <button type="button" className="secondary" onClick={() => setDraft(null)} disabled={working}>
+              Cancel
+            </button>
+          </form>
+        )}
         <div className="meta">
           <span className={`badge ${image.solve_status}`}>{statusLabel(image.solve_status)}</span>
           {busy && <span>since {relativeTime(image.updated_at, now)}</span>}
