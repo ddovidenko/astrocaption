@@ -160,7 +160,8 @@ offering Edit and Export beside the recovery controls (#173), while Publish need
 Rename lives in the card's heading (#231): the name is the control (a faint pencil after it is the
 hint; it is a button for the keyboard and screen readers), a click turns it into a box with the
 name in it, Enter or Save commits it (trimmed, 1–200 characters; empty is refused in plain words),
-Escape or Cancel puts the heading back, and losing focus does neither. Everything that shows the title (cards, the editor
+Escape or Cancel puts the heading back, and losing focus does neither. While a solve is queued or running the new name lands
+without stamping `updated_at`, which is the solve's clock then; the solve's end stamps the row. Everything that shows the title (cards, the editor
 header, the gallery and its served head tags, the search, the export's download name) reads the
 row, so a rename re-exports nothing.
 Delete asks for confirmation in the page, not in a browser dialog; so does the editor's
@@ -480,7 +481,7 @@ Owner (cookie session):
   `GET /images/{id}`, `DELETE /images/{id}`
 - `PUT /images/{id}/published` {published} → the updated image; 409 when publishing without an export (§ 5.5)
 - `PUT /images/{id}/title` {title} → the updated image; trimmed, 1–200 characters, else 422; the same
-  name again does not stamp `updated_at` (#231)
+  name again does not stamp `updated_at`, nor does a rename while a solve is queued or running (#231)
 - `POST /images/{id}/solve` (re-solve, optional hints: scale, downsample factor, centre + radius)
 - `POST /images/{id}/check` (check again: resume polling the stored nova job without uploading, #10).
   409 unless the row's `check_available` is true (a failed solve that timed out and still holds a

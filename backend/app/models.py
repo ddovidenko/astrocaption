@@ -572,12 +572,15 @@ class RenameRequest(BaseModel):
 
     title: str = Field(max_length=200)
 
-    @field_validator("title")
+    @field_validator("title", mode="before")
     @classmethod
-    def _named(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("Give the image a name.")
+    def _named(cls, value: object) -> object:
+        # Trim first, so the cap measures the name that would be stored; a non-string falls
+        # through to pydantic's own type error.
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise PydanticCustomError("blank", "must not be blank")
         return value
 
 

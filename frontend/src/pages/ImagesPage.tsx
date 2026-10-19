@@ -464,7 +464,10 @@ export function ImageCard({
   const renaming = draft !== null
   const box = useRef<HTMLInputElement>(null)
   useEffect(() => {
-    if (renaming) box.current?.select()
+    if (renaming) {
+      box.current?.focus()
+      box.current?.select()
+    }
   }, [renaming])
 
   /** Runs one card action and then refreshes the list — including after a refusal, because a
@@ -552,15 +555,17 @@ export function ImageCard({
           <h3 title={image.title}>
             {/* The name is the control (#231): a button in heading clothes, a faint pencil after it
                 as the hint, so the action row stays for the rarer actions. */}
-            <button type="button" className="title-button" aria-label={`Rename ${image.title}`} onClick={() => setDraft(image.title)} disabled={working}>
+            <button type="button" className="title-button" title="Rename" onClick={() => setDraft(image.title)} disabled={working}>
               {image.title}
             </button>
+            <span className="pencil" aria-hidden="true" />
           </h3>
         ) : (
           <form
             className="rename"
             onSubmit={(e) => {
               e.preventDefault()
+              if (draft.trim() === '') return // the rule lives here, not only on the disabled Save
               void run(async () => {
                 await api.rename(image.id, draft.trim())
                 setDraft(null)

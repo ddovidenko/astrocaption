@@ -1031,13 +1031,15 @@ def test_startup_reclassifies_stored_kinds_against_the_current_names_table(
 
 
 def test_rename_sets_the_title_and_a_no_op_leaves_updated_at_alone(
-    client: TestClient, sample_jpeg: Path
+    client: TestClient, sample_jpeg: Path, settings: Settings
 ) -> None:
-    image = upload(client, sample_jpeg, title="Orion")
+    image = wait_for_status(client, upload(client, sample_jpeg, title="Orion")["id"], {"solved"})
+    _backdate(settings, image["id"], 5)  # the stamps have whole-second resolution
+    solved_at = client.get(f"/api/images/{image['id']}").json()["updated_at"]
     resp = client.put(f"/api/images/{image['id']}/title", json={"title": "  Orion Belt  "})
     assert resp.status_code == 200, resp.text
     assert resp.json()["title"] == "Orion Belt"
-    assert resp.json()["updated_at"] >= image["updated_at"]
+    assert resp.json()["updated_at"] > solved_at
     stamped = client.get(f"/api/images/{image['id']}").json()["updated_at"]
     # The same name again changes nothing, so the row is not stamped (#231).
     again = client.put(f"/api/images/{image['id']}/title", json={"title": "Orion Belt"})
@@ -1050,14 +1052,29 @@ def test_rename_sets_the_title_and_a_no_op_leaves_updated_at_alone(
 
 
 def test_rename_refuses_an_empty_or_overlong_title_and_an_unknown_image(
-    client: TestClient, anon_client: TestClient, sample_jpeg: Path
+    client: TestClient, anon_client: TestClient, sample_jpeg: Path, settings: Settings
 ) -> None:
     image = upload(client, sample_jpeg, title="Orion")
-    for bad in ("", "   ", "x" * 201):
+    for bad, sentence in (
+        ("", "title: must not be blank"),
+        ("   ", "title: must not be blank"),
+        ("x" * 201, "title: must be at most 200 characters long"),
+    ):
         resp = client.put(f"/api/images/{image['id']}/title", json={"title": bad})
-        assert resp.status_code == 422, bad
+        assert (resp.status_code, resp.json()["detail"]) == (422, sentence), bad
     assert client.get(f"/api/images/{image['id']}").json()["title"] == "Orion"
+    # The cap applies to the trimmed name: padding around 200 characters is not "too long".
+    padded = client.put(f"/api/images/{image['id']}/title", json={"title": "  " + "y" * 200 + "  "})
+    assert padded.status_code == 200, padded.text
+    assert padded.json()["title"] == "y" * 200
     assert client.put("/api/images/nope/title", json={"title": "Orion"}).status_code == 404
+    # While a solve is queued or running the row's updated_at is the solve's clock (abandonment,
+    # the card's "stuck" rule): the name still lands, but without the stamp.
+    Database(settings.db_path).update_image(image["id"], {"solve_status": SolveStatus.SOLVING})
+    before = client.get(f"/api/images/{image['id']}").json()["updated_at"]
+    resp = client.put(f"/api/images/{image['id']}/title", json={"title": "Belt"})
+    assert resp.status_code == 200, resp.text
+    assert (resp.json()["title"], resp.json()["updated_at"]) == ("Belt", before)
     assert (
         anon_client.put(f"/api/images/{image['id']}/title", json={"title": "Orion"}).status_code
         == 401

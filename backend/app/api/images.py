@@ -426,7 +426,10 @@ async def rename_image(
     else (#231)."""
     rec = _get_or_404(db, image_id)
     if rec.title != body.title:  # a no-op must not bump updated_at
-        db.update_image(image_id, {"title": body.title})
+        # While a solve is queued or running, updated_at is the solve's clock (the abandonment
+        # guard, the card's "stuck" rule), so the name lands without the stamp; the solve's own
+        # end stamps the row. A rename right after an upload is the common case.
+        db.update_image(image_id, {"title": body.title}, stamp=not rec.busy)
         rec = _get_or_404(db, image_id)
     return _image_out_for(db, settings, rec)
 
