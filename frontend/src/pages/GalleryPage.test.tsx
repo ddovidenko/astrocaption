@@ -79,7 +79,7 @@ describe('GalleryPage', () => {
   it('restarts from the page the URL names when the cursor image was unpublished meanwhile', async () => {
     vi.mocked(api.gallery)
       .mockResolvedValueOnce({ items: [item], next: 'img-1' })
-      .mockRejectedValueOnce(new ApiError(422, 'That page is no longer available; reload the list.'))
+      .mockRejectedValueOnce(new ApiError(410, 'That page is no longer available; reload the list.'))
       .mockResolvedValueOnce({ items: [{ ...item, id: 'img-3', title: 'Andromeda' }], next: null })
     render(
       <MemoryRouter initialEntries={['/gallery?before=img-7']}>
@@ -94,7 +94,7 @@ describe('GalleryPage', () => {
   it('restarts from the top when the cursor image was unpublished meanwhile', async () => {
     vi.mocked(api.gallery)
       .mockResolvedValueOnce({ items: [item], next: 'img-1' })
-      .mockRejectedValueOnce(new ApiError(422, 'That page is no longer available; reload the list.'))
+      .mockRejectedValueOnce(new ApiError(410, 'That page is no longer available; reload the list.'))
       .mockResolvedValueOnce({ items: [{ ...item, id: 'img-3', title: 'Andromeda' }], next: null })
     render(
       <MemoryRouter>
@@ -105,6 +105,37 @@ describe('GalleryPage', () => {
     expect(await screen.findByRole('link', { name: /Andromeda/ })).toBeTruthy()
     expect(screen.queryByRole('link', { name: /Orion/ })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Show more' })).toBeNull()
+  })
+
+  it('starts from the top and drops the cursor from the URL when the followed page is gone (#227)', async () => {
+    vi.mocked(api.gallery)
+      .mockRejectedValueOnce(new ApiError(410, 'That page is no longer available; reload the list.'))
+      .mockResolvedValueOnce({ items: [item], next: null })
+    render(
+      <MemoryRouter initialEntries={['/gallery?q=orion&before=unpublished']}>
+        <GalleryPage health={health()} />
+        <Url />
+      </MemoryRouter>,
+    )
+    expect(await screen.findByRole('link', { name: /Orion/ })).toBeTruthy()
+    expect(screen.getByTestId('url').textContent).toBe('?q=orion')
+    expect(api.gallery).toHaveBeenLastCalledWith({ q: 'orion', before: null })
+    expect(screen.queryByText(/no longer available/)).toBeNull()
+  })
+
+  it('a Show more failure other than a gone cursor is shown as it is, with no restart (#227)', async () => {
+    vi.mocked(api.gallery)
+      .mockResolvedValueOnce({ items: [item], next: 'img-1' })
+      .mockRejectedValueOnce(new ApiError(422, 'q: must be at most 200 characters'))
+    render(
+      <MemoryRouter>
+        <GalleryPage health={health()} />
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('link', { name: 'Show more' }))
+    expect(await screen.findByText('q: must be at most 200 characters')).toBeTruthy()
+    expect(api.gallery).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('link', { name: /Orion/ })).toBeTruthy()
   })
 
   it('captions each card with its title and the upload day', async () => {
@@ -241,7 +272,7 @@ describe('GalleryPage', () => {
       let answerRestart: (page: { items: GalleryItem[]; next: string | null }) => void = () => {}
       vi.mocked(api.gallery)
         .mockResolvedValueOnce({ items: [item], next: 'img-1' })
-        .mockRejectedValueOnce(new ApiError(422, 'The page is gone.'))
+        .mockRejectedValueOnce(new ApiError(410, 'The page is gone.'))
         .mockImplementationOnce(() => new Promise((resolve) => { answerRestart = resolve }))
         .mockResolvedValueOnce({ items: [{ ...item, id: 'img-3', title: 'Andromeda' }], next: null })
       render(

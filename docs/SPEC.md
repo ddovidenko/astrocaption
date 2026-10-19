@@ -208,7 +208,10 @@ Delete asks for confirmation in the page, not in a browser dialog; so does the e
   report after a short pause, since typing a year emits a value per digit). The search and chips live in
   the URL (`/gallery?q=veil`), so a result is
   linkable and a reload keeps it, and the Show more link carries them so a followed page stays
-  inside the result set; changing a filter starts again from the top. An active search with no
+  inside the result set; changing a filter starts again from the top. Both pages start from the
+  page a followed link names (the owner's too, and its refreshes keep that start); when that
+  page is gone (its image deleted or unpublished), the cursor leaves the URL and the list starts
+  from the top. An upload drops the cursor as it drops the filters. An active search with no
   result says "Nothing matches." (owner: "No images match.") next to a Clear button. An upload
   clears the owner's search and chips, so the new (pending, unpublished) card is in view.
   Hover (or tap on touch) swaps the preview
@@ -416,9 +419,11 @@ unpublished or not currently solved, its export files are missing, or the galler
   continues that search. `kind` (galaxy|nebula|cluster|star|other) keeps images with at least
   one stored object of that kind; `since` and `until` (`YYYY-MM-DD`) bound the upload day in
   UTC, both inclusive, and an inverted range is simply empty. Any of these malformed is 422.
-  A `before` that names no image is 422 `That page is no longer available;
-  reload the list.` A published row whose export files are missing is skipped but still counted,
-  so a page can be short by one.
+  A `before` that names no row of the list being paged (deleted, outside its filters, or, for a
+  visitor, unpublished) is 410 `That page is no longer available; reload the list.` (not 422, so a
+  page can tell a gone cursor from a malformed parameter). An unpublished id gets the same answer as
+  an unknown one, so the cursor cannot confirm that a private id exists. A published row whose
+  export files are missing is skipped but still counted, so a page can be short by one.
 - `GET /gallery/{id}` → one `GalleryItem`
 - `GET /gallery/{id}/files/{thumb|preview|annotated-preview|export}` → the file, `Cache-Control:
   public, no-cache`; `export` is an attachment named `<slug>-annotated.jpg`; an unknown kind is

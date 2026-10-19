@@ -101,7 +101,7 @@ async def list_gallery(
             limit, before, ListFilter(q=q, kind=kind, since=since, until=until)
         )
     except UnknownCursor:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, PAGE_GONE) from None
+        raise HTTPException(status.HTTP_410_GONE, PAGE_GONE) from None
     items: list[GalleryItem] = []
     for rec in page.items:
         if not export_exists(settings, rec):

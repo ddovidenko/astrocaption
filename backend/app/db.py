@@ -41,7 +41,8 @@ PAGE_LIMIT = 24
 
 
 class UnknownCursor(LookupError):
-    """``before`` names no image: the row was deleted after the caller saw it."""
+    """``before`` names no row of the list being paged: deleted after the caller saw it, outside
+    the list's filters, or (for a visitor) unpublished."""
 
 
 class ImagePage(NamedTuple):
@@ -563,7 +564,13 @@ class Database:
         # page follows.
         with self.connect() as conn:
             if before is not None:
-                cursor = conn.execute("SELECT rowid FROM images WHERE id = ?", (before,)).fetchone()
+                # The cursor must be a row of this list, not merely a row: a visitor's `before`
+                # naming an unpublished image would otherwise page on (200) while an unknown id is
+                # 410, and the difference would tell them which private ids exist (#227).
+                where = " AND ".join(["id = ?", *conds])
+                cursor = conn.execute(
+                    f"SELECT rowid FROM images WHERE {where}", (before, *values)
+                ).fetchone()
                 if cursor is None:
                     raise UnknownCursor(before)
                 conds.append("rowid < ?")

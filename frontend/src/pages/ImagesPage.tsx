@@ -7,6 +7,7 @@ import {
   formatBytes,
   hasLayout,
   isBusy,
+  isPageGone,
   pageError,
   statusLabel,
   type ConfigOut,
@@ -20,9 +21,9 @@ import { dayLabel } from '../day'
 import { elapsed, exportOf, exportState, relativeTime } from '../exportStatus'
 import ConfirmInline from '../ConfirmInline'
 import ListFilters from './ListFilters'
-import { EMPTY_QUERY, isFiltered, toPageQuery, type ListQuery } from './listQuery'
+import { EMPTY_QUERY, isFiltered, toPageQuery } from './listQuery'
 import ShowMore from './ShowMore'
-import { useListQuery } from './useListQuery'
+import { useListQuery, type ListLocation } from './useListQuery'
 
 const POLL_MS = 3000
 
@@ -34,7 +35,7 @@ export default function ImagesPage({
   refreshHealth: () => Promise<HealthOut | null>
 }) {
   // The search and chips live in the URL (SPEC § 5.5): linkable, and a reload keeps them.
-  const [query, changeQuery, currentQuery] = useListQuery()
+  const { query, start, change: changeQuery, current, dropStart } = useListQuery()
   const [images, setImages] = useState<ImageOut[]>([])
   const [next, setNext] = useState<string | null>(null)
   const [config, setConfig] = useState<ConfigOut | null>(null)
@@ -68,9 +69,10 @@ export default function ImagesPage({
   // upload can finish long after the owner typed a new search.
   const refresh = useCallback(async () => {
     const mine = ++seq.current
+    const where = current()
     try {
       const [page, cfg] = await Promise.all([
-        listFirst(Math.max(PAGE_LIMIT, shown.current), currentQuery()),
+        listFirst(Math.max(PAGE_LIMIT, shown.current), where),
         api.config(),
         refreshHealth(),
       ])
@@ -80,9 +82,16 @@ export default function ImagesPage({
       setNow(Date.now())
       setError(null)
     } catch (err) {
-      if (mine === seq.current) setError(pageError(err))
+      if (mine !== seq.current) return
+      // The followed page the list starts from is gone (deleted in another tab): the cursor
+      // leaves the URL, and the load effect lists from the top (#227).
+      if (isPageGone(err) && where.start) {
+        dropStart()
+        return
+      }
+      setError(pageError(err))
     }
-  }, [applyPage, refreshHealth, currentQuery])
+  }, [applyPage, refreshHealth, current, dropStart])
 
   // The config is fetched once; `refresh` and the poll keep it fresh after that. A search
   // does not change it, so the list below does not wait on it.
@@ -101,14 +110,14 @@ export default function ImagesPage({
     }
   }, [])
 
-  // The list the URL names: the first load, and every search or chip change after it (the
-  // query is in the URL, so a change re-runs this), under the same "newest answer wins" rule
-  // as `refresh`. Not `void refresh()`: react-hooks/set-state-in-effect forbids a
-  // setState-wrapping call in an effect body.
+  // The list the URL names, from the page a followed Show more link names (#227): the first
+  // load, and every search or chip change after it (the query is in the URL, so a change
+  // re-runs this), under the same "newest answer wins" rule as `refresh`. Not `void refresh()`:
+  // react-hooks/set-state-in-effect forbids a setState-wrapping call in an effect body.
   useEffect(() => {
     const mine = ++seq.current
     api
-      .listImages(toPageQuery(query))
+      .listImages(start ? { ...toPageQuery(query), before: start } : toPageQuery(query))
       .then((page) => {
         if (mine !== seq.current) return
         applyPage(page)
@@ -117,24 +126,32 @@ export default function ImagesPage({
       })
       .catch((err: unknown) => {
         if (mine !== seq.current) return
+        // The followed page is gone: the cursor leaves the URL, and this effect lists from
+        // the top.
+        if (isPageGone(err) && start) {
+          dropStart()
+          return
+        }
         // The cards on screen belong to the previous query; leaving them under the error
         // would let Show more append this query's rows to them.
         applyPage({ items: [], next: null })
         setError(pageError(err))
       })
-  }, [applyPage, query])
+  }, [applyPage, query, start, dropStart])
 
   // A fresh upload is pending and unpublished, so under a chip or a search it would be out
-  // of sight (or the page would say "No images match." right after it landed): the filters
-  // go, and the URL change fetches the whole list; health comes along as a refresh would.
+  // of sight (or the page would say "No images match." right after it landed), and on a
+  // followed page it is above the cursor: the filters and the cursor go, and the URL change
+  // fetches the whole list; health comes along as a refresh would.
   const uploaded = useCallback(async () => {
-    if (!isFiltered(currentQuery())) {
+    const where = current()
+    if (!isFiltered(where.query) && !where.start) {
       await refresh()
       return
     }
     changeQuery(EMPTY_QUERY)
     await refreshHealth()
-  }, [currentQuery, refresh, changeQuery, refreshHealth])
+  }, [current, refresh, changeQuery, refreshHealth])
 
   const showMore = useCallback(async () => {
     if (next === null) return
@@ -152,10 +169,12 @@ export default function ImagesPage({
       setNext(page.next)
       setMore({ busy: false, error: null })
     } catch (err) {
-      // The cursor image was deleted meanwhile (another tab): the list is stale, start it over.
-      if (err instanceof ApiError && err.status === 422) {
+      // The cursor image was deleted meanwhile (another tab): the list is stale, start it over
+      // from the page the URL names. Any other failure is shown as it is (#227).
+      if (isPageGone(err)) {
+        // The link stays busy meanwhile: a second tap would send the same gone cursor again.
+        await refresh()
         setMore({ busy: false, error: null })
-        void refresh()
         return
       }
       setMore({ busy: false, error: pageError(err) })
@@ -238,17 +257,27 @@ export default function ImagesPage({
   )
 }
 
-/** The first `count` images of `query` as one page: pages of at most 100 (the server's cap)
- *  joined, so a refresh keeps every card the owner has shown. */
-async function listFirst(count: number, query: ListQuery): Promise<Page<ImageOut>> {
+/** The first `count` images of `where` as one page, from the followed page it starts at:
+ *  pages of at most 100 (the server's cap) joined, so a refresh keeps every card the owner has
+ *  shown. */
+async function listFirst(count: number, where: ListLocation): Promise<Page<ImageOut>> {
   const items: ImageOut[] = []
-  let before: string | null = null
+  let before: string | null = where.start
   do {
-    const page: Page<ImageOut> = await api.listImages({
-      ...toPageQuery(query),
-      limit: Math.min(100, count - items.length),
-      before,
-    })
+    let page: Page<ImageOut>
+    try {
+      page = await api.listImages({
+        ...toPageQuery(where.query),
+        limit: Math.min(100, count - items.length),
+        before,
+      })
+    } catch (err) {
+      // Only the first request speaks for the start the URL names. A chained cursor (the row a
+      // page ended on) deleted between two requests of the walk is not that: the cards so far
+      // stand, and the link keeps the cursor, so the next tap starts the list over.
+      if (isPageGone(err) && before !== where.start) return { items, next: before }
+      throw err
+    }
     items.push(...page.items)
     before = page.next
   } while (before !== null && items.length < count)

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router'
-import { api, ApiError, describeError, type GalleryItem, type HealthOut, type PageQuery } from '../api'
+import { api, describeError, isPageGone, type GalleryItem, type HealthOut, type PageQuery } from '../api'
 import { dayLabel } from '../day'
 import GalleryCard from './GalleryCard'
 import ListFilters from './ListFilters'
@@ -15,9 +14,7 @@ import { useListQuery } from './useListQuery'
  *  typed search replaces the URL (no history entry per keystroke) and drops the cursor. */
 export default function GalleryPage({ health }: { health: HealthOut }) {
   const enabled = health.public_gallery_enabled
-  const [params] = useSearchParams()
-  const start = params.get('before')
-  const [query, changeQuery, currentQuery] = useListQuery()
+  const { query, start, change: changeQuery, current, dropStart } = useListQuery()
   const [items, setItems] = useState<GalleryItem[] | null>(null)
   const [next, setNext] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -38,6 +35,12 @@ export default function GalleryPage({ health }: { health: HealthOut }) {
       })
       .catch((err: unknown) => {
         if (cancelled) return
+        // The page a followed Show more link named is gone (its image was unpublished): the
+        // cursor leaves the URL, and this effect lists from the top (#227).
+        if (isPageGone(err) && start) {
+          dropStart()
+          return
+        }
         // The cards on screen belong to the previous search; leaving them under the error
         // would let Show more append this search's rows to them.
         setItems(null)
@@ -47,14 +50,14 @@ export default function GalleryPage({ health }: { health: HealthOut }) {
     return () => {
       cancelled = true
     }
-  }, [enabled, start, page])
+  }, [enabled, start, page, dropStart])
 
   const showMore = useCallback(async () => {
     if (next === null) return
     setMore({ busy: true, error: null })
     // The URL moved on (a new search) while this page was in flight: the effect owns the list
     // now, and this page belongs to the old search. Dropped, and the link stays for another tap.
-    const movedOn = () => currentQuery() !== query
+    const movedOn = () => current().query !== query
     try {
       const result = await api.gallery(page(next))
       if (movedOn()) {
@@ -65,27 +68,33 @@ export default function GalleryPage({ health }: { health: HealthOut }) {
       setNext(result.next)
       setMore({ busy: false, error: null })
     } catch (err) {
-      // The cursor image was unpublished meanwhile: the list is stale, start it over from the
-      // page the URL names, or from the top when that cursor is gone as well.
-      if (err instanceof ApiError && err.status === 422) {
-        const result = await api
-          .gallery(page(start))
-          .catch(() => (start ? api.gallery(page(null)) : null))
-          .catch(() => null)
-        if (movedOn()) {
-          setMore({ busy: false, error: null })
-          return
-        }
-        if (result) {
+      // Only a gone cursor (410) means the list is stale; any other failure is shown as it is.
+      if (!isPageGone(err)) {
+        setMore({ busy: false, error: describeError(err) })
+        return
+      }
+      // The cursor image was unpublished meanwhile: start over from the page the URL names.
+      // When that page is gone as well, the cursor leaves the URL and the effect lists from
+      // the top (#227).
+      try {
+        const result = await api.gallery(page(start))
+        if (!movedOn()) {
           setItems(result.items)
           setNext(result.next)
+        }
+        setMore({ busy: false, error: null })
+      } catch (restart) {
+        if (movedOn()) {
           setMore({ busy: false, error: null })
-          return
+        } else if (isPageGone(restart) && start) {
+          dropStart()
+          setMore({ busy: false, error: null })
+        } else {
+          setMore({ busy: false, error: describeError(restart) })
         }
       }
-      setMore({ busy: false, error: describeError(err) })
     }
-  }, [next, start, page, query, currentQuery])
+  }, [next, start, page, query, current, dropStart])
 
   if (!enabled) {
     return (
