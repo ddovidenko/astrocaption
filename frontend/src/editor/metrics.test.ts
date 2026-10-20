@@ -14,6 +14,7 @@ import {
   labelText,
   leaderSegment,
   boxCrossesRing,
+  ringEncloses,
   routeLeader,
   segmentCrossesBox,
   segmentCrossesRing,
@@ -270,9 +271,30 @@ describe('render vectors', () => {
     expect(texts.some((c) => c.routed && c.segment && c.routed.to[1] !== c.segment.to[1])).toBe(true)
     // #119: at least one case reports itself blocked.
     expect(vectors.leaders.some((c) => c.routed?.blocked)).toBe(true)
+    // #220: a ring enclosing the marker, with the box outside it, is not an obstacle; one whose
+    // outline runs exactly through the marker centre still is.
+    const enclosed = routed.filter((c) => c.obstacles.some((o) => ringEncloses(o, c.cx, c.cy)))
+    expect(enclosed.length).toBeGreaterThanOrEqual(1)
+    expect(enclosed.every((c) => c.routed && !c.routed.blocked)).toBe(true)
+    expect(enclosed.some((c) => c.routed && c.segment && c.routed.to[1] === c.segment.to[1])).toBe(true)
+    const onOutline = routed.filter((c) =>
+      c.obstacles.some((o) => (c.cx - o.x) ** 2 + (c.cy - o.y) ** 2 === o.r * o.r),
+    )
+    expect(onOutline.length).toBeGreaterThanOrEqual(1)
+    expect(onOutline.every((c) => c.routed?.blocked)).toBe(true)
     // At least one case reroutes and at least one falls back, so a broken port cannot pass.
     expect(routed.some((c) => c.routed && c.segment && c.routed.to[1] !== c.segment.to[1])).toBe(true)
     expect(routed.some((c) => c.routed && c.segment && c.routed.to[1] === c.segment.to[1])).toBe(true)
+  })
+
+  it('ringEncloses is strict: the outline itself does not count (#220)', () => {
+    const c: Circle = { x: 30, y: 0, r: 60 }
+    expect(ringEncloses(c, 0, 0)).toBe(true)
+    expect(ringEncloses(c, 89.9, 0)).toBe(true)
+    expect(ringEncloses(c, 90, 0)).toBe(false)
+    expect(ringEncloses(c, 30, -60)).toBe(false)
+    expect(ringEncloses(c, 100, 0)).toBe(false)
+    expect(ringEncloses({ x: 0, y: 0, r: 0 }, 0, 0)).toBe(false)
   })
 
   it('reproduces every ring crossing on and around the thresholds', () => {
