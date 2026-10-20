@@ -19,6 +19,7 @@ from app.placement import (
     box_inside,
     boxes_overlap,
     place_labels,
+    ring_encloses,
     scale_unit,
     segment_crosses_box,
 )
@@ -126,6 +127,17 @@ def test_ring_semantics() -> None:
     assert not box_crosses_ring(Box(1100, 0, 1300, 50), big, 4)  # fully outside
     assert box_crosses_ring(Box(900, -20, 1100, 20), big, 4)  # straddles the outline
     assert box_crosses_ring(Box(980, 0, 1200, 50), big, 4)  # within pad of the outline
+
+
+def test_ring_encloses_a_point_strictly_inside_it() -> None:
+    """#220: the marker centre inside the ring, squared distances, the outline itself excluded."""
+    c = Circle(30, 0, 60)
+    assert ring_encloses(c, 0, 0)
+    assert ring_encloses(c, 89.9, 0)
+    assert not ring_encloses(c, 90, 0)  # exactly on the outline
+    assert not ring_encloses(c, 30, -60)
+    assert not ring_encloses(c, 100, 0)
+    assert not ring_encloses(Circle(0, 0, 0), 0, 0)  # a point marker encloses nothing
 
 
 def test_labels_inside_a_huge_marker_do_not_collide() -> None:

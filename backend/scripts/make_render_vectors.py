@@ -221,11 +221,14 @@ def leader_vectors() -> list[dict[str, Any]]:
     box at exactly 12·s. Then the routing cases (#14), each with its ``routed`` segment: another
     ring on the nearest point's path (the marker level with the box: its top-left corner
     clears), that corner's path blocked too (bottom-left), the whole facing side blocked (the
-    far corners are clear of every ring but would cross the text: nearest point), a big ring the
-    box sits behind (nearest point), a leader entirely inside a big ring (clear), a box inside
-    the marker (no segment, whatever the rings), a diagonal box whose two facing faces both
-    offer candidates (top midpoint), and a box sitting across a big ring's outline, which then
-    does not block (top-left corner). Then the text-box cases (#118): another label's box on
+    far corners are clear of every ring but would cross the text: nearest point), a big ring
+    between the marker and the box that covers every candidate (nearest point, blocked), a ring
+    that encloses the marker while the box sits outside it (#220: that ring is not an obstacle,
+    so the nearest point, clear), the same with the marker centre exactly on the outline (not
+    enclosed: blocked), a leader entirely inside a big ring (clear), a box inside the marker
+    (no segment, whatever the rings), a diagonal box whose two facing faces both offer
+    candidates (top midpoint), and a box sitting across a big ring's outline, which then does
+    not block (top-left corner). Then the text-box cases (#118): another label's box on
     the nearest point's path (top-left corner), a box and a ring blocking the nearest point
     and the top-left corner (bottom-left), a box across every candidate (the nearest point:
     text blocks only when some candidate clears it), and a box plus a ring where only a
@@ -250,7 +253,15 @@ def leader_vectors() -> list[dict[str, Any]]:
         (18.0, tall, [Circle(1550, 1000, 5)], []),  # nearest blocked: top-left corner
         (18.0, tall, [Circle(1550, 1000, 5), Circle(1550, 925, 5)], []),  # and that: bottom-left
         (18.0, tall, [Circle(1550, 1000, 5), Circle(1550, 925, 5), Circle(1550, 1075, 5)], []),
-        (18.0, tall, [Circle(1530, 1000, 60)], []),  # behind a big ring: nothing clears, nearest
+        # Rings clear of the box by more than the pad (outline ≤ 1585, box at 1600), so only
+        # their relation to the marker decides: between marker and box, covering every candidate
+        # (blocked); enclosing the marker centre, 40 < 45 (#220: clear); the marker centre
+        # exactly on the outline, 30 = 30 (not enclosed: blocked).
+        (18.0, tall, [Circle(1545, 1000, 40)], []),
+        (18.0, tall, [Circle(1540, 1000, 45)], []),
+        (18.0, tall, [Circle(1530, 1000, 30)], []),
+        # Within the pad of the box's left edge (1590 + 12 > 1600): not an obstacle, clear.
+        (18.0, tall, [Circle(1530, 1000, 60)], []),
         (18.0, tall, [Circle(1530, 1000, 500)], []),  # entirely inside a big ring: clear
         (130.0, Box(1520, 990, 1600, 1010), [Circle(1550, 1000, 5)], []),  # inside: no segment
         (18.0, Box(1600, 1100, 1900, 1160), [Circle(1550, 1050, 5)], []),  # diagonal: top mid

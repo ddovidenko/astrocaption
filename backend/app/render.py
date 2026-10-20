@@ -30,6 +30,7 @@ from .placement import (
     Box,
     Circle,
     box_crosses_ring,
+    ring_encloses,
     scale_unit,
     segment_crosses_box,
     segment_crosses_ring,
@@ -199,8 +200,11 @@ def route_leader(
     wins, else the first that clears the rings, else ``seg`` itself, which is then ``blocked``.
     A ring whose outline already runs through ``box`` (the owner dragged the label onto it; M 42's
     arc through a label near the Trapezium) is not an obstacle: the leader cannot make that
-    worse."""
-    obstacles = [c for c in obstacles if not box_crosses_ring(box, c, pad)]
+    worse. Nor is a ring that encloses the marker itself (NGC 603 inside M 33, #220): a label
+    outside that ring cannot be reached without crossing it, so no drag could clear the notice."""
+    obstacles = [
+        c for c in obstacles if not (box_crosses_ring(box, c, pad) or ring_encloses(c, cx, cy))
+    ]
     start, end, _gap = seg
     candidates: list[tuple[Point, Point]] = [(start, end)]
     for px, py in _facing_candidates(cx, cy, box):

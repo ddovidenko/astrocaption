@@ -110,9 +110,10 @@ def test_route_leader_avoids_another_ring() -> None:
     assert abs(x1 - 100 / dist * 10) < 1e-9 and abs(y1 - (-60) / dist * 10) < 1e-9
     # That corner's path blocked too: the bottom corner.
     assert routed_to(box, [Circle(50, 0, 5), Circle(50, -30, 5)]) == (100, 60)
-    # Nothing clears: the nearest point is used, and the leader reports itself blocked (#119).
-    assert routed_to(box, [Circle(30, 0, 60)]) == (100, 0)
-    assert route_leader(seg, 0, 0, 10, box, [Circle(30, 0, 60)], 4).blocked
+    # Nothing clears (a ring between the marker and the box covers every candidate): the
+    # nearest point is used, and the leader reports itself blocked (#119).
+    assert routed_to(box, [Circle(50, 0, 30)]) == (100, 0)
+    assert route_leader(seg, 0, 0, 10, box, [Circle(50, 0, 30)], 4).blocked
     # Entirely inside a big ring: the nearest point stays.
     assert routed_to(box, [Circle(30, 0, 500)]) == (100, 0)
 
@@ -131,6 +132,22 @@ def test_route_leader_ignores_a_ring_the_box_sits_across() -> None:
     # A big ring the box lies entirely inside is not straddled and still blocks.
     assert routed_to(box, [Circle(150, 0, 100)]) == (100, 0)
     assert routed_to(box, [Circle(50, 0, 5), Circle(150, 0, 100)]) == (100, 0)
+
+
+def test_route_leader_ignores_a_ring_that_encloses_its_marker() -> None:
+    """#220: a ring that encloses the leader's own marker (NGC 603 inside M 33's ring) never
+    blocks that leader: a label outside the ring cannot be reached without crossing its
+    outline, so the notice would nag about something no drag can fix."""
+    box = Box(100, -60, 200, 60)
+    seg = leader_segment(0, 0, 10, box)
+    assert seg is not None
+    enclosing = Circle(30, 0, 60)  # the marker at the origin is 30 from its centre: inside
+    assert route_leader(seg, 0, 0, 10, box, [enclosing], 4) == RoutedLeader(seg[0], seg[1], False)
+    # A small ring on the nearest point's path still reroutes; the enclosing one stays ignored
+    # although the top-left corner's path crosses its outline too.
+    assert routed_to(box, [Circle(50, 0, 5), enclosing]) == (100, -60)
+    # A marker centre exactly on the outline is not enclosed: that ring blocks as before.
+    assert route_leader(seg, 0, 0, 10, box, [Circle(30, 0, 30)], 4).blocked
 
 
 def test_route_leader_avoids_another_labels_text() -> None:

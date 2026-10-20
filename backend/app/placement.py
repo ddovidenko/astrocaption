@@ -181,6 +181,15 @@ def segment_crosses_ring(
     return nearest_sq < outer * outer and (inner <= 0 or farthest_sq > inner * inner)
 
 
+def ring_encloses(c: Circle, x: float, y: float) -> bool:
+    """True when the point (x, y) lies strictly inside the circle: the outline itself does not
+    count. ``route_leader`` drops a ring that encloses the leader's own marker (#220): a label
+    outside that ring cannot be reached without crossing it. Squared distances only, as for the
+    other ring tests."""
+    dx, dy = x - c.x, y - c.y
+    return dx * dx + dy * dy < c.r * c.r
+
+
 def box_inside(box: Box, width: float, height: float) -> bool:
     return box.left >= 0 and box.top >= 0 and box.right <= width and box.bottom <= height
 

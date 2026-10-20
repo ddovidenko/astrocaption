@@ -297,7 +297,9 @@ Every enabled object has:
   ring *and* every other box wins, else the first that clears the rings, else the closest point. So text alone
   never reroutes unless some candidate clears it, and a ring is never crossed to spare text. A ring whose
   outline already runs through the label's own box (the owner dragged it there) does not block that label's
-  leader. Routing never decides whether a leader exists: `auto` looks at the closest point's gap alone. Both
+  leader, and neither does a ring that encloses the label's own marker (its centre strictly inside the circle;
+  NGC 603 inside M 33, #220): a label outside that ring cannot be reached without crossing it, so the crossing
+  is forced rather than fixable by a drag. Routing never decides whether a leader exists: `auto` looks at the closest point's gap alone. Both
   renderers apply the rule; `make render-vectors` pins it (the ring, box-ring and segment-box tests exactly on
   their thresholds too, #117: all three compare squared distances, since `hypot` is not bit-identical between
   Python and V8). When even the closest point cuts a ring, the leader is drawn there and the editor says so

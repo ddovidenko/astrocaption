@@ -253,6 +253,16 @@ export function segmentCrossesRing(a: [number, number], b: [number, number], c: 
   return nearestSq < outer * outer && (inner <= 0 || farthestSq > inner * inner)
 }
 
+/** True when (x, y) lies strictly inside the circle: the outline itself does not count.
+ *  `routeLeader` drops a ring that encloses the leader's own marker (#220): a label outside that
+ *  ring cannot be reached without crossing it. Mirrors placement.ring_encloses: squared
+ *  distances only, like the other ring tests. */
+export function ringEncloses(c: Circle, x: number, y: number): boolean {
+  const dx = x - c.x
+  const dy = y - c.y
+  return dx * dx + dy * dy < c.r * c.r
+}
+
 /** Segment from the marker edge towards (px, py) and the gap between them; null when the point
  *  lies within the marker. Mirrors render._leader_to. */
 function leaderTo(cx: number, cy: number, r: number, px: number, py: number): LeaderSegment | null {
@@ -305,7 +315,8 @@ export interface RoutedLeader {
  *  point) and then `facingCandidates`, in that order; the first one that clears every `obstacles`
  *  ring and every other label's text box (`boxes`, inflated by `pad`) wins, else the first that
  *  clears the rings, else `seg` itself, which is then `blocked`. A ring whose outline runs through
- *  the box itself never blocks. Mirrors render.route_leader. */
+ *  the box itself never blocks, nor does one that encloses the marker (#220). Mirrors
+ *  render.route_leader. */
 export function routeLeader(
   seg: LeaderSegment,
   cx: number,
@@ -318,8 +329,10 @@ export function routeLeader(
 ): RoutedLeader {
   // A ring whose outline already runs through the box (the owner dragged the label onto it;
   // M 42's arc through a label near the Trapezium) is not an obstacle: the leader cannot make
-  // that worse.
-  const obstacles = allObstacles.filter((c) => !boxCrossesRing(box, c, pad))
+  // that worse. Nor is a ring that encloses the marker itself (NGC 603 inside M 33, #220): a
+  // label outside that ring cannot be reached without crossing it, so no drag could clear the
+  // notice.
+  const obstacles = allObstacles.filter((c) => !(boxCrossesRing(box, c, pad) || ringEncloses(c, cx, cy)))
   const candidates: [[number, number], [number, number]][] = [[seg.from, seg.to]]
   for (const [px, py] of facingCandidates(cx, cy, box)) {
     const cand = leaderTo(cx, cy, r, px, py)
