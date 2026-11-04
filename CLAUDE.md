@@ -31,6 +31,7 @@ make reset-password-dev   # the same on a make dev checkout
 make placement-vectors   # regenerate tests/fixtures/placement/*.json from the Python placer
 make render-vectors      # regenerate tests/fixtures/render/vectors.json from render.py (text boxes, ascents, leaders, anchors)
 make names-vectors       # regenerate tests/fixtures/names/vectors.json from models.py (name ranking + alias line)
+make safari-probe [OUT=path]   # self-contained HTML that measures the contract's strings in any browser (#72); default frontend/dist/safari-probe.html
 make names-catalog       # rebuild backend/app/catalog/names.json from OpenNGC (network)
 make objects-catalog     # rebuild backend/app/catalog/objects.json (Sharpless/Barnard/LDN/LBN/PGC) from VizieR (network)
 make check-version TAG=v0.1.0   # the release workflow's tag guard: TAG must equal the version in pyproject, app/__init__.py, package.json and its lockfile

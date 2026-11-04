@@ -10,7 +10,7 @@ NPM       := npm --prefix frontend
 # shim that answers success for any unit, which would refuse `make install` in every Codespace.
 DEV_UNIT_ACTIVE := [ -d /run/systemd/system ] && systemctl is-active --quiet astrocaption-dev
 
-.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors render-vectors names-vectors names-catalog objects-catalog fonts record-fixtures favicons e2e-fixture e2e clean
+.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors render-vectors names-vectors safari-probe names-catalog objects-catalog fonts record-fixtures favicons e2e-fixture e2e clean
 
 help:
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -116,6 +116,9 @@ placement-vectors: $(VENV)/.installed ## Regenerate tests/fixtures/placement/*.j
 
 render-vectors: $(VENV)/.installed ## Regenerate tests/fixtures/render/vectors.json from render.py (the canvas parity contract)
 	cd backend && .venv/bin/python scripts/make_render_vectors.py
+
+safari-probe: $(VENV)/.installed ## Write a self-contained page that measures the render contract's strings in any browser (#72); OUT=path, default frontend/dist/safari-probe.html
+	cd backend && .venv/bin/python scripts/make_safari_probe.py $(if $(OUT),$(abspath $(OUT)))
 
 names-vectors: $(VENV)/.installed ## Regenerate tests/fixtures/names/vectors.json from models.py (name ranking + alias line, pins the TypeScript port)
 	cd backend && .venv/bin/python scripts/make_names_vectors.py
