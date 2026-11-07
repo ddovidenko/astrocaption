@@ -51,7 +51,7 @@ Everything the app stores lives in `./data`; back up that directory and nothing 
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/ddovidenko/astrocaption)
 
-`make install && make dev` on a machine with Python 3.13+ and Node 24, or open the repo in a
+`make install && make dev` on a machine with Python 3.13+ and Node 26, or open the repo in a
 Codespace, which does the same. `make test`, `make lint` and `make e2e` are the checks CI runs;
 `docs/ARCHITECTURE.md` says where things are.
 

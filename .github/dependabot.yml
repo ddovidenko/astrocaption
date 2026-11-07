@@ -33,8 +33,9 @@ updates:
       # Remove when #27 (TypeScript 7 upgrade) lands.
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
-      # @types/node follows the Node the project runs (24, the Docker build stage and CI);
-      # a newer major's types would accept APIs that runtime lacks. Bump with #25 (Node 26).
+      # @types/node follows the Node the project runs (26, the Docker build stage, CI and the
+      # devcontainer); a newer major's types would accept APIs that runtime lacks. Bump it by
+      # hand together with the Node LTS move below.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
 
@@ -44,6 +45,6 @@ updates:
       interval: weekly
     ignore:
       # The build stage tracks Node LTS by hand (odd majors never become LTS; even
-      # majors only after their LTS date, see #25). Minor/patch alpine bumps still flow.
+      # majors only after their LTS date). Minor/patch alpine bumps still flow.
       - dependency-name: node
         update-types: ["version-update:semver-major"]
