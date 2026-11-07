@@ -64,6 +64,9 @@ from app.render import (
 )
 
 OUT = REPO_ROOT / "tests" / "fixtures" / "render" / "vectors.json"
+#: The editor's load-time measurement check (#72): the longest contract string per bundled font at
+#: each size of ``SIZES_EVERY_FONT``, with Pillow's width, bundled into the frontend.
+PROBE_OUT = REPO_ROOT / "frontend" / "src" / "editor" / "probe-strings.json"
 FONTS_DIR = REPO_ROOT / "fonts"
 FIXTURES = (
     REPO_ROOT / "backend" / "tests" / "fixtures" / "nova",
@@ -73,6 +76,7 @@ FIXTURES = (
 # Every bundled font at three sizes for the strings that exercise the glyphs labels need
 # (Greek Bayer letters, the middle dot, the apostrophe, digits, a long alias line) ...
 SIZES_EVERY_FONT = (12, 24, 48)
+PROBE_SIZES = SIZES_EVERY_FONT
 GLYPH_STRINGS = (
     "θ1 Ori C",
     "ι Ori · 44 Ori",
@@ -466,6 +470,22 @@ def build_vectors(fonts_dir: Path) -> dict[str, Any]:
     }
 
 
+def probe_strings(texts: list[list[Any]]) -> list[dict[str, Any]]:
+    """For every font and ``PROBE_SIZES`` size the widest string of ``texts`` (the ``text_vectors``
+    rows), ordered by file then size. The editor measures these in the document's font when it
+    loads and refuses the browser when a width is off by more than SPEC § 9's 0.5 px (#72): a
+    hinted canvas drifts most along a long string, whatever the size."""
+    widest: dict[tuple[str, int], list[Any]] = {}
+    for row in texts:
+        file, size, _text, width = row
+        if size in PROBE_SIZES and width > widest.get((file, size), [None, None, None, -1.0])[3]:
+            widest[(file, size)] = row
+    return [
+        {"file": file, "size": size, "text": text, "width": width}
+        for (file, size, text, width) in (widest[key] for key in sorted(widest))
+    ]
+
+
 def dump(doc: dict[str, Any]) -> str:
     """One list entry per line, so a diff shows which font or rule changed."""
     lines = ["{"]
@@ -490,6 +510,9 @@ def main() -> None:
     doc = build_vectors(FONTS_DIR)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(dump(doc), encoding="utf-8")
+    probe = probe_strings(doc["texts"])
+    PROBE_OUT.write_text(json.dumps(probe, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    print(f"wrote {PROBE_OUT.relative_to(REPO_ROOT)}: {len(probe)} probe strings")
     print(
         f"wrote {OUT.relative_to(REPO_ROOT)}: {len(doc['fonts'])} fonts, {len(doc['texts'])} texts,"
         f" {len(doc['labels'])} labels, {len(doc['leaders'])} leaders, {len(doc['anchors'])} anchors"

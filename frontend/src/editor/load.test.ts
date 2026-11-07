@@ -1,12 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
+import { getMeasurer } from './editing'
 import { loadFonts } from './fonts'
 import { loadEditor } from './load'
+import type { TextMeasurer } from './metrics'
+import probe from './probe-strings.json'
 import type { LoadedDocument } from './store'
 import { makeDoc } from './testDoc'
 
 vi.mock('../api', () => ({ api: { image: vi.fn(), objects: vi.fn(), annotations: vi.fn(), fonts: vi.fn() } }))
 vi.mock('./fonts', () => ({ loadFonts: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('./editing', () => ({ getMeasurer: vi.fn() }))
+
+/** A measurer that returns Pillow's width for every probe string, plus `drift` px. */
+function measuringLikePillow(drift = 0): TextMeasurer {
+  return (text, file, size) => {
+    const entry = probe.find((p) => p.file === file && p.size === size && p.text === text)
+    if (!entry) throw new Error(`unexpected measurement ${file} ${size} ${text}`)
+    return entry.width + drift
+  }
+}
 
 function mockApi(doc: LoadedDocument) {
   vi.mocked(api.image).mockResolvedValue(doc.image)
@@ -17,28 +30,42 @@ function mockApi(doc: LoadedDocument) {
 
 describe('loadEditor', () => {
   beforeEach(() => {
-    // The test environment is plain node: there is no real CanvasRenderingContext2D at all, let
-    // alone one with `textRendering`. Stub a browser-capable one so loadEditor's pre-flight check
-    // passes; the one test that wants a Safari-shaped prototype overrides this with its own.
-    Object.defineProperty(globalThis, 'CanvasRenderingContext2D', { value: class {}, configurable: true })
-    CanvasRenderingContext2D.prototype.textRendering = 'auto'
+    vi.mocked(getMeasurer).mockReturnValue(measuringLikePillow())
   })
 
   afterEach(() => {
-    Reflect.deleteProperty(globalThis, 'CanvasRenderingContext2D')
     vi.clearAllMocks()
   })
 
-  it('rejects before any fetch when the browser cannot measure text like the export', async () => {
-    // Stubs a Safari-shaped prototype: no `textRendering`, so the browser cannot draw text the
-    // way Pillow does. No fetch mocking needed — the check runs before the network calls.
-    Object.defineProperty(globalThis, 'CanvasRenderingContext2D', {
-      value: class {},
-      configurable: true,
-    })
+  it('rejects when the browser measures the document font off by more than 0.5 px (#72)', async () => {
+    // The check is behavioural, not a feature sniff: Safari has no canvas `textRendering` yet
+    // measures within 0.25 px, while a hinted canvas drifts along a long string.
+    mockApi(makeDoc())
+    vi.mocked(getMeasurer).mockReturnValue(measuringLikePillow(0.75))
     await expect(loadEditor('img-1')).rejects.toThrow(
-      'This browser cannot measure text the way the export does (no canvas textRendering support); ' +
-        'the editor needs a current browser such as Chrome, Edge or Firefox.',
+      'This browser does not measure text the way the export does (widths off by up to 0.75 px); ' +
+        'the editor needs a current browser such as Chrome, Edge, Firefox or Safari.',
+    )
+    // Measured after the font loaded: an unloaded family would measure a fallback face.
+    expect(loadFonts).toHaveBeenCalledWith(['Inter-Regular.ttf'])
+  })
+
+  it('accepts a browser within the tolerance and measures only the document font', async () => {
+    mockApi(makeDoc())
+    const measure = vi.fn(measuringLikePillow(0.5))
+    vi.mocked(getMeasurer).mockReturnValue(measure)
+    await expect(loadEditor('img-1')).resolves.toBeTruthy()
+    const files = new Set(measure.mock.calls.map(([, file]) => file))
+    expect([...files]).toEqual(['Inter-Regular.ttf'])
+    expect(measure.mock.calls.length).toBe(probe.filter((p) => p.file === 'Inter-Regular.ttf').length)
+  })
+
+  it('rejects a browser whose widths come back NaN instead of letting them through the comparison', async () => {
+    mockApi(makeDoc())
+    vi.mocked(getMeasurer).mockReturnValue(() => Number.NaN)
+    await expect(loadEditor('img-1')).rejects.toThrow(
+      'This browser does not measure text the way the export does (text widths could not be measured); ' +
+        'the editor needs a current browser such as Chrome, Edge, Firefox or Safari.',
     )
   })
 

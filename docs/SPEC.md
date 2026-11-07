@@ -544,14 +544,21 @@ render contract is pinned by `tests/fixtures/render/vectors.json` (`make render-
 line heights, alias sizes, ascents, leader segments and anchor boxes that `render.py` computes for real
 label strings from the nova fixtures, in every bundled font. `backend/tests/test_render_parity.py` and
 `frontend/src/editor/metrics.test.ts` replay it exactly. The name ranking and alias policy have their own contract: `make names-vectors` writes `tests/fixtures/names/vectors.json` from `models.py` for every fixture name list and a hand-written edge set, and `backend/tests/test_names_vectors.py` and `frontend/src/editor/names.test.ts` replay it. The browser measures text with
-`textRendering: geometricPrecision` and must return every vector string's width within 0.5 px of
-Pillow's; the editor's rendering of the e2e field may differ from the server's annotated preview in at
+`textRendering: geometricPrecision` where it has the property and as is otherwise, and must return
+every vector string's width within 0.5 px of Pillow's; the editor's rendering of the e2e field may differ from the server's annotated preview in at
 most 1 % of pixels by more than 48 (of 255) in any channel (`frontend/e2e/parity.spec.ts`).
 Box widths are rounded up to whole pixels, so a difference under 0.5 px can still move a box edge, and
 with it a leader endpoint, by one pixel; the pixel budget allows for it. Chromium (99+) and Firefox
 (116+) implement `textRendering` and both meet the width contract (every vector string, worst 0.26 px);
-Safari does not implement it, so `loadEditor` refuses the editor there with a message naming the
-browsers that work, while the gallery, config page and exports stay available (#72).
+Safari does not implement it and meets the contract as is (Safari 26 on macOS, worst 0.24 px: CoreText
+does not hint advances), so the gate is behavioural: `make render-vectors` also writes
+`frontend/src/editor/probe-strings.json`, the widest contract string per font at 12, 24 and 48 px with
+Pillow's width, and `loadEditor` measures the document font's three once the font is loaded, refusing the
+browser with a message when any is off by more than 0.5 px, while the gallery, config page and exports
+stay available (#72). The same check runs again for each font the Style tab switches to, since fonts carry
+their own hinting instructions. `make safari-probe` writes a self-contained page that runs the whole contract
+in any browser for checking a new engine; the pixel diff itself runs in Chromium only, so Safari is verified on
+widths, not pixels.
 A stored per-image
 style whose `font_file` is no longer bundled renders, places and is served by `GET /annotations`
 with the built-in default and a server-log warning naming the file; `GET /annotations` names the stored file in `font_fallback`; the editor shows it and the next save stores the resolved font. `resolve_font_file` and `GET /fonts` use the same predicate (`list_fonts`).

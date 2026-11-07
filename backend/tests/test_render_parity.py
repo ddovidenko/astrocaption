@@ -19,9 +19,12 @@ from app.fonts import layout_engine_available
 from scripts.make_render_vectors import (
     GLYPH_STRINGS,
     OUT,
+    PROBE_OUT,
+    PROBE_SIZES,
     build_vectors,
     fixture_objects,
     label_strings,
+    probe_strings,
 )
 from tests.conftest import FONTS_DIR
 
@@ -56,6 +59,29 @@ def test_provenance_stamps_are_context_not_contract(built: dict[str, Any]) -> No
     stored = dict(built)
     stored["pillow"] = "0.0.0"
     assert_contract_current(stored, built)
+
+
+def test_probe_strings_are_current(built: dict[str, Any]) -> None:
+    """The editor's load-time measurement check (#72) reads frontend/src/editor/probe-strings.json,
+    written by ``make render-vectors`` from the same texts as the contract."""
+    stored = json.loads(PROBE_OUT.read_text(encoding="utf-8"))
+    assert stored == probe_strings(built["texts"]), (
+        "probe-strings.json is stale: make render-vectors"
+    )
+
+
+def test_probe_strings_pick_the_longest_string_per_font_and_size(built: dict[str, Any]) -> None:
+    texts = built["texts"]
+    probe = probe_strings(texts)
+    files = {font["file"] for font in built["fonts"]}
+    assert {(p["file"], p["size"]) for p in probe} == {(f, s) for f in files for s in PROBE_SIZES}
+    assert len(probe) == len(files) * len(PROBE_SIZES)
+    for p in probe:
+        same = [t for t in texts if t[0] == p["file"] and t[1] == p["size"]]
+        assert [p["file"], p["size"], p["text"], p["width"]] in same
+        assert p["width"] == max(t[3] for t in same)
+    # Ordered by file then size, so a diff of the file reads as a table.
+    assert [(p["file"], p["size"]) for p in probe] == sorted((p["file"], p["size"]) for p in probe)
 
 
 def test_pillow_uses_the_raqm_engine() -> None:

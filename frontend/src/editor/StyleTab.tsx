@@ -3,6 +3,7 @@ import { api, pageError, type FontOut, type StyleConfig } from '../api'
 import StyleForm from '../style/StyleForm'
 import { styleFormFromConfig, type ColorKey, type NumberKey, type StyleForm as StyleFormValues } from '../style/styleForm'
 import { loadBundledFont } from './fonts'
+import { assertMeasuresLikeExport } from './load'
 import { isEditable, useEditor } from './store'
 import { fallbackSentence, isNumberKey, patchForField } from './styleTab'
 import { useTaggedDraft } from './taggedDraft'
@@ -155,6 +156,7 @@ export default function StyleTab() {
     dropFontError()
     try {
       await loadBundledFont(file)
+      assertMeasuresLikeExport(file) // the load-time gate, per font (#72)
       useEditor.getState().setStyle({ font_file: file })
     } catch (err) {
       // null is a lost session: the shell is already sending the owner to /login (api.ts).
@@ -175,6 +177,7 @@ export default function StyleTab() {
     try {
       const def = await api.imageDefaultStyle(imageId)
       await loadBundledFont(def.font_file)
+      assertMeasuresLikeExport(def.font_file)
       useEditor.getState().setStyle(def)
     } catch (err) {
       setError(pageError(err))

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { StyleDefaults } from '../api'
 import { loadBundledFont } from '../editor/fonts'
-import { fontFamilyFor } from '../editor/metrics'
+import { fontFamilyFor, preferGeometricPrecision } from '../editor/metrics'
 import type { StyleForm } from './styleForm'
 import {
   ASSUMED_FONT_SIZE,
@@ -34,8 +34,9 @@ function textWidth(text: string, family: string, size: number): number | null {
   if (measureCtx === undefined) measureCtx = document.createElement('canvas').getContext('2d')
   if (!measureCtx) return null
   // Unhinted, like SVG text: hinted canvas advances round per glyph and can drift past the margin
-  // over a long alias line (see canvasMeasurer). Firefox has no textRendering; it measures as is.
-  if ('textRendering' in measureCtx) measureCtx.textRendering = 'geometricPrecision'
+  // over a long alias line (see canvasMeasurer); Safari has no textRendering and measures as is,
+  // which agrees with Pillow there (#72).
+  preferGeometricPrecision(measureCtx)
   measureCtx.font = `${size}px ${family}`
   return measureCtx.measureText(text).width
 }

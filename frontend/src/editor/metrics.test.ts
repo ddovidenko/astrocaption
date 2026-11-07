@@ -2,8 +2,13 @@ import { describe, expect, it } from 'vitest'
 import raw from '../../../tests/fixtures/render/vectors.json'
 import { MAX_UPLOAD_MB, MIN_UPLOAD_MB, type FontOut, type Label, type LeaderMode, type ObjectOut, type StyleConfig } from '../api'
 import type { Circle } from './metrics'
+import probe from './probe-strings.json'
 import {
   ANCHORS,
+  MEASUREMENT_TOLERANCE,
+  canvasMeasurer,
+  measurementDrift,
+  preferGeometricPrecision,
   MAX_FONT_SIZE,
   MAX_MARKER_MIN_RADIUS,
   MAX_STROKE_WIDTH,
@@ -138,6 +143,72 @@ function expectBox(got: Box, want: Box): void {
   expect(Math.abs(got.right - want.right)).toBeLessThanOrEqual(EPS)
   expect(Math.abs(got.bottom - want.bottom)).toBeLessThanOrEqual(EPS)
 }
+
+describe('canvasMeasurer', () => {
+  function fakeContext(hasTextRendering: boolean) {
+    const ctx = {
+      font: '',
+      measureText: (text: string) => ({ width: text.length * 7 + (ctx.font.length ? 0.5 : 0) }),
+    } as unknown as CanvasRenderingContext2D & { textRendering?: string }
+    if (hasTextRendering) ctx.textRendering = 'auto'
+    return ctx
+  }
+
+  it('sets geometricPrecision where the browser has textRendering', () => {
+    const ctx = fakeContext(true)
+    expect(canvasMeasurer(ctx)('NGC 1976', 'Inter-Regular.ttf', 12)).toBe(8 * 7 + 0.5)
+    expect(ctx.textRendering).toBe('geometricPrecision')
+    expect(ctx.font).toBe('12px "Inter-Regular"')
+  })
+
+  it('measures as is where it does not (Safari, #72): the load-time check decides, not the property', () => {
+    const ctx = fakeContext(false)
+    expect(canvasMeasurer(ctx)('NGC 1976', 'Inter-Regular.ttf', 12)).toBe(8 * 7 + 0.5)
+    expect('textRendering' in ctx).toBe(false)
+  })
+
+  it('preferGeometricPrecision is the one switch measuring and drawing share', () => {
+    const withIt = fakeContext(true)
+    preferGeometricPrecision(withIt)
+    expect(withIt.textRendering).toBe('geometricPrecision')
+    const without = fakeContext(false)
+    preferGeometricPrecision(without)
+    expect('textRendering' in without).toBe(false)
+  })
+})
+
+describe('measurementDrift', () => {
+  const widths = new Map(probe.map((p) => [`${p.file}|${p.size}|${p.text}`, p.width]))
+  const like = (drift: number): TextMeasurer => (text, file, size) => widths.get(`${file}|${size}|${text}`)! + drift
+
+  it('is the largest deviation from Pillow over the font\'s probe strings', () => {
+    expect(measurementDrift(like(0), 'Inter-Regular.ttf')).toBe(0)
+    expect(measurementDrift(like(-0.3), 'Inter-Regular.ttf')).toBeCloseTo(0.3, 9)
+    expect(measurementDrift(like(0.75), 'Ubuntu-Bold.ttf')).toBeCloseTo(0.75, 9)
+    expect(MEASUREMENT_TOLERANCE).toBe(0.5)
+  })
+
+  it('refuses a font the probe set does not know in plain language (a stale build)', () => {
+    expect(() => measurementDrift(like(0), 'Nope.ttf')).toThrow(
+      'Font Nope.ttf has no text-measurement reference in this build; ' +
+        'regenerate the render contract (make render-vectors) and rebuild.',
+    )
+  })
+})
+
+describe('probe strings', () => {
+  it('are contract strings: the widest per font at 12, 24 and 48 px', () => {
+    const files = new Set(vectors.fonts.map((f) => f.file))
+    expect(probe.length).toBe(files.size * 3)
+    for (const p of probe) {
+      expect(files.has(p.file), p.file).toBe(true)
+      expect([12, 24, 48]).toContain(p.size)
+      const same = vectors.texts.filter(([file, size]) => file === p.file && size === p.size)
+      expect(same.some(([, , text, width]) => text === p.text && width === p.width), JSON.stringify(p)).toBe(true)
+      expect(Math.max(...same.map(([, , , width]) => width))).toBe(p.width)
+    }
+  })
+})
 
 describe('fontShorthand', () => {
   it('builds the canvas font string from the file stem, quoted', () => {
