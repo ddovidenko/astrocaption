@@ -4,7 +4,7 @@
 # ---- stage 1: frontend -------------------------------------------------------------
 # The bundle is platform-independent, so under a multi-arch build (release.yml) this stage
 # runs once on the runner's own architecture instead of once per target under QEMU.
-FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend
+FROM --platform=$BUILDPLATFORM node:26-alpine AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund

@@ -2,7 +2,7 @@
   "name": "AstroCaption",
   "image": "mcr.microsoft.com/devcontainers/python:3.14",
   "features": {
-    "ghcr.io/devcontainers/features/node:1": { "version": "24" }
+    "ghcr.io/devcontainers/features/node:1": { "version": "26" }
   },
   // Pillow's wheel bundles raqm but loads libfribidi at runtime (same as docker/Dockerfile);
   // without it the render tests fail.
