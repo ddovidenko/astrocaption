@@ -117,7 +117,8 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
 - `make install` refuses to run `npm ci` while the `astrocaption-dev` unit is active (Vite would keep serving
   stale bundle hashes: 504 "Outdated Optimize Dep", blank page, no error). Stop the unit first, or
   `make install FORCE=1` to have it restarted afterwards. Same fix if you ever see those 504s:
-  `sudo systemctl restart astrocaption-dev`.
+  `sudo systemctl restart astrocaption-dev`. The unit's own start is exempt: after a pull that changed
+  the lockfile, restarting the unit runs `npm ci` itself (#247).
 - Don't switch git branches that add or remove `frontend/vite.config.ts` while `make dev` runs: Vite
   restarts without the `/api` proxy and the page goes blank (`make e2e`'s dev-proxy project catches a
   `vite.config.ts` that lost the proxy; it cannot see a live-restart). Stop the servers first (kill by
