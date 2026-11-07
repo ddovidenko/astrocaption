@@ -8,7 +8,10 @@ NPM       := npm --prefix frontend
 # True when the `make dev-service` systemd unit is serving (false where systemd is absent).
 # /run/systemd/system exists only under a booted systemd; devcontainer images ship a `systemctl`
 # shim that answers success for any unit, which would refuse `make install` in every Codespace.
-DEV_UNIT_ACTIVE := [ -d /run/systemd/system ] && systemctl is-active --quiet astrocaption-dev
+# The unit's own `make dev` (systemd gives its processes the unit's INVOCATION_ID) has no Vite
+# serving yet, so npm ci is safe there and a restart would kill the start itself (#247).
+DEV_UNIT_ACTIVE := [ -d /run/systemd/system ] && systemctl is-active --quiet astrocaption-dev \
+  && [ "$$INVOCATION_ID" != "$$(systemctl show astrocaption-dev -p InvocationID --value)" ]
 
 .PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors render-vectors names-vectors safari-probe names-catalog objects-catalog fonts record-fixtures favicons e2e-fixture e2e clean
 
