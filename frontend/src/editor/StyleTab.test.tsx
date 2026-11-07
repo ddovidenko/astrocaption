@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { loadBundledFont } from './fonts'
+import { assertMeasuresLikeExport } from './load'
 import { useEditor } from './store'
 import StyleTab from './StyleTab'
 import { makeDoc } from './testDoc'
@@ -12,6 +13,7 @@ vi.mock('../api', async (importOriginal) => {
   return { ...real, api: { ...real.api, imageDefaultStyle: vi.fn() } }
 })
 vi.mock('./fonts', () => ({ loadBundledFont: vi.fn() }))
+vi.mock('./load', () => ({ assertMeasuresLikeExport: vi.fn() }))
 
 const doc = () => makeDoc()
 // The Roboto tests pick a font makeDoc() does not list; add it so the select offers it and
@@ -26,6 +28,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   useEditor.getState().reset()
   vi.mocked(loadBundledFont).mockReset().mockResolvedValue('Inter-Regular')
+  vi.mocked(assertMeasuresLikeExport).mockReset()
   vi.mocked(api.imageDefaultStyle).mockReset()
 })
 afterEach(() => {
@@ -154,6 +157,23 @@ describe('StyleTab fonts', () => {
     expect(screen.getByText('Font Roboto-Bold.ttf could not be loaded.')).toBeTruthy()
     expect(state().undo).toHaveLength(0)
   })
+  it('keeps the previous font when the browser drifts on the chosen one (#72), checked after the load', async () => {
+    state().load(docWithRoboto())
+    const refusal = 'This browser does not measure text the way the export does (widths off by up to 1.20 px); ' +
+      'the editor needs a current browser such as Chrome, Edge, Firefox or Safari.'
+    vi.mocked(assertMeasuresLikeExport).mockImplementation(() => { throw new Error(refusal) })
+    render(<StyleTab />)
+    const font = screen.getByLabelText('Font') as HTMLSelectElement
+    await act(async () => { fireEvent.change(font, { target: { value: 'Roboto-Bold.ttf' } }) })
+    expect(state().style?.font_file).toBe('Inter-Regular.ttf')
+    expect(font.value).toBe('Inter-Regular.ttf')
+    expect(screen.getByText(refusal)).toBeTruthy()
+    expect(state().undo).toHaveLength(0)
+    // An unloaded family measures a fallback face, so the check must follow the load.
+    expect(assertMeasuresLikeExport).toHaveBeenCalledWith('Roboto-Bold.ttf')
+    expect(vi.mocked(assertMeasuresLikeExport).mock.invocationCallOrder[0]!)
+      .toBeGreaterThan(vi.mocked(loadBundledFont).mock.invocationCallOrder[0]!)
+  })
   it('picking the font already in use clears a pending fallback notice with one commit', async () => {
     state().load({ ...doc(), fontFallback: { stored: 'Gone.ttf', used: 'Inter-Regular.ttf' } })
     render(<StyleTab />)
@@ -176,6 +196,18 @@ describe('StyleTab reset and colour', () => {
     expect(state().style).toEqual(def)
     expect(state().undo).toHaveLength(1)
     expect(fontSize().value).toBe('36')
+  })
+  it('reset to site defaults is refused the same way when the browser drifts on the default font (#72)', async () => {
+    state().load(docWithRoboto())
+    const def = { ...doc().annotations.style, font_file: 'Roboto-Bold.ttf' }
+    vi.mocked(api.imageDefaultStyle).mockResolvedValue(def)
+    vi.mocked(assertMeasuresLikeExport).mockImplementation(() => { throw new Error('drifts') })
+    render(<StyleTab />)
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reset to site defaults' })) })
+    expect(state().style?.font_file).toBe('Inter-Regular.ttf')
+    expect(state().undo).toHaveLength(0)
+    expect(screen.getByText('drifts')).toBeTruthy()
+    expect(assertMeasuresLikeExport).toHaveBeenCalledWith('Roboto-Bold.ttf')
   })
   it('a colour typed then closed is one commit', async () => {
     state().load(doc())

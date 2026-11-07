@@ -2,7 +2,7 @@ import { useRef } from 'react'
 import { Shape } from 'react-konva'
 import type Konva from 'konva'
 import type { FontOut, Label, StyleConfig } from '../api'
-import { ascentFor, fontShorthand, type LabelBox, type LabelLines } from './metrics'
+import { ascentFor, fontShorthand, preferGeometricPrecision, type LabelBox, type LabelLines } from './metrics'
 
 /** A refusal to draw this shape at all, raised here and worded for the page. Anything else the
  *  canvas throws is a browser failure whose message is not for the owner (CLAUDE.md: no raw
@@ -43,7 +43,7 @@ export function LabelTextShape({ label, style, font, box, text, onDrawError }: P
         )
       }
       const c = ctx._context
-      c.textRendering = 'geometricPrecision'
+      preferGeometricPrecision(c)
       c.textBaseline = 'alphabetic'
       c.textAlign = 'left'
       c.lineJoin = 'round'

@@ -29,7 +29,7 @@ make up           # docker compose up (uses ./data as volume)
 make reset-password   # in the compose container; see docs/LOCKOUT.md
 make reset-password-dev   # the same on a make dev checkout
 make placement-vectors   # regenerate tests/fixtures/placement/*.json from the Python placer
-make render-vectors      # regenerate tests/fixtures/render/vectors.json from render.py (text boxes, ascents, leaders, anchors)
+make render-vectors      # regenerate tests/fixtures/render/vectors.json from render.py (text boxes, ascents, leaders, anchors) and frontend/src/editor/probe-strings.json (the editor's load-time measurement check)
 make names-vectors       # regenerate tests/fixtures/names/vectors.json from models.py (name ranking + alias line)
 make safari-probe [OUT=path]   # self-contained HTML that measures the contract's strings in any browser (#72); default frontend/dist/safari-probe.html
 make names-catalog       # rebuild backend/app/catalog/names.json from OpenNGC (network)
@@ -51,8 +51,8 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
 - Preview (browser canvas) and export (server Pillow) must produce the same layout. Both read
   the same annotation JSON and the same font files. Any change to one renderer requires the
   same change to the other and a regenerated contract: `make render-vectors`
-  rewrites `tests/fixtures/render/vectors.json` from `render.py`, `backend/tests/test_render_parity.py` fails
-  while it is stale, `frontend/src/editor/metrics.ts` (pinned by `metrics.test.ts`) must be changed to match,
+  rewrites `tests/fixtures/render/vectors.json` and `frontend/src/editor/probe-strings.json` from `render.py`,
+  `backend/tests/test_render_parity.py` fails while either is stale, `frontend/src/editor/metrics.ts` (pinned by `metrics.test.ts`) must be changed to match,
   the name ranking and alias policy are pinned the same way by `make names-vectors` (`tests/fixtures/names/vectors.json`,
   replayed by `backend/tests/test_names_vectors.py` and `frontend/src/editor/names.test.ts`),
   and the pixel diff in `frontend/e2e/parity.spec.ts` (Konva stage exported as PNG at a fixed zoom against

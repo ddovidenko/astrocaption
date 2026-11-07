@@ -8,6 +8,7 @@
 // server resolves a font that is no longer bundled to the default, and the browser must draw
 // with the same one. A /fonts/<file> 404 would fall back to a system font silently.
 import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
+import probeStrings from './probe-strings.json' with { type: 'json' }
 import { aliasNames, primaryName } from './names'
 
 export const MIN_FONT_SIZE = 6
@@ -113,23 +114,55 @@ export function fontShorthand(size: number, file: string): string {
 /** Advance width of `text` set in `fontFile` at `size` px, in original-image pixels. */
 export type TextMeasurer = (text: string, fontFile: string, size: number) => number
 
-/** The canvas measurer. `geometricPrecision` turns hinting off so widths agree with Pillow's
- *  getlength within 0.5 px at every size (design § 1); default canvas text rounds to whole
- *  pixels and drifts up to 27 % at small sizes. Chromium and Firefox (116+) both meet the
- *  contract (#72: 1,944 vector strings, worst 0.26 px); Safari has no `textRendering` and is
- *  refused by `loadEditor`. The font must be loaded (FontFace) first.
+/** The canvas measurer. Where the browser has `textRendering`, `geometricPrecision` turns hinting
+ *  off so widths agree with Pillow's getlength within 0.5 px at every size (design § 1); hinted
+ *  canvas text rounds advances per glyph and drifts along a long string. Chromium and Firefox
+ *  (116+) meet the contract that way (#72: 1,944 vector strings, worst 0.26 px). Safari has no
+ *  `textRendering` and measures as is, which also meets it (CoreText does not hint advances:
+ *  worst 0.24 px on Safari 26); whether a browser measures like the export is decided by
+ *  `measurementDrift` when the editor loads, not by the property.
  *  The font's FontFace must already be loaded: `measureText` on an unloaded family silently uses
  *  a fallback font, and `document.fonts.check()` cannot detect that (it returns true for an
  *  unregistered family), so the editor awaits `document.fonts.load()` before its first draw. */
 export function canvasMeasurer(ctx: CanvasRenderingContext2D): TextMeasurer {
-  if (!('textRendering' in CanvasRenderingContext2D.prototype)) {
-    throw new Error('this browser cannot measure text the way the export does (no canvas textRendering)')
-  }
   return (text, fontFile, size) => {
-    ctx.textRendering = 'geometricPrecision' // per call: a ctx.restore() would otherwise reset it
+    preferGeometricPrecision(ctx) // per call: a ctx.restore() would otherwise reset it
     ctx.font = fontShorthand(size, fontFile)
     return ctx.measureText(text).width
   }
+}
+
+/** Turn glyph hinting off where the browser offers the switch. Measuring and drawing both go
+ *  through here so they agree on what the property means: Safari has none and needs none (#72). */
+export function preferGeometricPrecision(ctx: CanvasRenderingContext2D): void {
+  if ('textRendering' in ctx) ctx.textRendering = 'geometricPrecision'
+}
+
+/** SPEC § 9: every contract string within this many px of Pillow's width. */
+export const MEASUREMENT_TOLERANCE = 0.5
+
+interface ProbeString {
+  file: string
+  size: number
+  text: string
+  width: number
+}
+
+/** The largest deviation, in px, between `measure` and Pillow over `file`'s probe strings: the
+ *  widest contract string at 12, 24 and 48 px (`probe-strings.json`, written by `make
+ *  render-vectors`). `loadEditor` refuses a browser whose drift exceeds `MEASUREMENT_TOLERANCE`
+ *  (#72). The font must be loaded first, like every measurement. */
+export function measurementDrift(measure: TextMeasurer, file: string): number {
+  const entries = (probeStrings as ProbeString[]).filter((p) => p.file === file)
+  // Only a build whose probe file predates the font can get here: GET /annotations serves a
+  // font the server bundles, and `make render-vectors` writes every bundled font.
+  if (entries.length === 0) {
+    throw new Error(
+      `Font ${file} has no text-measurement reference in this build; ` +
+        'regenerate the render contract (make render-vectors) and rebuild.',
+    )
+  }
+  return Math.max(...entries.map((p) => Math.abs(measure(p.text, p.file, p.size) - p.width)))
 }
 
 export interface LabelBox {

@@ -114,7 +114,7 @@ reset-password-dev: $(VENV)/.installed ## Choose a new owner password on this ch
 placement-vectors: $(VENV)/.installed ## Regenerate tests/fixtures/placement/*.json from the Python placer
 	cd backend && .venv/bin/python scripts/make_placement_vectors.py
 
-render-vectors: $(VENV)/.installed ## Regenerate tests/fixtures/render/vectors.json from render.py (the canvas parity contract)
+render-vectors: $(VENV)/.installed ## Regenerate tests/fixtures/render/vectors.json and frontend/src/editor/probe-strings.json from render.py (the canvas parity contract)
 	cd backend && .venv/bin/python scripts/make_render_vectors.py
 
 safari-probe: $(VENV)/.installed ## Write a self-contained page that measures the render contract's strings in any browser (#72); OUT=path, default frontend/dist/safari-probe.html
