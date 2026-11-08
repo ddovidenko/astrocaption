@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
+dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10", "uv>=0.13", "pip-audit>=2.10"]
 
 [build-system]
 requires = ["setuptools>=69"]

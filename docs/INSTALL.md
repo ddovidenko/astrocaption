@@ -25,6 +25,8 @@ docker compose up -d                       # pulls ghcr.io/ddovidenko/astrocapti
 ```
 
 To build the image yourself instead of pulling it: `docker compose up -d --build` (`make up`).
+Python dependencies install from the pinned, hash-checked `backend/requirements.txt`, so a build
+from a release tag gets the same package versions as the published image of that release.
 
 Open <http://localhost:8080>. Uploaded images, previews, the SQLite database and exports
 live in `./data` on the host; back that directory up and nothing else.
