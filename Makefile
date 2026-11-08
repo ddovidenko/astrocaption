@@ -13,18 +13,35 @@ NPM       := npm --prefix frontend
 DEV_UNIT_ACTIVE := [ -d /run/systemd/system ] && systemctl is-active --quiet astrocaption-dev \
   && [ "$$INVOCATION_ID" != "$$(systemctl show astrocaption-dev -p InvocationID --value)" ]
 
-.PHONY: help install dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors render-vectors names-vectors safari-probe names-catalog objects-catalog fonts record-fixtures favicons e2e-fixture e2e clean
+.PHONY: help install lock audit dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors render-vectors names-vectors safari-probe names-catalog objects-catalog fonts record-fixtures favicons e2e-fixture e2e clean
 
 help:
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 install: $(VENV)/.installed frontend/node_modules ## Create the backend venv and install frontend packages
 
-$(VENV)/.installed: backend/pyproject.toml
+# The venv installs the pinned, hashed requirements-dev.txt (what CI and the image's runtime
+# half install too), then the app itself without re-resolving. `make lock` writes the pins.
+$(VENV)/.installed: backend/requirements-dev.txt backend/pyproject.toml
 	test -d $(VENV) || python3 -m venv $(VENV)
 	$(VENV)/bin/pip install --quiet --upgrade pip
-	$(VENV)/bin/pip install --quiet -e "backend[dev]"
+	$(VENV)/bin/pip install --quiet --require-hashes -r backend/requirements-dev.txt
+	$(VENV)/bin/pip install --quiet --no-deps -e backend
 	touch $@
+
+# uv resolves once for every platform and Python >= requires-python (--universal) so the same
+# file is correct on WSL, CI, the image and a Mac; the header names this target. Without
+# UPGRADE=1, pins already in the file are kept and only new or conflicting ones move.
+LOCK := $(abspath $(VENV))/bin/uv pip compile --quiet --universal --generate-hashes \
+  --custom-compile-command "make lock" $(if $(UPGRADE),--upgrade,)
+
+lock: $(VENV)/.installed ## Re-pin backend/requirements.txt and requirements-dev.txt from pyproject.toml (UPGRADE=1 moves every pin to its latest)
+	cd backend && $(LOCK) -o requirements.txt pyproject.toml
+	cd backend && $(LOCK) --extra dev --constraint requirements.txt -o requirements-dev.txt pyproject.toml
+
+audit: $(VENV)/.installed ## Known vulnerabilities in the pinned backend requirements and the frontend lockfile (network)
+	cd backend && .venv/bin/pip-audit --require-hashes --disable-pip --progress-spinner off -r requirements-dev.txt
+	$(NPM) audit
 
 # `npm ci` wipes node_modules, including Vite's pre-bundle cache (node_modules/.vite/deps).
 # A Vite that is already serving keeps handing out the old bundle hashes and every React

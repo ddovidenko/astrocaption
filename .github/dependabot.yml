@@ -10,6 +10,10 @@ updates:
       actions:
         patterns: ["*"]
 
+  # Reads the pinned backend/requirements.txt and requirements-dev.txt (`make lock`, #250): the
+  # pins are what bump PRs and security alerts are raised against. pyproject.toml alone carries
+  # only floors, which Dependabot cannot compare to anything. If a bump PR fails CI on a pin
+  # conflict, `make lock` on its branch re-resolves the transitive pins.
   - package-ecosystem: pip
     directory: /backend
     schedule:

@@ -33,11 +33,15 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY backend/pyproject.toml /app/src/pyproject.toml
+COPY backend/pyproject.toml backend/requirements.txt /app/src/
 COPY backend/app /app/src/app
-# pip is only needed to install; dropping it removes its vendored packages from the
-# runtime image (and from vulnerability scans) and trims a few MB.
-RUN pip install /app/src && pip uninstall -y pip && rm -rf /app/src /root/.cache
+# Dependencies come from the pinned, hashed lockfile (`make lock`, #250): the image ships the
+# versions Dependabot and `make audit` looked at, not whatever PyPI serves on build day. The app
+# itself installs without re-resolving. pip is only needed to install; dropping it removes its
+# vendored packages from the runtime image (and from vulnerability scans) and trims a few MB.
+RUN pip install --require-hashes -r /app/src/requirements.txt \
+    && pip install --no-deps /app/src \
+    && pip uninstall -y pip && rm -rf /app/src /root/.cache
 
 COPY fonts /app/fonts
 COPY --from=frontend /src/backend/static /app/static

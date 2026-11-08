@@ -16,6 +16,9 @@ Release with generated notes and that version's `compose.yml` attached.
    plus its lockfile with `npm --prefix frontend version X.Y.Z --no-git-tag-version`.
    `make check-version TAG=vX.Y.Z` is the same guard the workflow runs. Run `make screenshots`
    in the same PR: the README screenshots show the version in the page header.
+   Run `make audit` too: the image installs exactly `backend/requirements.txt`, so a fix that PyPI
+   already has reaches self-hosters only through a `make lock UPGRADE=1` (or a Dependabot bump) in
+   this PR. The weekly `audit` workflow runs the same check on Mondays and fails loudly.
 2. **Merge** it (squash, like every PR), then `git checkout main && git pull`.
 3. **Tag and push:** `git tag vX.Y.Z && git push origin vX.Y.Z`. Watch the run under Actions.
 4. **Check the result:** the Release page lists the notes and `compose.yml`; the package page

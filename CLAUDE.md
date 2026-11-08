@@ -19,7 +19,9 @@ data/         (runtime, volume-mounted) sqlite db, uploads, renders, config. Nev
 ## Commands
 
 ```
-make install      # backend venv (backend/.venv) + frontend node_modules; run by make dev/test/lint as needed
+make install      # backend venv (backend/.venv) from the pinned backend/requirements-dev.txt + frontend node_modules; run by make dev/test/lint as needed
+make lock         # re-pin backend/requirements.txt (image) and requirements-dev.txt (venv, CI) from pyproject.toml with uv; UPGRADE=1 moves every pin to its latest. Run it after editing pyproject deps: tests/test_lockfiles.py fails while the pins are stale
+make audit        # pip-audit over the pinned backend requirements + npm audit (network); audit.yml runs it weekly and fails loudly
 make dev          # backend on :8000 (uvicorn --reload) + vite on :5173 with proxy
 make dev-service  # the same at boot, as a systemd unit (Linux/WSL); stop it before running make dev by hand
 make test         # pytest + vitest
@@ -89,6 +91,10 @@ If a Makefile target doesn't exist yet, create it rather than documenting a raw 
 - Dev environment is Ubuntu 26.04 under WSL2. Repo lives on the Linux filesystem (`~/astrocaption`), never under `/mnt/c`. Use Linux paths and tooling only; Docker is invoked from the WSL shell.
 - Start each task by restating which SPEC.md section it implements and which milestone it belongs to.
 - Ask before adding a dependency. Prefer the standard library and what's already installed.
+  Backend dependencies are declared as floors in `backend/pyproject.toml` and pinned with hashes in
+  `backend/requirements.txt` (what the image installs) and `requirements-dev.txt` (venv, CI); `make lock`
+  rewrites both, Dependabot bumps the pins weekly, and a Dependabot PR that fails CI on a pin conflict
+  is fixed by `make lock` on its branch.
 - After finishing a feature: run `make lint test`, update SPEC.md if behaviour diverged from it,
   and note anything a self-hoster needs to know in `docs/INSTALL.md`.
 - Don't scaffold ahead of the current milestone. Milestone order is in SPEC.md § 13.
