@@ -50,8 +50,9 @@ export interface LabelControls {
   }
   aliases: { value: string; onChange(value: string): void }
   leader: { value: string; onChange(value: string): void }
-  /** `mixed`: some of the selection is pinned and some is not (`pressed` is then false). */
-  pin: { label: string; pressed: boolean; mixed: boolean; toggle(): void }
+  /** `value` is 'on', 'off' or MIXED (some of the selection is pinned and some is not; `pressed`
+   *  is then false); `label` is the strip's wording for the same thing. */
+  pin: { label: string; pressed: boolean; value: string; toggle(): void }
   /** Places the selection again with the placer and unpins it. The placer measures text, so it
    *  can throw; then nothing was moved and `onError` is told. */
   resetPosition(): void
@@ -97,16 +98,14 @@ export function useLabelControls(onError?: (message: string) => void): LabelCont
   const pinned = empty ? MIXED : common(selected, (l) => l.pinned)
   const pinLabel = pinned === MIXED ? 'Pin (mixed)' : pinned ? 'Pinned' : 'Pin'
 
-  // What a layout that measures its own width re-measures on: a signature of the content, not
-  // `selected` itself: a drag replaces every selected `Label` object on every frame, and keying on them would
-  // put a `getBoundingClientRect` — a forced layout — in the middle of each one (#105). The size
-  // guard keeps a settled measurement from looping.
-  //
-  // The signature covers everything that moves the width: the size field's text and the global
-  // size behind its placeholder (`style`), the swatch's " default"/" mixed" note — which is why
-  // *having* a colour override counts, not which colour it is — the two selects' values, the pin
-  // button's wording and whether there is a toolbar at all. The live picker draft is deliberately
-  // not in it: a drag changes the swatch's hex, not its layout, and would remeasure per frame.
+  // What a layout that measures its own width re-measures on (the floating strip does): a
+  // signature of the content, not `selected` itself, since a drag replaces every selected `Label`
+  // object on every frame and keying on them would put a forced layout in the middle of each one
+  // (#105). It covers everything here that moves the width: the size field's text, the swatch's
+  // " default"/" mixed" note — which is why *having* a colour override counts, not which colour it
+  // is — the two selects' values, the pin button's wording and whether there are controls at all.
+  // The live picker draft is deliberately not in it: a drag changes the swatch's hex, not its
+  // layout, and would re-measure per frame.
   const contentKey = `${shownSize}|${color === MIXED}|${shownColor === ''}|${aliases}|${leader}|${pinLabel}|${editable}`
 
   if (!style || !editable || empty) return null
@@ -114,7 +113,7 @@ export function useLabelControls(onError?: (message: string) => void): LabelCont
   const ids = selected.map((l) => l.object_id)
   const update = useEditor.getState().updateLabels
 
-  const commitSize = () => {
+  const commitDraft = () => {
     // Nothing was typed against what the field already shows (a focus and a blur, say): there is
     // no edit to commit. Without this, a blur on a mixed selection — whose field shows blank
     // because the sizes differ, not because anyone cleared it — would read as a clear and wipe
@@ -173,14 +172,15 @@ export function useLabelControls(onError?: (message: string) => void): LabelCont
   }
   const commitPreview = () => useEditor.getState().commitPreview()
 
-  const commitTyped = () => {
+  // Leaving the field: a held arrow's run first, then whatever is typed.
+  const commitSize = () => {
     commitPreview()
-    commitSize()
+    commitDraft()
   }
 
   return {
     ids,
-    commitSize: commitTyped,
+    commitSize,
     sizeField: {
       type: 'number',
       'aria-label': 'Font size',
@@ -196,7 +196,7 @@ export function useLabelControls(onError?: (message: string) => void): LabelCont
         if (e.target.validity.badInput) return
         setTyped(e.target.value)
       },
-      onBlur: commitTyped,
+      onBlur: commitSize,
       onKeyDown: (e) => {
         // Undo/redo: the editor's shortcuts leave keys to a focused toolbar field, and after arrow
         // steps the focus is still here, so the field hands them to the editor's history itself —
@@ -215,7 +215,7 @@ export function useLabelControls(onError?: (message: string) => void): LabelCont
         }
         if (e.key === 'Enter') {
           e.preventDefault()
-          commitSize()
+          commitDraft()
           e.currentTarget.blur()
         } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
           // The native step would only move the draft, which waits for Enter or blur (#144).
@@ -259,7 +259,7 @@ export function useLabelControls(onError?: (message: string) => void): LabelCont
     pin: {
       label: pinLabel,
       pressed: pinned === true,
-      mixed: pinned === MIXED,
+      value: pinned === MIXED ? MIXED : pinned ? 'on' : 'off',
       toggle: () => update(ids, { pinned: pinned !== true }),
     },
     resetPosition: () => {

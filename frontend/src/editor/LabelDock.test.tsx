@@ -219,8 +219,9 @@ describe('LabelDock sheet', () => {
     render(<LabelDock box={box} />)
     openSheet()
     fireEvent.change(rename(), { target: { value: 'Great Nebula' } })
-    // The selection moves on with the name still in the field and no blur to commit it: a mouse
-    // press on another label selects it before anything else hears of the press.
+    // A press on the photo ends the edit first (the gesture layer blurs the field, for a finger
+    // and for a mouse on a label alike), and only then moves the selection.
+    fireEvent.blur(rename())
     act(() => state().select(2))
     expect(label(1).text_override).toBe('Great Nebula')
     expect(label(2).text_override).toBeNull()

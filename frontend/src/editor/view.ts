@@ -54,11 +54,12 @@ export function pinchView(
 }
 
 /** Something now covers the bottom of the canvas from `visibleBottom` (stage-container pixels)
- *  down: the docked label bar's sheet (SPEC § 6.5). Pans the view up by the least that puts the
- *  image row `worldBottom` (original pixels; the selection's lower edge) `margin` screen pixels
- *  clear of it, and hands back the same view when it already is. Never pans down. */
+ *  down: the docked label bar when it appears, or its sheet when it opens (SPEC § 6.5). Pans the
+ *  view up by the least that puts the image row `worldBottom` (original pixels; the selection's
+ *  lower edge) `margin` screen pixels clear of it, and hands back the same view when it already
+ *  is. Never pans down. */
 export function revealAbove(view: View, worldBottom: number, visibleBottom: number, margin: number): View {
-  const over = worldBottom * view.scale + view.y + margin - visibleBottom
+  const over = toScreen(view, 0, worldBottom).y + margin - visibleBottom
   return over > 0 ? { ...view, y: view.y - over } : view
 }
 

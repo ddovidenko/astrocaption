@@ -1,6 +1,6 @@
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, type MouseEvent } from 'react'
+import { useEffectEvent, useLayoutEffect, useRef, type MouseEvent } from 'react'
 import ColorField from '../style/ColorField'
-import { usePressAway } from '../style/pressAway'
+import { useEscapeKey, usePressAway } from '../style/pressAway'
 import { disableAll, renameLabel } from './editing'
 import { ALIAS_OPTIONS, LEADER_OPTIONS, useLabelControls } from './labelControls'
 import { labelText, type Box } from './metrics'
@@ -51,99 +51,55 @@ export default function LabelDock({
   const only = controls && controls.ids.length === 1 ? controls.ids[0]! : null
   const onlyLabel = only === null ? undefined : labels.get(only)
   const onlyObject = only === null ? undefined : objects.get(only)
-  const name =
-    onlyLabel && onlyObject && style ? (onlyLabel.text_override ?? labelText(onlyObject, onlyLabel, style).primary) : ''
+  const name = onlyLabel && onlyObject && style ? labelText(onlyObject, onlyLabel, style).primary : ''
   const [typedName, setTypedName, dropName] = useTaggedDraft<string>([name, selectedIds])
 
   const dockRef = useRef<HTMLDivElement>(null)
   const sheetRef = useRef<HTMLDivElement>(null)
 
-  // The name in the field right now, for the one way out that no handler below sees: the
-  // selection moving on under it. A mouse press on another label selects that label before the
-  // press reaches anything here, and by then this render's draft is already derived away.
-  const pending = useRef<{ id: number; text: string; name: string } | null>(null)
-  useEffect(() => {
-    pending.current = only !== null && typedName !== null ? { id: only, text: typedName, name } : null
-  })
-  useEffect(
-    () => () => {
-      // Runs before the effect above has caught up with the new selection, so this is still the
-      // old one's name. Only for a label that is still there: one an undo took away, or a document
-      // that turned read-only, gets nothing written on top of it.
-      const left = pending.current
-      pending.current = null
-      if (left && useEditor.getState().labels.get(left.id)?.enabled) renameLabel(left.id, left.text, left.name)
-    },
-    [selectedIds],
-  )
-
   /** Stores a name still in the field, as leaving the field does. */
   const commitName = () => {
-    pending.current = null
     if (only === null || typedName === null) return
     renameLabel(only, typedName, name)
     dropName()
   }
   /** `keepName`: whether a name still being typed is stored on the way out. Everything but
    *  Escape and Clear overrides keeps it; a press on a button never blurs the field (the buttons
-   *  refuse the focus), and a mouse press elsewhere unmounts it before a blur could fire. */
+   *  refuse the focus), and a mouse press elsewhere unmounts it before a blur could fire. (A press
+   *  on the canvas is the gesture layer's: it ends the edit before it moves the selection.) */
   const close = (keepName = true) => {
     if (keepName) commitName()
-    else {
-      pending.current = null
-      dropName()
-    }
+    else dropName()
     dropOpened()
   }
 
   usePressAway(dockRef, open, () => close())
 
-  // Escape closes the sheet wherever the focus is: More refuses the focus, so it is usually still
-  // on the page. On the document, like the colour picker's, so it is heard before the canvas's
-  // own listener on the window, which would clear the selection in the same keystroke; and both
-  // close together when both are open.
-  const onEscape = useEffectEvent((e: KeyboardEvent) => {
-    if (e.key !== 'Escape') return
-    e.stopPropagation()
-    close(false)
-  })
-  useEffect(() => {
-    if (!open) return
-    document.addEventListener('keydown', onEscape)
-    return () => document.removeEventListener('keydown', onEscape)
-  }, [open])
+  // Escape closes the sheet wherever the focus is (More refuses the focus, so it is usually
+  // still on the page), dropping a name that was being typed.
+  useEscapeKey(open, () => close(false))
 
   // The dock takes the bottom of the canvas when it appears (the canvas is a flex sibling and
   // gets shorter), and the sheet covers more of it when it opens. Each time, a selection that
-  // would be under it is moved up by just enough to show; nothing moves back afterwards (the
-  // owner may have panned since). `covered` is how much of the canvas, as the store knows it, is
-  // or is about to be out of sight at the bottom.
-  const reveal = (covered: number) => {
+  // would be under the new cover is moved up by just enough to show; nothing moves back
+  // afterwards (the owner may have panned since). `cover` is what has just taken the canvas's
+  // lowest pixels, as many as it is tall: for the dock, the store still holds the canvas's height
+  // from before it lost them; the sheet lies over the canvas from where the dock begins.
+  const reveal = useEffectEvent((cover: HTMLElement | null) => {
+    if (!cover) return
     const s = useEditor.getState()
-    if (s.viewport.h - covered < MIN_CLEAR) return
-    const next = revealAbove(s.view, box.bottom, s.viewport.h - covered, MARGIN)
+    const clear = s.viewport.h - cover.getBoundingClientRect().height
+    if (clear < MIN_CLEAR) return
+    const next = revealAbove(s.view, box.bottom, clear, MARGIN)
     if (next !== s.view) s.setView(next)
-  }
-  // On appearing, the store still holds the canvas's height from before it lost the dock's.
-  const onAppear = useEffectEvent(() => {
-    if (dockRef.current) reveal(dockRef.current.getBoundingClientRect().height)
   })
   const shown = controls !== null
-  useLayoutEffect(() => {
-    if (shown) onAppear()
-  }, [shown])
-  // The sheet lies over the canvas's lowest `height` pixels: the canvas ends where the dock begins.
-  const onOpen = useEffectEvent(() => {
-    if (sheetRef.current) reveal(sheetRef.current.getBoundingClientRect().height)
-  })
-  useLayoutEffect(() => {
-    if (open) onOpen()
-  }, [open])
+  useLayoutEffect(() => reveal(dockRef.current), [shown])
+  useLayoutEffect(() => reveal(sheetRef.current), [open])
 
   if (!controls) return null
 
   const noFocus = (e: MouseEvent) => e.preventDefault()
-  const pinState = controls.pin.mixed ? 'mixed' : controls.pin.pressed ? 'on' : 'off'
 
   return (
     <div ref={dockRef} className="label-dock" role="toolbar" aria-label="Selected labels">
@@ -191,7 +147,7 @@ export default function LabelDock({
             onClick={controls.pin.toggle}
           >
             <span>Pin in place</span>
-            <span className="label-sheet-value">{pinState}</span>
+            <span className="label-sheet-value">{controls.pin.value}</span>
           </button>
           <button
             type="button"

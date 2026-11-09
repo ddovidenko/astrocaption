@@ -31,3 +31,21 @@ export function usePressAway(ref: RefObject<HTMLElement | null>, active: boolean
     }
   }, [active])
 }
+
+/** Calls `onEscape` for an Escape pressed anywhere, for as long as `active`, and spends the key:
+ *  what closes a popover or a sheet from the keyboard. On the document, so it is heard before the
+ *  editor's own listener on the window, which would otherwise act on the same keystroke as well
+ *  and clear the selection (#104); the next Escape is the editor's. Two of these open at once
+ *  both hear the key and both close. */
+export function useEscapeKey(active: boolean, onEscape: () => void): void {
+  const pressed = useEffectEvent((e: KeyboardEvent) => {
+    if (e.key !== 'Escape') return
+    e.stopPropagation()
+    onEscape()
+  })
+  useEffect(() => {
+    if (!active) return
+    document.addEventListener('keydown', pressed)
+    return () => document.removeEventListener('keydown', pressed)
+  }, [active])
+}

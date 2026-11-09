@@ -1,6 +1,6 @@
-import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
 import { HexColorInput, HexColorPicker } from 'react-colorful'
-import { usePressAway } from './pressAway'
+import { useEscapeKey, usePressAway } from './pressAway'
 import { normalizeHex } from './styleForm'
 
 /** A colour override: a swatch that opens an in-page picker, never the OS dialog.
@@ -110,21 +110,9 @@ export default function ColorField({
   // a cancelled touch counts as one). It calls this render's `closePicker`, so a drag that just
   // changed the draft is what gets committed, not whatever `onCommit` closed over on opening.
   usePressAway(wrap, open, () => closePicker(false))
-  const key = useEffectEvent((e: KeyboardEvent) => {
-    if (e.key !== 'Escape') return
-    // This Escape is spent here: the editor's own listener (on the window, so it runs after this
-    // one) would otherwise read the swatch it is about to refocus as the thing to act on and
-    // clear the selection in the same keystroke (#104). The next Escape is the editor's.
-    e.stopPropagation()
-    closePicker(true)
-  })
-  useEffect(() => {
-    if (!open) return
-    document.addEventListener('keydown', key)
-    return () => {
-      document.removeEventListener('keydown', key)
-    }
-  }, [open])
+  // Escape closes it too, and is spent on that (see `useEscapeKey`): the editor would otherwise
+  // read the swatch about to be refocused as the thing to act on and clear the selection.
+  useEscapeKey(open, () => closePicker(true))
 
   return (
     <div

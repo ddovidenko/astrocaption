@@ -23,7 +23,7 @@ export default function LabelTextEditor({ id, x, y, width, fontSize, onClose }: 
   const style = useEditor((s) => s.style)
   const label = useEditor((s) => s.labels.get(id))
   const obj = useEditor((s) => s.objects.get(id))
-  const initial = label && obj && style ? (label.text_override ?? labelText(obj, label, style).primary) : ''
+  const initial = label && obj && style ? labelText(obj, label, style).primary : ''
   const [draft, setDraft] = useState(initial)
   const ref = useRef<HTMLInputElement>(null)
   // What the field opened on. A close that changed nothing must commit nothing: without this, an

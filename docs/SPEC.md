@@ -450,6 +450,10 @@ canvas pane is a sliver, and the bar is cut off with it, not drawn over the pane
   still being typed, stored on the label it was typed for, except on Escape and Clear overrides,
   and except when that label is no longer there (an undo took it away, or a re-solve began). It
   does not drag and has no swipe to dismiss.
+- A press on the canvas ends an edit in progress before it does anything else, for a mouse on a
+  label as for a finger anywhere: a size or a name still being typed (in the bar, the sheet or
+  the floating strip of § 6.2) is stored on the selection it was typed for, and only then does the
+  selection move.
 - The sheet is never taller than the canvas: on a short screen (a phone on its side) it scrolls,
   and the view is then left where it is.
 - On a phone narrower than 375 px the bar's right edge may be cut off until the last step of #57.
