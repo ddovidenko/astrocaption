@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_SCALE, MIN_SCALE, actualSize, fitView, pinchView, toScreen, toWorld, zoomAt, type View } from './view'
+import { MAX_SCALE, MIN_SCALE, actualSize, fitView, pinchView, revealAbove, toScreen, toWorld, zoomAt, type View } from './view'
 
 describe('view', () => {
   it('fits a landscape image into the viewport with padding and centres it', () => {
@@ -89,5 +89,25 @@ describe('pinchView', () => {
     expect(pinchView(v, { x: 1, y: 1 }, 0, { x: 9, y: 9 }, 50)).toBe(v)
     expect(pinchView(v, { x: 1, y: 1 }, 50, { x: 9, y: 9 }, 0)).toBe(v)
     expect(pinchView(v, { x: 1, y: 1 }, NaN, { x: 9, y: 9 }, 50)).toBe(v)
+  })
+})
+
+// Something covers the bottom of the canvas (the docked bar's sheet, SPEC § 6.5): the view pans up
+// by the least that keeps a point clear of it.
+describe('revealAbove', () => {
+  const v: View = { scale: 0.5, x: 10, y: 100 }
+
+  it('leaves the view alone when the point is already clear of the cover', () => {
+    expect(revealAbove(v, 400, 400, 8)).toBe(v) // the point is at screen y 300
+  })
+
+  it('pans up just far enough to put the point a margin above the cover', () => {
+    const out = revealAbove(v, 800, 400, 8) // the point is at screen y 500
+    expect(out).toEqual({ scale: 0.5, x: 10, y: -8 })
+    expect(toScreen(out, 0, 800).y).toBe(392)
+  })
+
+  it('counts a point exactly a margin above the cover as clear', () => {
+    expect(revealAbove(v, 584, 400, 8)).toBe(v) // screen y 392
   })
 })
