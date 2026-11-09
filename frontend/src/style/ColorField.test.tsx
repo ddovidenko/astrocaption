@@ -92,7 +92,11 @@ describe('ColorField commits exactly once per close', () => {
   it('a touch inside the picker leaves it open', () => {
     const f = mount()
     f.open()
-    fireEvent.touchStart(screen.getByRole('dialog').querySelector('.react-colorful__interactive')!)
+    // react-colorful reads the finger's position, so the event carries one.
+    const finger = { identifier: 1, pageX: 10, pageY: 10, clientX: 10, clientY: 10 }
+    const surface = screen.getByRole('dialog').querySelector('.react-colorful__interactive')!
+    fireEvent.touchStart(surface, { touches: [finger], changedTouches: [finger] })
+    fireEvent.touchEnd(surface, { touches: [], changedTouches: [finger] })
     expect(f.dialog()).not.toBeNull()
     expect(f.onCommit).not.toHaveBeenCalled()
   })
