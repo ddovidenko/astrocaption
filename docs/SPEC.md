@@ -376,6 +376,8 @@ Since #57. Touch is recognised per event, not per device: a touch event runs the
 mouse event the rules of § 6.1 and § 6.2, and a touch-screen laptop gets both. Every touch that
 starts on the canvas is cancelled, so the browser never follows it with compatibility mouse events.
 
+- Only fingers that landed on the canvas count. A thumb resting on the top bar or the side panel,
+  as when a hand holds the device, is no part of a gesture on the image.
 - **Two fingers**: zoom and pan together. The image point under the midpoint of the two fingers
   stays under it, and the scale follows the distance between them, within the same limits as the
   wheel.
@@ -394,7 +396,10 @@ starts on the canvas is cancelled, so the browser never follows it with compatib
   the name; a second tap on the same object toggles it, and a third toggles it back. A tap anywhere
   else puts the name away. A single stray tap never makes a label appear or vanish.
 - **Touching the canvas ends an edit in progress**: a size typed in the toolbar is committed and an
-  open colour picker closes (committing its pick), before the touch does anything else.
+  open colour picker closes (committing its pick), before the touch does anything else. A touch
+  anywhere else closes the picker only if it is a tap, as before; scrolling the panel leaves it open.
+- A gesture the browser takes away (`touchcancel`) ends a pan or a pinch with nothing to commit; a
+  label being dragged stays where it had got to, as one change.
 - Not on touch: shift-selection, the double-click text editor, wheel-to-resize (the toolbar's − and
   + do it). Keyboard shortcuts are unchanged for anyone with a keyboard attached.
 - While a re-solve runs the document is read-only, as for the mouse: labels cannot be selected and

@@ -141,8 +141,11 @@ test('touch: pinch and pan move the photo, never the page', async ({ page }) => 
   await fit.tap()
   const bare = await emptyPoint(page, box)
   const fitted = await stageState(page)
+  //    The fingers land one after the other, as they do in a hand: the first one alone is the
+  //    start of a pan, and must stop being one when the second arrives.
   const a = { x: bare.x - 40, y: bare.y, id: 0 }
   const b = { x: bare.x + 40, y: bare.y, id: 1 }
+  await touch.start([a])
   await touch.start([a, b])
   await touch.move([
     { ...a, x: a.x - 20 },
@@ -150,7 +153,9 @@ test('touch: pinch and pan move the photo, never the page', async ({ page }) => 
   ])
   const afterSpread = await stageState(page)
   expect(afterSpread.scale).toBeGreaterThan(fitted.scale)
-  await touch.end([{ ...a, x: a.x - 20 }])
+  await touch.end([b])
+  // Two moves: a pan only shows on the move after the one that used up its slack.
+  await touch.move([{ ...a, x: a.x, y: a.y + 20 }])
   await touch.move([{ ...a, x: a.x + 20, y: a.y + 40 }])
   await touch.end()
   const afterLift = await stageState(page)
@@ -173,6 +178,23 @@ test('touch: pinch and pan move the photo, never the page', async ({ page }) => 
   expect(afterCancel.y - atCancel.y).toBeCloseTo(10, 0)
   await expect(saveStatus).toHaveText('Saved')
   expect(await pageZoom(page)).toEqual(UNZOOMED)
+
+  // 6. A finger resting off the canvas (a thumb on the top bar, holding the device) is not part
+  //    of a gesture on the photo: the one finger on the canvas still pans, and nothing zooms.
+  const title = (await page.locator('.editor-toolbar strong').boundingBox())!
+  const rest = { x: title.x + title.width / 2, y: title.y + title.height / 2, id: 0 }
+  const on = { ...(await emptyPoint(page, box)), id: 1 }
+  const restFrom = await stageState(page)
+  await touch.start([rest])
+  await touch.start([rest, on])
+  await touch.move([rest, { ...on, x: on.x - 15 }])
+  await touch.move([rest, { ...on, x: on.x - 45, y: on.y - 20 }])
+  await touch.end()
+  const restTo = await stageState(page)
+  expect(restTo.scale).toBe(restFrom.scale)
+  expect(restTo.x - restFrom.x).toBeCloseTo(-30, 0)
+  expect(restTo.y - restFrom.y).toBeCloseTo(-20, 0)
+  expect(await pageZoom(page)).toEqual(UNZOOMED)
 })
 
 test('touch: a label moves only once it is selected', async ({ page }) => {
@@ -187,6 +209,9 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
     const s = await stageState(page)
     return [s.x, s.y, s.scale]
   }
+  // Somewhere off the canvas that is not a control: the image title in the top bar.
+  const title = (await page.locator('.editor-toolbar strong').boundingBox())!
+  const rest = { x: title.x + title.width / 2, y: title.y + title.height / 2, id: 0 }
 
   await withAnnotationsRestored(page, imageId, async () => {
     const { id, corner, fittedScale } = await labelWithRoom(page, box)
@@ -223,10 +248,13 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
       expect(await stored()).toEqual(home)
     }
 
-    // 2. A tap selects it.
+    // 2. A tap selects it, and a thumb resting on the top bar does not get in the way.
     {
       const at = await labelPoint()
-      await page.touchscreen.tap(at.x, at.y)
+      await touch.start([rest])
+      await touch.start([rest, { ...at, id: 1 }])
+      await touch.end([{ ...at, id: 1 }])
+      await touch.end()
       await expect.poll(selected).toEqual([id])
       await expect(toolbar).toBeVisible()
     }
@@ -264,6 +292,43 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
       await expect.poll(stored).toEqual(home)
     }
 
+    // 4b. A finger landing off the canvas while the label is being dragged changes nothing: the
+    //     drag goes on, and the photo does not zoom.
+    {
+      const at = await labelPoint()
+      const before = await view()
+      const finger = (dx: number) => ({ x: at.x + dx, y: at.y, id: 1 })
+      await touch.start([finger(0)])
+      await touch.move([finger(20)])
+      await touch.move([finger(40)])
+      await touch.start([finger(40), rest])
+      await touch.move([finger(70), rest])
+      await touch.end()
+      expect(await view()).toEqual(before)
+      const moved = await drawn()
+      expect(moved[0]! - home[0]!).toBeCloseTo(70 / scale, 0)
+      expect(moved[1]!).toBeCloseTo(home[1]!, 0)
+      await undo.tap()
+      await expect.poll(drawn).toEqual(home)
+      await expect(undo).toBeDisabled()
+    }
+
+    // 4c. The browser takes the gesture away mid-drag: the label stays where it had got to, as
+    //     one undo entry (Konva ends the drag, as it does for a mouse released outside the window).
+    {
+      const at = await labelPoint()
+      await touch.start([at])
+      await touch.move([{ x: at.x + 20, y: at.y }])
+      await touch.move([{ x: at.x + 40, y: at.y }])
+      await touch.cancel()
+      const moved = await drawn()
+      expect(moved[0]! - home[0]!).toBeCloseTo(40 / scale, 0)
+      await expect(undo).toBeEnabled()
+      await undo.tap()
+      await expect.poll(drawn).toEqual(home)
+      await expect(undo).toBeDisabled()
+    }
+
     // 5. A second finger landing mid-drag: the label stays where it had got to (one undo entry)
     //    and the two fingers zoom the photo. Neither finger drags anything after that.
     {
@@ -276,7 +341,7 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
       await touch.move([first])
       await touch.start([first, second])
       await touch.move([{ ...first, y: first.y - 30 }, { ...second, y: second.y + 30 }])
-      await touch.end([{ ...first, y: first.y - 30 }])
+      await touch.end([second])
       await touch.move([{ ...first, x: first.x + 40, y: first.y + 10 }])
       await touch.end()
       const after = await stageState(page)
@@ -300,7 +365,7 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
       const before = await stageState(page)
       await touch.start([onLabel, other])
       await touch.move([{ ...onLabel, y: onLabel.y - 20 }, { ...other, y: other.y + 20 }])
-      await touch.end([{ ...onLabel, y: onLabel.y - 20 }])
+      await touch.end([other])
       await touch.move([{ ...onLabel, x: onLabel.x + 40, y: onLabel.y + 20 }])
       await touch.end()
       expect((await stageState(page)).scale).toBeGreaterThan(before.scale)
@@ -328,7 +393,18 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
       await expect.poll(selected).toEqual([id])
       await page.getByRole('button', { name: 'Fit' }).tap()
       const bare = await emptyPoint(page, box)
-      await page.touchscreen.tap(bare.x, bare.y)
+      // ...but not the finger left over from a pinch, which lifts where it landed without having
+      // moved: that is the end of a two-finger gesture, not a tap.
+      const stay = { x: bare.x - 30, y: bare.y, id: 0 }
+      const go = { x: bare.x + 30, y: bare.y, id: 1 }
+      await touch.start([stay, go])
+      await touch.move([stay, { ...go, x: go.x + 20 }])
+      await touch.end([go])
+      await touch.end()
+      expect(await selected()).toEqual([id])
+      await page.getByRole('button', { name: 'Fit' }).tap()
+      const clear = await emptyPoint(page, box)
+      await page.touchscreen.tap(clear.x, clear.y)
       await expect.poll(selected).toEqual([])
     }
   })

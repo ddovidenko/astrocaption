@@ -61,10 +61,15 @@ export interface CanvasGestures {
 /** How far a finger may wander and still be a tap, in screen pixels. The mouse's slack is 3. */
 export const TOUCH_SLACK = 10
 
-/** The fingers on the screen, in stage-container pixels (what `View` is expressed in). */
+/** The fingers on the canvas, in stage-container pixels (what `View` is expressed in). Only the
+ *  ones that landed on the canvas: `touches` lists every finger on the screen, and a thumb resting
+ *  on the top bar or the side panel (a hand holding the device) is no part of a gesture on the
+ *  photo. Counted in, it would turn every tap into the start of a pinch. */
 function touchPoints(stage: Konva.Stage, touches: TouchList): ScreenPoint[] {
   const rect = stage.container().getBoundingClientRect()
-  return Array.from(touches, (t) => ({ x: t.clientX - rect.left, y: t.clientY - rect.top }))
+  return Array.from(touches)
+    .filter((t) => t.target instanceof Node && stage.content.contains(t.target))
+    .map((t) => ({ x: t.clientX - rect.left, y: t.clientY - rect.top }))
 }
 
 function spread(a: ScreenPoint, b: ScreenPoint): { mid: ScreenPoint; dist: number } {
@@ -333,16 +338,6 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
     }
   }, [])
 
-  // Konva skips hit detection, and with it the stage's touchmove, while a node is being dragged.
-  // The second finger of a pinch can land mid-drag, so the stage has to keep hearing moves.
-  useEffect(() => {
-    const before = Konva.hitOnDragEnabled
-    Konva.hitOnDragEnabled = true
-    return () => {
-      Konva.hitOnDragEnabled = before
-    }
-  }, [])
-
   const onTouchStart = useCallback(
     (e: Konva.KonvaEventObject<TouchEvent>) => {
       const stage = stageRef.current
@@ -362,7 +357,9 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
       const t = touchRef.current
       if (points.length >= 2) {
         // A label in mid-drag stays where it has got to: stopping fires the ordinary dragend,
-        // which commits the move as its one undo entry, and the two fingers take over.
+        // which commits the move as its one undo entry, and the two fingers take over. With the
+        // drag over, Konva delivers the moves of the pinch to the stage again (it skips hit
+        // detection, and so the stage's touchmove, only while a node is being dragged).
         if (Konva.isDragging()) Konva.DD.node?.stopDrag()
         t.down = null
         t.pan = null
@@ -407,15 +404,20 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
     [stageRef],
   )
 
-  // The same for a finger lifted and a gesture the browser took away (an incoming call): nothing
-  // is committed by either, since a pan and a pinch only ever moved the view.
-  const onTouchEnd = useCallback((e: Konva.KonvaEventObject<TouchEvent>) => {
-    const t = touchRef.current
-    t.pinch = null
-    if (e.evt.touches.length === 0) {
-      touchRef.current = { down: null, pan: null, pinch: null, spent: false, onLabel: false }
-    }
-  }, [])
+  // The same for a finger lifted and a gesture the browser took away (an incoming call). A pan
+  // and a pinch only ever moved the view, so there is nothing to commit here; a label drag is
+  // Konva's to end, which it does through its ordinary dragend in both cases.
+  const onTouchEnd = useCallback(
+    (e: Konva.KonvaEventObject<TouchEvent>) => {
+      const stage = stageRef.current
+      const t = touchRef.current
+      t.pinch = null
+      if (!stage || touchPoints(stage, e.evt.touches).length === 0) {
+        touchRef.current = { down: null, pan: null, pinch: null, spent: false, onLabel: false }
+      }
+    },
+    [stageRef],
+  )
 
   const onLabelTouchPress = useCallback((id: number) => {
     touchedSelectedRef.current = useEditor.getState().selectedIds.has(id)
@@ -431,7 +433,8 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
   }, [])
 
   const blocksDrag = useCallback((e: Konva.KonvaEventObject<DragEvent>, id: number) => {
-    // Konva hands `dragstart` the native event that crossed the drag distance.
+    // Konva hands `dragstart` the native event the press began with (touchstart or mousedown),
+    // or nothing at all for a drag started from code.
     const type: string | undefined = (e.evt as Event | undefined)?.type
     if (!type?.startsWith('touch')) return false
     return touchRef.current.spent || !useEditor.getState().selectedIds.has(id)

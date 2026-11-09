@@ -250,12 +250,14 @@ export interface TouchPoint {
 
 /** Raw touch input (SPEC § 6.5). Playwright's own `page.touchscreen` can only tap, so drags and
  *  two-finger gestures go through the DevTools protocol, which is why the touch spec is Chromium
- *  only. Every call names the fingers that are down *after* it. */
+ *  only. `start` and `move` name every finger that is down after the call. `end` is the other way
+ *  round, because that is how Chromium reads the protocol (checked with a probe: a touchEnd that
+ *  lists a finger releases that finger and leaves the others down). */
 export interface TouchDriver {
   start(points: TouchPoint[]): Promise<void>
   move(points: TouchPoint[]): Promise<void>
-  /** Lifts fingers; `remaining` are the ones still down (none by default). */
-  end(remaining?: TouchPoint[]): Promise<void>
+  /** Lifts the fingers listed (matched by id), or every finger when none is. */
+  end(lifted?: TouchPoint[]): Promise<void>
   /** The browser takes the gesture away (an incoming call, a system gesture). */
   cancel(): Promise<void>
   /** One finger down at `from`, moved in `steps` straight to `to`, and lifted. */
@@ -280,7 +282,7 @@ export async function touchDriver(page: Page): Promise<TouchDriver> {
   const driver: TouchDriver = {
     start: async (points) => void (await send('touchStart', points)),
     move: async (points) => void (await send('touchMove', points)),
-    end: async (remaining = []) => void (await send('touchEnd', remaining)),
+    end: async (lifted = []) => void (await send('touchEnd', lifted)),
     cancel: async () => void (await send('touchCancel', [])),
     drag: async (from, to, steps = 5) => {
       await driver.start([from])

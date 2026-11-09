@@ -177,9 +177,12 @@ body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
 /* Nor may the page zoom anywhere on this screen (#57): a pinch or a double tap on the top bar
    would leave the whole editor magnified, with no gesture left on the canvas to undo it. pan-x
    pan-y keeps taps and scrolling (the object list) and drops both zooms; `manipulation` would
-   still allow the pinch. On `body`, not `main`, because the site header sits outside `main`.
-   overscroll-behavior: a pan that reaches the edge must not rubber-band the page. */
-body:has(> #root > main.editor-main) { touch-action: pan-x pan-y; overscroll-behavior: none; }
+   still allow the pinch. On `body`, not `main`, because the site header sits outside `main`. */
+body:has(> #root > main.editor-main) { touch-action: pan-x pan-y; }
+/* Nor may a drag on the top bar or the panel rubber-band the whole editor. On the root element:
+   only its overscroll-behavior applies to the viewport (Chromium also honours `body`'s, Safari
+   does not, so the browser test cannot tell the two apart). */
+html:has(> body > #root > main.editor-main) { overscroll-behavior: none; }
 /* iOS Safari zooms the whole page when a field under 16 px takes the focus, and leaves it zoomed:
    that is how the label toolbar (0.8rem fields) came to fill an iPhone's screen (#57). */
 @media (pointer: coarse) {

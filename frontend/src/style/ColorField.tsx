@@ -108,12 +108,16 @@ export default function ColorField({
   // The document listeners are wired once per open, not once per render; as effect events they
   // still call this render's `closePicker`, so a drag that just changed the draft is what gets
   // committed, not whatever `onCommit` closed over when the picker opened.
-  // A touch counts as well as a press: the editor canvas cancels its touchstarts (Konva, and the
-  // gesture layer for bare sky), so no compatibility mousedown ever follows a finger there and the
-  // picker would stay open over a selection that has moved on (SPEC § 6.5). Where one does follow,
-  // `closePicker`'s guard has already spent the close.
-  const away = useEffectEvent((e: MouseEvent | TouchEvent) => {
+  const away = useEffectEvent((e: MouseEvent) => {
     if (wrap.current && !wrap.current.contains(e.target as Node)) closePicker(false)
+  })
+  // A finger on the editor canvas counts as that press: every touchstart there is cancelled (by
+  // Konva, and by the gesture layer for bare sky), so no compatibility mousedown ever follows it
+  // and the picker would stay open over a selection that has moved on (SPEC § 6.5). Only there:
+  // anywhere else a tap brings its own mousedown, and a touch that turns out to be a scroll of
+  // the panel must not close the picker under the finger.
+  const touchedCanvas = useEffectEvent((e: TouchEvent) => {
+    if (e.target instanceof Element && e.target.closest('.editor-canvas')) closePicker(false)
   })
   const key = useEffectEvent((e: KeyboardEvent) => {
     if (e.key !== 'Escape') return
@@ -126,11 +130,11 @@ export default function ColorField({
   useEffect(() => {
     if (!open) return
     document.addEventListener('mousedown', away)
-    document.addEventListener('touchstart', away)
+    document.addEventListener('touchstart', touchedCanvas)
     document.addEventListener('keydown', key)
     return () => {
       document.removeEventListener('mousedown', away)
-      document.removeEventListener('touchstart', away)
+      document.removeEventListener('touchstart', touchedCanvas)
       document.removeEventListener('keydown', key)
     }
   }, [open])

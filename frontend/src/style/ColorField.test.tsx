@@ -70,24 +70,40 @@ describe('ColorField commits exactly once per close', () => {
     expect(f.dialog()).toBeNull()
     expect(f.onCommit).toHaveBeenCalledTimes(1)
   })
-  // A finger on the editor canvas never becomes a mousedown: Konva cancels the touchstart there,
-  // so the browser sends no compatibility mouse events (SPEC § 6.5).
-  it('a touch away', () => {
+  // A finger on the editor canvas never becomes a mousedown: every touchstart there is cancelled,
+  // so the browser sends no compatibility mouse events (SPEC § 6.5) and the touch itself has to
+  // close the picker. Anywhere else a tap is followed by its mousedown as usual, and a touch that
+  // turns out to be a scroll must leave the picker alone.
+  function canvas() {
+    const el = document.createElement('div')
+    el.className = 'editor-canvas'
+    document.body.append(el)
+    return el
+  }
+  it('a touch on the editor canvas', () => {
     const f = mount()
     f.open()
-    fireEvent.touchStart(document.body)
+    fireEvent.touchStart(canvas())
     expect(f.dialog()).toBeNull()
     expect(f.onCommit).toHaveBeenCalledTimes(1)
   })
-  it('a touch away followed by its compatibility mousedown', () => {
+  it('a touch on the canvas followed by a mousedown still commits once', () => {
     const f = mount()
     f.open()
+    const el = canvas()
     act(() => {
-      fireEvent.touchStart(document.body)
-      fireEvent.mouseDown(document.body)
+      fireEvent.touchStart(el)
+      fireEvent.mouseDown(el)
     })
     expect(f.dialog()).toBeNull()
     expect(f.onCommit).toHaveBeenCalledTimes(1)
+  })
+  it('a touch elsewhere (the start of a scroll) leaves it open', () => {
+    const f = mount()
+    f.open()
+    fireEvent.touchStart(document.body)
+    expect(f.dialog()).not.toBeNull()
+    expect(f.onCommit).not.toHaveBeenCalled()
   })
   it('a touch inside the picker leaves it open', () => {
     const f = mount()
