@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { fontFamilyFor, labelText } from './metrics'
-import { isEditable, useEditor } from './store'
+import { renameLabel } from './editing'
+import { useEditor } from './store'
 import { toScreen } from './view'
 
 interface Props {
@@ -51,16 +52,9 @@ export default function LabelTextEditor({ id, x, y, width, fontSize, onClose }: 
 
   const finish = (commit: boolean) => {
     if (doneRef.current) return
-    const text = draft.trim()
-    if (commit && text !== initialRef.current.trim()) {
-      // Ask the gate outright rather than watching `changeSeq` for a change that did not happen:
-      // a commit can legitimately be a no-op against the stored document (clearing a field on a
-      // label that never had an override), and that must close quietly, not claim a refusal.
-      if (!isEditable(useEditor.getState())) {
-        setRefused(true)
-        return
-      }
-      useEditor.getState().updateLabels([id], { text_override: text === '' ? null : text })
+    if (commit && renameLabel(id, draft, initialRef.current) === 'refused') {
+      setRefused(true)
+      return
     }
     doneRef.current = true
     onClose()

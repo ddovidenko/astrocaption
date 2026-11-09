@@ -116,6 +116,23 @@ export function resetPositions(ids: number[], measure?: TextMeasurer): void {
   if (updated.length > 0) state.applyLabels(updated)
 }
 
+/** Commits a typed name for label `id` (SPEC § 6.2): the trimmed text becomes its `text_override`,
+ *  and a blank clears it back to the catalogue name. `initial` is what the field opened on; text
+ *  that still says that is no edit at all (`'unchanged'`), so an untouched field on a label with no
+ *  override never stores the catalogue name as one. A document that turned read-only since the
+ *  field opened (a solve started) cannot take the rename: `'refused'`, and the caller keeps what
+ *  was typed on screen instead of closing as though the name had stuck. */
+export function renameLabel(id: number, text: string, initial: string): 'unchanged' | 'refused' | 'renamed' {
+  const trimmed = text.trim()
+  if (trimmed === initial.trim()) return 'unchanged'
+  const state = useEditor.getState()
+  // Asked outright rather than inferred from `changeSeq` not moving: a commit can legitimately be
+  // a no-op against the stored document, and that is not a refusal.
+  if (!isEditable(state)) return 'refused'
+  state.updateLabels([id], { text_override: trimmed === '' ? null : trimmed })
+  return 'renamed'
+}
+
 /** "Disable shown": every enabled id in `ids` is disabled in one store change; positions stay. */
 export function disableAll(ids: number[]): void {
   const state = useEditor.getState()
