@@ -155,7 +155,7 @@ def test_gallery_search_finds_a_title_or_an_object_name_and_ignores_owner_filter
     published = published_image(client, sample_jpeg)  # title "Orion Field", Orion fixture objects
     unpublished = exported_image(client, sample_jpeg)
 
-    def ids(**params: object) -> list[str]:
+    def ids(**params: str) -> list[str]:
         return list_ids(anon_client, "/api/gallery", **params)
 
     assert ids(q="orion field") == [published["id"]]
@@ -278,7 +278,7 @@ def test_gallery_filters_by_kind_and_upload_day(
     exported_image(client, sample_jpeg)  # unpublished: never listed, whatever the filter
     created = published["created_at"][:10]
 
-    def ids(**params: object) -> list[str]:
+    def ids(**params: str) -> list[str]:
         return list_ids(anon_client, "/api/gallery", **params)
 
     assert ids(kind="nebula") == [published["id"]]

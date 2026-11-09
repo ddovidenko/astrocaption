@@ -151,7 +151,7 @@ def test_list_images_search_and_filters(client: TestClient, sample_jpeg: Path) -
     m27 = upload(client, sample_jpeg, title="M27 final")["id"]
     other = upload(client, sample_jpeg, title="Untitled stack")["id"]
 
-    def ids(**params: object) -> list[str]:
+    def ids(**params: str) -> list[str]:
         return list_ids(client, "/api/images", **params)
 
     assert ids(q="veil") == [veil]
@@ -979,7 +979,7 @@ def test_list_images_filters_by_kind_and_upload_day(client: TestClient, sample_j
     assert wait_for_status(client, image_id, {"solved", "failed"})["solve_status"] == "solved"
     created = client.get(f"/api/images/{image_id}").json()["created_at"][:10]  # the UTC day
 
-    def ids(**params: object) -> list[str]:
+    def ids(**params: str) -> list[str]:
         return list_ids(client, "/api/images", **params)
 
     assert ids(kind="nebula") == [image_id]  # M 42
