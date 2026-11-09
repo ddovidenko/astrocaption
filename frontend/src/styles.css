@@ -126,13 +126,12 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
   .grid3 { grid-template-columns: 1fr 1fr; }
 }
 /* Phones (#169): nothing may set a width the viewport cannot hold. The nav drops under the title,
-   the editor toolbar wraps, the side panel leaves a strip of canvas and a 16 px gutter remains. */
+   the side panel leaves a strip of canvas and a 16 px gutter remains. (The editor toolbar has its
+   own compact form further down.) */
 @media (max-width: 640px) {
   header { flex-wrap: wrap; gap: 0.25rem 0.75rem; padding: 0.75rem 1rem; }
   header nav { flex-basis: 100%; margin-left: 0; flex-wrap: wrap; gap: 0.5rem 0.75rem; }
   main { padding: 1rem; }
-  .editor-toolbar { flex-wrap: wrap; gap: 0.5rem 0.75rem; padding: 0.5rem 1rem; }
-  .editor-toolbar strong { flex-basis: 100%; }
   .editor-body { grid-template-columns: 1fr min(320px, calc(100vw - 3rem)); }
   /* The card: one-line title (the full one is the tooltip), smaller detail text, and the
      actions as a grid: each select on its own row, the buttons three to a row, equal widths. */
@@ -156,6 +155,26 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
 .editor-main > .error, .editor-main > .meta { padding: 1.5rem; }
 .save-status { margin-left: auto; display: flex; gap: 0.5rem; align-items: center; color: var(--muted); font-size: 0.9rem; }
 .save-status.error { color: var(--danger); }
+.editor-toolbar .on-compact { display: none; }
+/* A compact editor (SPEC § 6.5, #57): a touch-first device, or a window as narrow as a phone; the
+   same test as `useCompactEditor`. The photo needs the height, and at 390 px the site header and
+   a toolbar wrapped over four rows took 330 px of it. So the header is put away on this screen
+   (the back arrow leads to the page that has it), and the toolbar is one row of finger-sized
+   controls: back, the title cut short, Fit, undo, redo and the save state. 100 % and the zoom
+   readout go; a pinch does that job here. */
+@media (pointer: coarse), (max-width: 640px) {
+  body:has(> #root > main.editor-main) > #root > header { display: none; }
+  /* wrap: only a save problem (a sentence and a button) ever takes a second row. Everything else
+     fits one, because the title gives way: it starts from nothing and takes what is left. */
+  .editor-toolbar { flex-wrap: wrap; gap: 0.25rem 0.4rem; padding: 0.25rem 0.5rem; }
+  .editor-toolbar strong { flex: 1 1 0; }
+  .editor-toolbar .zoom-readout, .editor-toolbar .zoom-actual { display: none; }
+  .editor-toolbar a, .editor-toolbar > button { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding: 0 0.6rem; }
+  .editor-toolbar .on-wide { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .editor-toolbar .on-compact { display: inline; font-size: 1.25rem; line-height: 1; }
+  .save-status { font-size: 0.85rem; white-space: nowrap; }
+  .save-status.error { flex-basis: 100%; white-space: normal; padding-bottom: 0.25rem; }
+}
 .save-status button { padding: 0.2rem 0.6rem; font-size: 0.85rem; }
 /* touch-action: every finger on the photo is the editor's (pinch-zoom, pan, drag: SPEC § 6.5);
    left to the browser, a pinch zooms the page and a drag scrolls it under the label being moved. */

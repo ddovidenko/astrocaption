@@ -35,6 +35,11 @@ test('a long unbroken title never widens the page', async ({ page, browser }) =>
     await expect(page.getByRole('button', { name: 'Fit' })).toBeVisible()
     await expectNoHorizontalOverflow(page, 'editor')
     await expect(page.getByRole('button', { name: 'Fit' })).toBeInViewport({ ratio: 1 })
+    // On a desktop the editor keeps the site header and the whole toolbar (the phone block below
+    // is where they are slimmed down).
+    await expect(page.locator('#root > header')).toBeVisible()
+    await expect(page.getByRole('button', { name: '100 %' })).toBeVisible()
+    await expect(page.locator('.editor-toolbar .zoom-readout')).toBeVisible()
     await page.getByRole('link', { name: '← Images' }).click()
 
     const cardAgain = page.locator('article.card', { hasText: LONG })
@@ -103,6 +108,28 @@ test.describe('phone width', () => {
       // The side panel starts closed on a phone, so the canvas has the width.
       await expect(page.locator('.side-panel.collapsed')).toBeVisible()
       await expect(page.locator('.editor-canvas')).toHaveJSProperty('clientWidth', 390 - 32)
+      // ...and the height (#57, SPEC § 6.5): in a compact editor the site header is put away and
+      // the toolbar is one row of finger-sized controls, so the photo starts near the top of the
+      // screen instead of 330 px down it.
+      await expect(page.locator('#root > header')).toBeHidden()
+      const toolbar = (await page.locator('.editor-toolbar').boundingBox())!
+      expect(toolbar.y).toBe(0)
+      expect(toolbar.height).toBeLessThanOrEqual(60)
+      // The canvas pane starts right under it; inside the pane only a notice (a sentence about
+      // this image, when there is one) sits above the photo.
+      expect((await page.locator('.editor-body').boundingBox())!.y).toBeLessThanOrEqual(64)
+      const back = page.getByRole('link', { name: '← Images' })
+      const controls = [back, ...['Fit', 'Undo', 'Redo'].map((name) => page.getByRole('button', { name, exact: true }))]
+      for (const control of controls) {
+        await expect(control).toBeInViewport({ ratio: 1 })
+        const box = (await control.boundingBox())!
+        expect(Math.min(box.width, box.height), `${await control.getAttribute('class')} is too small for a finger`).toBeGreaterThanOrEqual(44)
+      }
+      await expect(page.getByRole('button', { name: '100 %' })).toBeHidden()
+      await expect(page.locator('.editor-toolbar .zoom-readout')).toBeHidden()
+      // The title still shows, cut short, and names the image.
+      await expect(page.locator('.editor-toolbar strong')).toBeInViewport({ ratio: 1 })
+      expect((await page.locator('.editor-toolbar strong').boundingBox())!.width).toBeGreaterThan(40)
 
       const visitor = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })
       const pub = await visitor.newPage()

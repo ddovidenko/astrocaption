@@ -120,9 +120,14 @@ export default function EditorPage() {
   return (
     <>
       <div className="editor-toolbar">
-        <Link to="/">← Images</Link>
+        {/* `on-wide` text is only put out of sight in a compact editor (SPEC § 6.5), never out of
+            the accessible name: the link is "← Images" and the buttons "Undo" and "Redo" at
+            every width. */}
+        <Link to="/">
+          ← <span className="on-wide">Images</span>
+        </Link>
         <strong title={image.title}>{image.title}</strong>
-        <span className="meta">{Math.round(scale * 100)} %</span>
+        <span className="meta zoom-readout">{Math.round(scale * 100)} %</span>
         {/* These act on click and never need the focus; keeping it off them leaves the canvas
             shortcuts alive and stops Space from re-clicking the button. Keyboard focus (Tab)
             still works. */}
@@ -134,7 +139,7 @@ export default function EditorPage() {
           Fit
         </button>
         <button
-          className="secondary"
+          className="secondary zoom-actual"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => useEditor.getState().actual()}
         >
@@ -147,7 +152,10 @@ export default function EditorPage() {
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => useEditor.getState().undoLast()}
         >
-          Undo
+          <span className="on-wide">Undo</span>
+          <span className="on-compact" aria-hidden="true">
+            ↶
+          </span>
         </button>
         <button
           className="secondary"
@@ -156,7 +164,10 @@ export default function EditorPage() {
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => useEditor.getState().redoLast()}
         >
-          Redo
+          <span className="on-wide">Redo</span>
+          <span className="on-compact" aria-hidden="true">
+            ↷
+          </span>
         </button>
         <SaveStatus />
       </div>

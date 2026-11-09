@@ -25,8 +25,12 @@ can be selected, moved, resized, recoloured, renamed and hidden with a finger on
 
 ## Non-goals
 
-- A phone-first editor. The side panel, its four tabs and the top bar (Images, Fit, 100 %, Undo,
-  Redo, save status) keep today's layout and behaviour.
+- A phone-first editor. The side panel and its four tabs keep today's layout and behaviour.
+  *Amended 2026-11-09, after PR 1:* the top bar was on this list too, but measured at 390 px the
+  site header and the wrapped toolbar took 330 px, which would have left no photo above the More
+  sheet on a real iPhone. The owner chose to slim the top in a compact editor first (its own PR:
+  header hidden on the editor screen, one row with back, title, Fit, undo, redo and the save
+  state; 100 % and the zoom readout hidden).
 - Selecting several labels by touch. Shift-click has no touch equivalent and none is added.
 - Any change to what is drawn. The annotation JSON, `render.py`, `metrics.ts`, the placer and the
   render/names/placement vectors are untouched; `parity.spec.ts` must pass unchanged.
