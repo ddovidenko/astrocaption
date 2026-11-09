@@ -120,11 +120,11 @@ export default function LabelDock({
           )}
           <label className="label-sheet-row">
             <span>Aliases</span>
-            <MixedSelect label="Aliases" value={controls.aliases.value} options={ALIAS_OPTIONS} onChange={controls.aliases.onChange} />
+            <MixedSelect bare label="Aliases" value={controls.aliases.value} options={ALIAS_OPTIONS} onChange={controls.aliases.onChange} />
           </label>
           <label className="label-sheet-row">
             <span>Leader</span>
-            <MixedSelect label="Leader" value={controls.leader.value} options={LEADER_OPTIONS} onChange={controls.leader.onChange} />
+            <MixedSelect bare label="Leader" value={controls.leader.value} options={LEADER_OPTIONS} onChange={controls.leader.onChange} />
           </label>
           <button
             type="button"

@@ -218,6 +218,10 @@ describe('LabelDock sheet', () => {
     expect(screen.queryByLabelText('Rename')).toBeNull()
     expect((screen.getByLabelText('Aliases') as HTMLSelectElement).value).toBe('mixed')
     expect((screen.getByLabelText('Leader') as HTMLSelectElement).value).toBe('auto')
+    // The row already says which field it is; the choices do not repeat it as the strip's do.
+    const shown = (name: string) => (screen.getByLabelText(name) as HTMLSelectElement).selectedOptions[0]!.textContent
+    expect(shown('Aliases')).toBe('mixed')
+    expect(shown('Leader')).toBe('auto')
   })
 
   it('Aliases, Leader and Pin act on the selection and leave the sheet open', () => {

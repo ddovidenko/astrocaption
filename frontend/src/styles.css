@@ -340,7 +340,11 @@ html:has(> body > #root > main.editor-main) { overscroll-behavior: none; }
 .label-dock-stepper input[type='number'] { width: 3.25rem; margin: 0 -1px; padding: 0; border-radius: 0; text-align: center; appearance: textfield; -moz-appearance: textfield; }
 .label-dock-stepper input[type='number']::-webkit-inner-spin-button,
 .label-dock-stepper input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-.label-dock .color-field { display: flex; }
+/* The colour popover is placed against the dock, not against its own swatch: it is wider than
+   the room on either side of the swatch on a phone, and would be cut off by the screen's edge.
+   Always upwards, over the photo (there is nothing below the dock). */
+.label-dock .color-field { display: flex; position: static; }
+.label-dock .popover { top: auto; bottom: calc(100% + 0.4rem); left: 0.6rem; right: auto; }
 .label-dock .color-field .field-label, .label-dock .swatch-hex { display: none; }
 .label-dock .swatch { width: auto; justify-content: center; }
 .label-dock .swatch-chip { width: 1.4rem; height: 1.4rem; }

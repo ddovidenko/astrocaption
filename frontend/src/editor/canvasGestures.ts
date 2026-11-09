@@ -55,6 +55,10 @@ export interface CanvasGestures {
   moved: () => boolean
 }
 
+/** The per-label controls, in either layout: the floating strip, or the docked bar and sheet of
+ *  a compact editor. A key typed inside them belongs to the control that has the focus. */
+const LABEL_CONTROLS = '.label-toolbar, .label-dock'
+
 /** How far a finger may wander and still be a tap, in screen pixels. The mouse's slack is 3. */
 const TOUCH_SLACK = 10
 
@@ -132,7 +136,7 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
       // Everything inside the floating toolbar counts as a field, whatever it is: the colour
       // swatch and the picker are buttons and inputs, and Escape there closes the popover while
       // Delete/Backspace edits a hex — neither may clear the selection or disable its labels.
-      if (el.closest('.label-toolbar')) return true
+      if (el.closest(LABEL_CONTROLS)) return true
       const tags = withButton ? ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'] : ['INPUT', 'TEXTAREA', 'SELECT']
       return tags.includes(el.tagName)
     }
@@ -148,7 +152,7 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
       // checkbox (an Objects-tab row keeps the focus after a click), which has none, so the
       // editor's history answers from there. Every other shortcut still treats it as a field.
       const el = document.activeElement
-      const checkboxFocused = el instanceof HTMLInputElement && el.type === 'checkbox' && !el.closest('.label-toolbar')
+      const checkboxFocused = el instanceof HTMLInputElement && el.type === 'checkbox' && !el.closest(LABEL_CONTROLS)
       if ((e.ctrlKey || e.metaKey) && !e.altKey && (!inField() || checkboxFocused)) {
         const key = e.key.toLowerCase()
         if (key === 'z' && !e.shiftKey) {
@@ -165,7 +169,7 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
       // Escape on a toolbar *button* (the colour swatch, refocused when its picker closed on the
       // previous Escape) is the editor's: a second Escape clears the selection (#104). The
       // toolbar's fields keep it, as they keep every key.
-      const toolbarButton = el instanceof HTMLButtonElement && el.closest('.label-toolbar') !== null
+      const toolbarButton = el instanceof HTMLButtonElement && el.closest(LABEL_CONTROLS) !== null
       if ((inField() && !(e.key === 'Escape' && toolbarButton)) || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === 'f' || e.key === 'F') useEditor.getState().fit()
       else if (e.key === '1') useEditor.getState().actual()
