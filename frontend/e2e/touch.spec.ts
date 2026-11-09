@@ -373,6 +373,24 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
       await expect(undo).toBeDisabled()
     }
 
+    // 6b. The toolbar's colour picker is drawn over the canvas: a finger inside it works it, and
+    //     only a touch on the photo closes it.
+    {
+      await expect.poll(selected).toEqual([id])
+      await toolbar.getByRole('button', { name: /Text colour/ }).tap()
+      const picker = toolbar.getByRole('dialog')
+      await expect(picker).toBeVisible()
+      await picker.locator('input').tap()
+      await expect(picker).toBeVisible()
+      await page.touchscreen.tap(box.x + 20, box.y + box.height - 20)
+      await expect(picker).toBeHidden()
+      // That touch may have landed on anything; back to the label.
+      const at = await labelPoint()
+      await page.touchscreen.tap(at.x, at.y)
+      await expect.poll(selected).toEqual([id])
+      await expect(undo).toBeDisabled()
+    }
+
     // 7. Touching the photo ends an edit in progress: a size typed in the toolbar, with no Enter,
     //    is kept when the next touch lands on the canvas.
     {

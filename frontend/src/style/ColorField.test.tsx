@@ -77,6 +77,7 @@ describe('ColorField commits exactly once per close', () => {
   function canvas() {
     const el = document.createElement('div')
     el.className = 'editor-canvas'
+    el.addEventListener('touchstart', (e) => e.preventDefault()) // what Konva and the gesture layer do
     document.body.append(el)
     return el
   }
@@ -97,6 +98,24 @@ describe('ColorField commits exactly once per close', () => {
     })
     expect(f.dialog()).toBeNull()
     expect(f.onCommit).toHaveBeenCalledTimes(1)
+  })
+  // The label toolbar, and so its picker, is drawn inside the canvas element, over the stage.
+  it('a touch inside the picker of a field that sits over the canvas leaves it open', () => {
+    const host = document.createElement('div')
+    host.className = 'editor-canvas'
+    document.body.append(host)
+    const onCommit = vi.fn()
+    render(<ColorField label="Text colour" value="#ffffff" fallback="#000000" onChange={vi.fn()} onCommit={onCommit} />, {
+      container: host,
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Text colour/ }))
+    const finger = { identifier: 1, pageX: 10, pageY: 10, clientX: 10, clientY: 10 }
+    const surface = screen.getByRole('dialog').querySelector('.react-colorful__interactive')!
+    fireEvent.touchStart(surface, { touches: [finger], changedTouches: [finger] })
+    fireEvent.touchEnd(surface, { touches: [], changedTouches: [finger] })
+    fireEvent.touchStart(screen.getByRole('dialog').querySelector('input')!)
+    expect(screen.queryByRole('dialog')).not.toBeNull()
+    expect(onCommit).not.toHaveBeenCalled()
   })
   it('a touch elsewhere (the start of a scroll) leaves it open', () => {
     const f = mount()
