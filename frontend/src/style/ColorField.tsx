@@ -111,6 +111,15 @@ export default function ColorField({
   const away = useEffectEvent((e: MouseEvent) => {
     if (wrap.current && !wrap.current.contains(e.target as Node)) closePicker(false)
   })
+  // A cancelled touchstart counts as that press. The editor canvas cancels every touch that
+  // lands on it (Konva for its shapes, the gesture layer for bare sky: SPEC § 6.5), so the
+  // browser sends no compatibility mousedown after it and the picker would stay open over a
+  // selection that has moved on. Reading the cancel itself, not where the touch landed, keeps
+  // this to exactly the touches no mousedown follows: a tap elsewhere brings its own, and a
+  // touch that turns out to be a scroll of the panel leaves the picker alone.
+  const cancelledTouch = useEffectEvent((e: TouchEvent) => {
+    if (e.defaultPrevented && wrap.current && !wrap.current.contains(e.target as Node)) closePicker(false)
+  })
   const key = useEffectEvent((e: KeyboardEvent) => {
     if (e.key !== 'Escape') return
     // This Escape is spent here: the editor's own listener (on the window, so it runs after this
@@ -122,9 +131,12 @@ export default function ColorField({
   useEffect(() => {
     if (!open) return
     document.addEventListener('mousedown', away)
+    // Passive: it only reads the event, and must not hold up the start of a scroll.
+    document.addEventListener('touchstart', cancelledTouch, { passive: true })
     document.addEventListener('keydown', key)
     return () => {
       document.removeEventListener('mousedown', away)
+      document.removeEventListener('touchstart', cancelledTouch)
       document.removeEventListener('keydown', key)
     }
   }, [open])

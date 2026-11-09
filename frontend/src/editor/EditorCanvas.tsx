@@ -7,6 +7,7 @@ import LabelTextEditor from './LabelTextEditor'
 import LabelToolbar from './LabelToolbar'
 import { LabelTextShape } from './LabelTextShape'
 import { useCanvasGestures } from './canvasGestures'
+import { useCompactEditor } from './compact'
 import { getMeasurer, isEditable, tryToggleWithPlacement } from './editing'
 import { primaryName } from './names'
 import { PAD_FACTOR } from './placement'
@@ -153,6 +154,9 @@ interface EntryProps {
   /** A press that turned out to be a click, not a drag (the gesture hook checks its `movedRef`). */
   onClick: (id: number, shift: boolean) => void
   onDoubleClick: (id: number) => void
+  /** The touch half of the gesture layer (SPEC § 6.5): see `CanvasGestures.label`. */
+  onTouchPress: (id: number) => void
+  onTap: (id: number) => void
   moveLabel: (id: number, x: number, y: number, commit?: boolean) => void
   /** Whether Space is held: a pan gesture, which wins over selecting or dragging a label. Held in
    *  React state so `draggable` can turn off before Konva sees the press. */
@@ -172,6 +176,8 @@ const LabelEntry = memo(function LabelEntry({
   onPress,
   onClick,
   onDoubleClick,
+  onTouchPress,
+  onTap,
   moveLabel,
   spacePan,
   onDrawError,
@@ -215,6 +221,10 @@ const LabelEntry = memo(function LabelEntry({
           if (spacePan || e.evt.button !== 0) return
           onPress(label.object_id, e.evt.shiftKey)
         }}
+        // Touch (SPEC § 6.5): whether a finger may drag this label at all is the gesture layer's
+        // call, made through the stage's drag distance; the drag handlers below are the mouse's.
+        onTouchStart={() => onTouchPress(label.object_id)}
+        onTap={() => onTap(label.object_id)}
         onClick={(e) => {
           if (e.evt.button === 0 && !spacePan) onClick(label.object_id, e.evt.shiftKey)
         }}
@@ -331,6 +341,7 @@ export default function EditorCanvas() {
   const [sizeError, setSizeError] = useState<string | null>(null)
   const gestures = useCanvasGestures(stageRef)
   const { moved } = gestures
+  const compact = useCompactEditor()
 
   // 1. The viewport: one ResizeObserver, and the first non-zero size fits the image.
   useEffect(() => {
@@ -548,6 +559,7 @@ export default function EditorCanvas() {
   // the objects, the marker sizes or the zoom (the 8 px floor is in screen pixels) change — not on
   // every pan. They sit on their own layer *below* the labels, so a label drawn inside a big
   // marker (M 42 swallows the Trapezium stars) is still the thing a click on it hits.
+  // A compact editor doubles the floor: a fingertip needs a bigger target than a cursor does.
   const hitCircles = useMemo(
     () =>
       objectOrder.map((id) => {
@@ -560,10 +572,19 @@ export default function EditorCanvas() {
             key={id}
             x={obj.x}
             y={obj.y}
-            radius={Math.max(markerRadius(obj, style), 8 / view.scale)}
+            radius={Math.max(markerRadius(obj, style), (compact ? 16 : 8) / view.scale)}
             fill="transparent"
             onMouseEnter={() => hover(id)}
             onMouseLeave={() => hover(null)}
+            // A finger cannot hover, so a tap does it in two steps (SPEC § 6.5): the first shows
+            // the ring and the name, the second on the same object toggles it. The hover stays,
+            // so a third tap toggles back; a tap anywhere else clears it. A single stray tap
+            // therefore never makes a label appear or vanish.
+            onTap={() => {
+              if (moved()) return
+              if (useEditor.getState().hoveredId !== id) hover(id)
+              else tryToggleWithPlacement(id, setToggleError)
+            }}
             // Left button only, and not after a pan or a label drag that happened to end over
             // this marker: the click Konva fires then is not a toggle. `tryToggleWithPlacement` catches a
             // placer that throws (a stale font) and says so, rather than a dead click.
@@ -573,7 +594,7 @@ export default function EditorCanvas() {
           />
         )
       }),
-    [objectOrder, objects, style, view.scale, hover, moved],
+    [objectOrder, objects, style, view.scale, hover, moved, compact],
   )
 
   // While a solve runs the toggle above no-ops; the cursor over a marker says so (#76). An effect,
@@ -667,6 +688,8 @@ export default function EditorCanvas() {
               onPress={gestures.label.onPress}
               onClick={gestures.label.onClick}
               onDoubleClick={onLabelDoubleClick}
+              onTouchPress={gestures.label.onTouchPress}
+              onTap={gestures.label.onTap}
               moveLabel={moveLabel}
               spacePan={gestures.spacePan}
               onDrawError={onDrawError}

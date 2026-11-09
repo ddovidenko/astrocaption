@@ -70,6 +70,71 @@ describe('ColorField commits exactly once per close', () => {
     expect(f.dialog()).toBeNull()
     expect(f.onCommit).toHaveBeenCalledTimes(1)
   })
+  // A finger on the editor canvas never becomes a mousedown: every touchstart there is cancelled,
+  // so the browser sends no compatibility mouse events (SPEC § 6.5) and the touch itself has to
+  // close the picker. Anywhere else a tap is followed by its mousedown as usual, and a touch that
+  // turns out to be a scroll must leave the picker alone.
+  function canvas() {
+    const el = document.createElement('div')
+    el.className = 'editor-canvas'
+    el.addEventListener('touchstart', (e) => e.preventDefault()) // what Konva and the gesture layer do
+    document.body.append(el)
+    return el
+  }
+  it('a touch on the editor canvas', () => {
+    const f = mount()
+    f.open()
+    fireEvent.touchStart(canvas())
+    expect(f.dialog()).toBeNull()
+    expect(f.onCommit).toHaveBeenCalledTimes(1)
+  })
+  it('a touch on the canvas followed by a mousedown still commits once', () => {
+    const f = mount()
+    f.open()
+    const el = canvas()
+    act(() => {
+      fireEvent.touchStart(el)
+      fireEvent.mouseDown(el)
+    })
+    expect(f.dialog()).toBeNull()
+    expect(f.onCommit).toHaveBeenCalledTimes(1)
+  })
+  // The label toolbar, and so its picker, is drawn inside the canvas element, over the stage.
+  it('a touch inside the picker of a field that sits over the canvas leaves it open', () => {
+    const host = document.createElement('div')
+    host.className = 'editor-canvas'
+    document.body.append(host)
+    const onCommit = vi.fn()
+    render(<ColorField label="Text colour" value="#ffffff" fallback="#000000" onChange={vi.fn()} onCommit={onCommit} />, {
+      container: host,
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Text colour/ }))
+    const finger = { identifier: 1, pageX: 10, pageY: 10, clientX: 10, clientY: 10 }
+    const surface = screen.getByRole('dialog').querySelector('.react-colorful__interactive')!
+    fireEvent.touchStart(surface, { touches: [finger], changedTouches: [finger] })
+    fireEvent.touchEnd(surface, { touches: [], changedTouches: [finger] })
+    fireEvent.touchStart(screen.getByRole('dialog').querySelector('input')!)
+    expect(screen.queryByRole('dialog')).not.toBeNull()
+    expect(onCommit).not.toHaveBeenCalled()
+  })
+  it('a touch elsewhere (the start of a scroll) leaves it open', () => {
+    const f = mount()
+    f.open()
+    fireEvent.touchStart(document.body)
+    expect(f.dialog()).not.toBeNull()
+    expect(f.onCommit).not.toHaveBeenCalled()
+  })
+  it('a touch inside the picker leaves it open', () => {
+    const f = mount()
+    f.open()
+    // react-colorful reads the finger's position, so the event carries one.
+    const finger = { identifier: 1, pageX: 10, pageY: 10, clientX: 10, clientY: 10 }
+    const surface = screen.getByRole('dialog').querySelector('.react-colorful__interactive')!
+    fireEvent.touchStart(surface, { touches: [finger], changedTouches: [finger] })
+    fireEvent.touchEnd(surface, { touches: [], changedTouches: [finger] })
+    expect(f.dialog()).not.toBeNull()
+    expect(f.onCommit).not.toHaveBeenCalled()
+  })
   it('the swatch toggled shut', () => {
     const f = mount()
     f.open()

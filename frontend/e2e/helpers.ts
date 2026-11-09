@@ -224,3 +224,87 @@ export async function exportImage(page: Page, imageId: string): Promise<string> 
   const out = (await res.json()) as ExportOut
   return new URL(out.annotated_preview_url, page.url()).href
 }
+
+/** The stage transform, the drawn labels and the image size, read through the editor's test hook. */
+export function stageState(page: Page) {
+  return page.evaluate(() => {
+    const hook = window.__astrocaptionEditor!
+    return {
+      x: hook.stage.x(),
+      y: hook.stage.y(),
+      scale: hook.stage.scaleX(),
+      labels: hook.labelPositions(),
+      imageWidth: hook.imageWidth,
+      imageHeight: hook.imageHeight,
+    }
+  })
+}
+
+/** A finger on the page, in CSS pixels. `id` tells fingers apart and defaults to the position in
+ *  the list, so a finger that stays down must keep its place (or carry an explicit id). */
+export interface TouchPoint {
+  x: number
+  y: number
+  id?: number
+}
+
+/** Raw touch input (SPEC § 6.5). Playwright's own `page.touchscreen` can only tap, so drags and
+ *  two-finger gestures go through the DevTools protocol, which is why the touch spec is Chromium
+ *  only. `start` and `move` name every finger that is down after the call. `end` is the other way
+ *  round, because that is how Chromium reads the protocol (checked with a probe: a touchEnd that
+ *  lists a finger releases that finger and leaves the others down). */
+export interface TouchDriver {
+  start(points: TouchPoint[]): Promise<void>
+  move(points: TouchPoint[]): Promise<void>
+  /** Lifts the fingers listed (matched by id), or every finger when none is. */
+  end(lifted?: TouchPoint[]): Promise<void>
+  /** The browser takes the gesture away (an incoming call, a system gesture). */
+  cancel(): Promise<void>
+  /** One finger down at the first point, moved through the others in turn, and lifted. Give it
+   *  at least two moves when the photo should pan: the first uses up the 10 px of tap slack. */
+  path(points: TouchPoint[]): Promise<void>
+  /** Two fingers `fromDist` apart either side of `center`, moved in `steps` until they are
+   *  `toDist` apart either side of `center + shift`, and lifted. */
+  pinch(
+    center: TouchPoint,
+    fromDist: number,
+    toDist: number,
+    opts?: { steps?: number; shift?: { x: number; y: number } },
+  ): Promise<void>
+}
+
+export async function touchDriver(page: Page): Promise<TouchDriver> {
+  const cdp = await page.context().newCDPSession(page)
+  const send = (type: 'touchStart' | 'touchMove' | 'touchEnd' | 'touchCancel', points: TouchPoint[]) =>
+    cdp.send('Input.dispatchTouchEvent', {
+      type,
+      touchPoints: points.map((p, i) => ({ x: p.x, y: p.y, id: p.id ?? i })),
+    })
+  const driver: TouchDriver = {
+    start: async (points) => void (await send('touchStart', points)),
+    move: async (points) => void (await send('touchMove', points)),
+    end: async (lifted = []) => void (await send('touchEnd', lifted)),
+    cancel: async () => void (await send('touchCancel', [])),
+    path: async ([first, ...rest]) => {
+      if (!first) return
+      await driver.start([first])
+      for (const point of rest) await driver.move([point])
+      await driver.end()
+    },
+    pinch: async (center, fromDist, toDist, { steps = 5, shift = { x: 0, y: 0 } } = {}) => {
+      const fingers = (t: number): TouchPoint[] => {
+        const half = (fromDist + (toDist - fromDist) * t) / 2
+        const cx = center.x + shift.x * t
+        const cy = center.y + shift.y * t
+        return [
+          { x: cx - half, y: cy },
+          { x: cx + half, y: cy },
+        ]
+      }
+      await driver.start(fingers(0))
+      for (let i = 1; i <= steps; i++) await driver.move(fingers(i / steps))
+      await driver.end()
+    },
+  }
+  return driver
+}

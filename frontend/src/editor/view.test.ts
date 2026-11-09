@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_SCALE, MIN_SCALE, actualSize, fitView, toScreen, toWorld, zoomAt } from './view'
+import { MAX_SCALE, MIN_SCALE, actualSize, fitView, pinchView, toScreen, toWorld, zoomAt, type View } from './view'
 
 describe('view', () => {
   it('fits a landscape image into the viewport with padding and centres it', () => {
@@ -51,5 +51,43 @@ describe('view', () => {
     const centreAfter = toWorld(a, 600, 400)
     expect(centreAfter.x).toBeCloseTo(centreBefore.x)
     expect(centreAfter.y).toBeCloseTo(centreBefore.y)
+  })
+})
+
+// Two fingers on the photo (SPEC § 6.5): the world point under the old midpoint follows the new
+// one, and the spread between the fingers scales the view.
+describe('pinchView', () => {
+  const v: View = { scale: 0.5, x: 100, y: 50 }
+
+  it('is the identity when nothing moved', () => {
+    expect(pinchView(v, { x: 200, y: 200 }, 80, { x: 200, y: 200 }, 80)).toEqual(v)
+  })
+
+  it('keeps the world point under the midpoint while zooming', () => {
+    const out = pinchView(v, { x: 200, y: 200 }, 80, { x: 200, y: 200 }, 160)
+    expect(out.scale).toBeCloseTo(1)
+    expect(toWorld(out, 200, 200)).toEqual(toWorld(v, 200, 200))
+  })
+
+  it('pans with the midpoint', () => {
+    const out = pinchView(v, { x: 200, y: 200 }, 80, { x: 230, y: 180 }, 80)
+    expect(out).toEqual({ scale: 0.5, x: 130, y: 30 })
+  })
+
+  it('zooms and pans in one step', () => {
+    const out = pinchView(v, { x: 200, y: 200 }, 80, { x: 230, y: 180 }, 160)
+    const w = toWorld(v, 200, 200)
+    expect(toScreen(out, w.x, w.y)).toEqual({ x: 230, y: 180 })
+  })
+
+  it('clamps at both limits and still follows the midpoint', () => {
+    expect(pinchView(v, { x: 0, y: 0 }, 1, { x: 0, y: 0 }, 1e6).scale).toBe(MAX_SCALE)
+    expect(pinchView(v, { x: 0, y: 0 }, 1e6, { x: 0, y: 0 }, 1).scale).toBe(MIN_SCALE)
+  })
+
+  it('returns the view unchanged for a zero or non-finite distance', () => {
+    expect(pinchView(v, { x: 1, y: 1 }, 0, { x: 9, y: 9 }, 50)).toBe(v)
+    expect(pinchView(v, { x: 1, y: 1 }, 50, { x: 9, y: 9 }, 0)).toBe(v)
+    expect(pinchView(v, { x: 1, y: 1 }, NaN, { x: 9, y: 9 }, 50)).toBe(v)
   })
 })

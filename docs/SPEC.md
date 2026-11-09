@@ -33,7 +33,8 @@ No multi-user, no roles, no invites in v1.
 - Email, password reset by email, OAuth.
 - Multiple owners or per-image permissions.
 - Mobile-first editor. Every page must fit a phone's width without a horizontal scroll (pinned by
-  `frontend/e2e/layout.spec.ts` at 390 px); the editor may assume a mouse.
+  `frontend/e2e/layout.spec.ts` at 390 px). The editor is laid out for a desktop, but it no longer
+  assumes a mouse: § 6.5 says what a finger does, enough for small corrections from a phone.
 
 ## 4. Tech stack
 
@@ -268,6 +269,7 @@ select/drag, the autosave and the side panel (§ 6.3).
 - Hovering an object's position highlights it (subtle ring + name tooltip), whether or not it is enabled.
 - **Click** a hovered object: toggles it enabled. Its label appears at its default position.
 - **Click** a label: selects it (shows a selection outline). Clicking empty canvas deselects.
+- Each of these has a touch counterpart, with its own rules where a finger differs from a cursor: § 6.5.
 - Keyboard: `Esc` clears the selection, `Delete`/`Backspace` disable every selected label (one change), `F` fit to view, `1` 100 %.
 - `Ctrl+Z` undo, `Ctrl+Y` / `Ctrl+Shift+Z` redo (`Cmd` on macOS), also as toolbar buttons. The history is per editing session (lost on reload and cleared by a conflict), capped at 100 entries; a drag is one entry, a bulk enable is one entry, an auto-arrange is one entry. Keys are ignored while a form field has the focus.
 
@@ -367,6 +369,58 @@ Details fixed by the M1 implementation (`backend/app/placement.py`):
 - Box widths are `ceil` of a measured width on both sides, and the canvas measures within 0.5 px of Pillow (§ 9), so for a string whose width sits within that of an integer the two placers see boxes one pixel apart and can pick different anchors for the same label. This is accepted (#65): the browser's placement (toggling a label on, Reset position) becomes the stored `x, y`, which the server renders as stored and never re-places unless Auto-arrange is asked for; the pixel budget in § 9 already covers the one-pixel box edge at draw time. A measure endpoint would put a round trip in front of every toggle for a difference no one can see.
 - An object whose own circle spills past the frame (M 31 filling the field: radius larger than the distance to every edge) gets no slot outside its ring, so after the normal search fails it is labelled as a point at its centre using the same anchors and rings. Only objects whose ring is fully inside the frame fall through to the `collided` fallback.
 - Text boxes are measured by the caller (Pillow on the server, canvas metrics in the browser); the placer itself has no font dependency. Vectors in `tests/fixtures/placement/` pin the Python output and are regenerated with `make placement-vectors`.
+
+### 6.5 Touch
+
+Since #57. Touch is recognised per event, not per device: a touch event runs the rules below, a
+mouse event the rules of § 6.1 and § 6.2, and a touch-screen laptop gets both. Every touch that
+starts on the canvas is cancelled, so the browser never follows it with compatibility mouse events.
+
+- Only fingers that landed on the canvas count. A thumb resting on the top bar or the side panel,
+  as when a hand holds the device, is no part of a gesture on the image.
+- **Two fingers**: zoom and pan together. The image point under the midpoint of the two fingers
+  stays under it, and the scale follows the distance between them, within the same limits as the
+  wheel.
+- **One finger**: pans, from wherever it lands (bare canvas, a marker, a label that is not selected).
+  The first 10 screen px are slack, so a tap may wander; the image then follows the finger from
+  where the slack ran out, without a jump.
+- **Tap a label**: selects it, replacing the selection. **Tap bare canvas**: clears the selection.
+  There is no multi-selection by touch.
+- **Drag a selected label**: moves it, as one change, and pins it, exactly as a mouse drag does. Only
+  a selected label moves under a finger; a drag on any other label pans, so moving around a
+  zoomed-in image cannot nudge one. The drag starts after the same 10 px of slack.
+- **A second finger landing during a label drag** ends the drag where the label is (one undo entry)
+  and the two fingers zoom. After a two-finger gesture, a finger still on the screen does nothing
+  until every finger has lifted: it neither pans, drags nor counts as a tap.
+- **Tap an object**: two steps, since a finger cannot hover. The first tap shows the hover ring and
+  the name; a second tap on the same object toggles it, and a third toggles it back. A tap anywhere
+  else puts the name away. A single stray tap never makes a label appear or vanish.
+- **Touching the canvas ends an edit in progress**: a size typed in the toolbar is committed and an
+  open colour picker closes (committing its pick), before the touch does anything else. A touch
+  anywhere else closes the picker only if it is a tap, as before; scrolling the panel leaves it open.
+- A gesture the browser takes away (`touchcancel`) ends a pan or a pinch with nothing to commit; a
+  label being dragged stays where it had got to, as one change.
+- Not on touch: shift-selection, the double-click text editor, wheel-to-resize (the toolbar's − and
+  + do it). Keyboard shortcuts are unchanged for anyone with a keyboard attached.
+- While a re-solve runs the document is read-only, as for the mouse: labels cannot be selected and
+  the second tap does not toggle; zooming, panning and the first (name) tap still work.
+
+**The page stays put.** On the editor screen the page itself never zooms or scrolls under a
+finger: the canvas takes every touch (`touch-action: none`), and the rest of the screen, the site
+header included, allows scrolling and taps but neither pinch-zoom nor double-tap zoom
+(`touch-action: pan-x pan-y`). Under a coarse pointer every field on the screen is at least 16 px,
+because iOS Safari zooms the page when a smaller one takes the focus. Other pages zoom as usual.
+
+**Compact.** A *compact* editor is one on a touch-first device (`pointer: coarse`) at any width, or
+in a window up to 640 px wide. It affects sizes and layout only, never which gesture rules apply.
+Today it doubles the hit target around an object from 8 to 16 screen px. The label toolbar is still
+the floating strip of § 6.2 there, wider than a phone's screen; a docked bar replaces it in a
+compact editor in the next step of #57.
+
+Pinned by `frontend/e2e/touch.spec.ts` (Chromium at 390 × 844 with touch input; two-finger input
+through the DevTools protocol). Not automatable: iOS Safari's own focus zoom and page pinch. The
+spec pins their causes instead (the visual viewport stays at scale 1 under a pinch anywhere on the
+screen; no field is under 16 px).
 
 ## 7. Data model
 
@@ -663,4 +717,4 @@ Later (not v1): local ASTAP solver option, custom object entries (user-added lab
 
 - Nova rate limits: undocumented; we serialise solves (one at a time) and cache job results forever. Confirm behaviour under a burst of 5 uploads. (#56)
 - Object list size: wide fields can return 500+ HD stars. Decided 2026-09-11 (#37): `hd` entries are hidden by default and shown by the Objects tab's HD-stars toggle; a bright star that nova lists twice, as `bright` and as `hd` at the same pixel, keeps both rows (flagging the twin is post-v1 polish). The filter is tested against `tests/fixtures/nova-narrow/`: 8 objects, 5 `hd`, 3 labels enabled. (nova adds `hd` entries only to fields of about 1° radius or less: the 2.4° Orion recording has none.)
-- Touch support in the editor: out of scope for v1, but Konva makes pinch-zoom cheap. Revisit after milestone 5 (#57).
+- Touch editor (§ 6.5): not yet checked on a real iPhone (planned once a release carries the docked label bar) or on any tablet (#57).

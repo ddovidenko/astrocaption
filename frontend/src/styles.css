@@ -157,7 +157,9 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
 .save-status { margin-left: auto; display: flex; gap: 0.5rem; align-items: center; color: var(--muted); font-size: 0.9rem; }
 .save-status.error { color: var(--danger); }
 .save-status button { padding: 0.2rem 0.6rem; font-size: 0.85rem; }
-.editor-canvas { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #000; cursor: grab; }
+/* touch-action: every finger on the photo is the editor's (pinch-zoom, pan, drag: SPEC § 6.5);
+   left to the browser, a pinch zooms the page and a drag scrolls it under the label being moved. */
+.editor-canvas { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #000; cursor: grab; touch-action: none; }
 .editor-canvas.panning { cursor: grabbing; }
 .editor-tooltip { position: absolute; pointer-events: none; padding: 0.15rem 0.5rem; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; white-space: nowrap; }
 /* The double-click text editor: absolutely placed over the label by LabelTextEditor. */
@@ -170,8 +172,21 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
    sized by that list: the grid row grows to the full list, the canvas grows with it, and the page
    scrolls instead of the list. It has to be `body`: `#root` is a flex item with `flex: 1 1 0`, so
    its own `height` is ignored in favour of the flex basis. Only the editor route is touched, so
-   every other page keeps its ordinary document scrolling. */
-body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
+   every other page keeps its ordinary document scrolling.
+   Nor may the page zoom anywhere on this screen (#57): a pinch or a double tap on the top bar
+   would leave the whole editor magnified, with no gesture left on the canvas to undo it. pan-x
+   pan-y keeps taps and scrolling (the object list) and drops both zooms; `manipulation` would
+   still allow the pinch. On `body`, not `main`, because the site header sits outside `main`. */
+body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; touch-action: pan-x pan-y; }
+/* Nor may a drag on the top bar or the panel rubber-band the whole editor. On the root element:
+   only its overscroll-behavior applies to the viewport (Chromium also honours `body`'s, Safari
+   does not, so the browser test cannot tell the two apart). */
+html:has(> body > #root > main.editor-main) { overscroll-behavior: none; }
+/* iOS Safari zooms the whole page when a field under 16 px takes the focus, and leaves it zoomed:
+   that is how the label toolbar (0.8rem fields) came to fill an iPhone's screen (#57). */
+@media (pointer: coarse) {
+  body:has(> #root > main.editor-main) :is(input, select, textarea) { font-size: max(16px, 1em); }
+}
 .editor-body { display: grid; grid-template-columns: 1fr 320px; flex: 1; min-height: 0; }
 .editor-body.collapsed { grid-template-columns: 1fr 32px; }
 .editor-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
