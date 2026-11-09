@@ -5,6 +5,7 @@ import {
   ensureSetUpAndSignedIn,
   ensureSolvedImage,
   fetchAnnotations,
+  fetchObjects,
   stageState,
   touchDriver,
   withAnnotationsRestored,
@@ -46,6 +47,43 @@ async function emptyPoint(page: Page, box: Box): Promise<{ x: number; y: number 
   const pick = candidates.find((p) => p.x > 60 && p.y > 60 && p.x < box.width - 60 && p.y < box.height - 60)
   expect(pick, 'the view leaves no empty canvas beside the image').toBeTruthy()
   return { x: box.x + pick!.x, y: box.y + pick!.y }
+}
+
+/** Zooms in about `point` (page pixels) until the stage scale is at least `minScale`. At the
+ *  fitted size a phone shows a label a few pixels tall, so the specs zoom in first, as an owner
+ *  would. The wheel does it because it keeps the point under the cursor exactly in place; as many
+ *  notches as it takes, since how far one notch zooms depends on the emulated device. */
+async function zoomAbout(page: Page, point: { x: number; y: number }, minScale: number): Promise<void> {
+  await page.mouse.move(point.x, point.y)
+  for (let i = 0; i < 8 && (await stageState(page)).scale < minScale; i++) {
+    await page.mouse.wheel(0, -400)
+  }
+  expect((await stageState(page)).scale).toBeGreaterThanOrEqual(minScale)
+  // Off the canvas again: a cursor left resting on an object would hover it.
+  await page.mouse.move(0, 0)
+}
+
+/** A drawn label with room around it in the fitted view, and the page point of its corner. */
+async function labelWithRoom(page: Page, box: Box) {
+  const fitted = await stageState(page)
+  const target = fitted.labels.find((l) => {
+    const x = fitted.x + l.x * fitted.scale
+    const y = fitted.y + l.y * fitted.scale
+    return x > 90 && y > 90 && x < box.width - 150 && y < box.height - 150
+  })
+  expect(target, 'no label with room around it').toBeTruthy()
+  const corner = { x: box.x + fitted.x + target!.x * fitted.scale, y: box.y + fitted.y + target!.y * fitted.scale }
+  return { id: target!.id, corner, fittedScale: fitted.scale }
+}
+
+/** A point inside label `id`'s text box, wherever the label and the view are now. */
+async function pointOnLabel(page: Page, box: Box, id: number): Promise<{ x: number; y: number }> {
+  const s = await stageState(page)
+  const l = s.labels.find((x) => x.id === id)!
+  return {
+    x: box.x + s.x + l.x * s.scale + Math.min(8, (l.w * s.scale) / 2),
+    y: box.y + s.y + l.y * s.scale + Math.min(8, (l.h * s.scale) / 2),
+  }
 }
 
 const pageZoom = (page: Page) =>
@@ -150,35 +188,10 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
   }
 
   await withAnnotationsRestored(page, imageId, async () => {
-    // A label with room around it. At the fitted size a label is a few pixels tall, so the view
-    // is zoomed in about the label first, as an owner would; the wheel does it here because it
-    // keeps the point under the cursor in place, which makes the label easy to find afterwards.
-    const fitted = await stageState(page)
-    const target = fitted.labels.find((l) => {
-      const x = fitted.x + l.x * fitted.scale
-      const y = fitted.y + l.y * fitted.scale
-      return x > 90 && y > 90 && x < box.width - 150 && y < box.height - 150
-    })
-    expect(target, 'no label with room around it').toBeTruthy()
-    const id = target!.id
-    const corner = { x: box.x + fitted.x + target!.x * fitted.scale, y: box.y + fitted.y + target!.y * fitted.scale }
-    await page.mouse.move(corner.x, corner.y)
-    // As many notches as it takes: how far one wheel event zooms depends on the emulated device.
-    for (let i = 0; i < 8 && (await stageState(page)).scale < fitted.scale * 5; i++) {
-      await page.mouse.wheel(0, -400)
-    }
-    expect((await stageState(page)).scale).toBeGreaterThanOrEqual(fitted.scale * 5)
-    const zoomed = await stageState(page)
-    const scale = zoomed.scale
-    /** A point inside the label's text box, wherever the label and the view are now. */
-    const labelPoint = async () => {
-      const s = await stageState(page)
-      const l = s.labels.find((x) => x.id === id)!
-      return {
-        x: box.x + s.x + l.x * s.scale + Math.min(8, (l.w * s.scale) / 2),
-        y: box.y + s.y + l.y * s.scale + Math.min(8, (l.h * s.scale) / 2),
-      }
-    }
+    const { id, corner, fittedScale } = await labelWithRoom(page, box)
+    await zoomAbout(page, corner, fittedScale * 5)
+    const scale = (await stageState(page)).scale
+    const labelPoint = () => pointOnLabel(page, box, id)
     const drawn = async () => {
       const l = (await stageState(page)).labels.find((x) => x.id === id)!
       return [l.x, l.y]
@@ -317,5 +330,141 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
       await page.touchscreen.tap(bare.x, bare.y)
       await expect.poll(selected).toEqual([])
     }
+  })
+})
+
+test('touch: two taps toggle an object; fields are finger-sized; the mouse still works', async ({ page }) => {
+  const box = await openEditor(page)
+  const imageId = currentImageId(page)
+  const saveStatus = page.locator('.save-status')
+  const tooltip = page.locator('.editor-tooltip')
+  const undo = page.getByRole('button', { name: 'Undo', exact: true })
+  const fit = page.getByRole('button', { name: 'Fit' })
+  const labelCount = () => page.evaluate(() => window.__astrocaptionEditor!.labelCount)
+  const selected = () => page.evaluate(() => window.__astrocaptionEditor!.selectedIds())
+
+  await withAnnotationsRestored(page, imageId, async (doc) => {
+    // An object with no label showing, a small marker, and nothing else within reach of a
+    // fingertip: no other object's hit circle, and no label's text box (labels sit above the hit
+    // circles and would take the tap).
+    const fitted = await stageState(page)
+    // Three times the fitted size: enough to aim at one object, and the smallest markers
+    // (`marker_min_radius`) are still only a few pixels across on screen.
+    const zoom = fitted.scale * 3
+    const objects = await fetchObjects(page, imageId)
+    const enabled = new Set(doc.labels.filter((l) => l.enabled).map((l) => l.object_id))
+    const radius = (o: { radius: number }) => Math.max(o.radius, doc.style.marker_min_radius)
+    const reach = 60 / zoom
+    const object = objects.find((o) => {
+      if (enabled.has(o.id) || radius(o) * zoom >= 6) return false
+      const x = fitted.x + o.x * fitted.scale
+      const y = fitted.y + o.y * fitted.scale
+      if (!(x > 60 && y > 60 && x < box.width - 60 && y < box.height - 60)) return false
+      if (objects.some((p) => p.id !== o.id && Math.hypot(p.x - o.x, p.y - o.y) < radius(p) + reach)) return false
+      return !fitted.labels.some(
+        (l) => o.x > l.x - reach && o.x < l.x + l.w + reach && o.y > l.y - reach && o.y < l.y + l.h + reach,
+      )
+    })
+    expect(object, 'no isolated, disabled, small object in the fixture').toBeTruthy()
+    const { id } = object!
+    const centre = { x: box.x + fitted.x + object!.x * fitted.scale, y: box.y + fitted.y + object!.y * fitted.scale }
+    await zoomAbout(page, centre, zoom)
+    const storedEnabled = async () =>
+      (await fetchAnnotations(page, imageId)).labels.find((l) => l.object_id === id)?.enabled ?? false
+    const before = await labelCount()
+    // A tap beside the marker: inside the 16 px floor a compact editor gives every object's hit
+    // circle, outside what a mouse gets (the marker itself, or 8 px), halfway between the two.
+    const mouseReach = Math.max(radius(object!) * (await stageState(page)).scale, 8)
+    expect(mouseReach, 'the marker is too big on screen for the floor to matter').toBeLessThan(14)
+    const aside = (mouseReach + 16) / 2
+    const near = { x: centre.x - aside, y: centre.y }
+
+    // 1. The first tap only says what is there: the ring and the name, as hovering does.
+    await expect(tooltip).toBeHidden()
+    await page.touchscreen.tap(near.x, near.y)
+    await expect(tooltip).toBeVisible()
+    await expect(tooltip).not.toBeEmpty()
+    expect(await labelCount()).toBe(before)
+    await expect(saveStatus).toHaveText('Saved')
+    expect(await storedEnabled()).toBe(false)
+
+    // 2. The second tap on the same object switches its label on.
+    await page.touchscreen.tap(near.x, near.y)
+    await expect.poll(labelCount).toBe(before + 1)
+    await expect.poll(storedEnabled).toBe(true)
+
+    // 3. The hover stayed on it, so a third tap switches it off again. The new label was placed
+    //    beside the marker; tap on whichever side of the centre it is not.
+    const placed = (await stageState(page)).labels.find((l) => l.id === id)!
+    const s = await stageState(page)
+    const inLabel = (p: { x: number; y: number }) => {
+      const wx = (p.x - box.x - s.x) / s.scale
+      const wy = (p.y - box.y - s.y) / s.scale
+      const pad = 4 / s.scale
+      return wx > placed.x - pad && wx < placed.x + placed.w + pad && wy > placed.y - pad && wy < placed.y + placed.h + pad
+    }
+    const off = [
+      { x: centre.x - aside, y: centre.y },
+      { x: centre.x + aside, y: centre.y },
+      { x: centre.x, y: centre.y - aside },
+      { x: centre.x, y: centre.y + aside },
+    ].find((p) => !inLabel(p))
+    expect(off, 'the new label covers every side of its marker').toBeTruthy()
+    await page.touchscreen.tap(off!.x, off!.y)
+    await expect.poll(labelCount).toBe(before)
+    await expect.poll(storedEnabled).toBe(false)
+
+    // 4. A tap on bare canvas puts the name away.
+    await expect(tooltip).toBeVisible()
+    await fit.tap()
+    const bare = await emptyPoint(page, box)
+    await page.touchscreen.tap(bare.x, bare.y)
+    await expect(tooltip).toBeHidden()
+
+    // 5. No field on the editor screen is under 16 px with a coarse pointer: iOS zooms the whole
+    //    page when a smaller one takes the focus. The floating toolbar (a label selected) and the
+    //    side panel (open) are both on screen for the count.
+    const label = await labelWithRoom(page, box)
+    await zoomAbout(page, label.corner, label.fittedScale * 5)
+    const onLabel = await pointOnLabel(page, box, label.id)
+    await page.touchscreen.tap(onLabel.x, onLabel.y)
+    await expect.poll(selected).toEqual([label.id])
+    await expect(page.getByRole('toolbar', { name: 'Selected labels' }).getByRole('spinbutton', { name: 'Font size' })).toBeAttached()
+    await page.getByRole('button', { name: 'Expand panel' }).tap()
+    const fields = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('input, select, textarea'), (el) => ({
+        name: el.getAttribute('aria-label') ?? el.getAttribute('name') ?? el.tagName,
+        size: parseFloat(getComputedStyle(el).fontSize),
+      })),
+    )
+    expect(fields.length).toBeGreaterThan(3)
+    expect(fields.filter((f) => f.size < 16)).toEqual([])
+    await page.getByRole('button', { name: 'Collapse panel' }).tap()
+
+    // 6. A mouse on the same page after all that (a touch-screen laptop): the wheel still zooms
+    //    and a drag still moves a label, by the distance dragged and as one undo entry.
+    const at = await pointOnLabel(page, box, label.id)
+    const wheelFrom = (await stageState(page)).scale
+    await page.mouse.move(at.x, at.y)
+    await page.mouse.wheel(0, -200)
+    await expect.poll(async () => (await stageState(page)).scale).toBeGreaterThan(wheelFrom)
+    const from = await pointOnLabel(page, box, label.id)
+    const start = await stageState(page)
+    const home = start.labels.find((l) => l.id === label.id)!
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await page.mouse.move(from.x + 30, from.y + 20, { steps: 5 })
+    await page.mouse.up()
+    const moved = (await stageState(page)).labels.find((l) => l.id === label.id)!
+    expect(moved.x - home.x).toBeCloseTo(30 / start.scale, 0)
+    expect(moved.y - home.y).toBeCloseTo(20 / start.scale, 0)
+    // One entry: a single Undo puts it back (the toggles above left entries of their own).
+    await undo.tap()
+    await expect
+      .poll(async () => {
+        const l = (await stageState(page)).labels.find((x) => x.id === label.id)!
+        return [l.x, l.y]
+      })
+      .toEqual([home.x, home.y])
   })
 })

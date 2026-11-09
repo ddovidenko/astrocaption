@@ -7,6 +7,7 @@ import LabelTextEditor from './LabelTextEditor'
 import LabelToolbar from './LabelToolbar'
 import { LabelTextShape } from './LabelTextShape'
 import { TOUCH_SLACK, useCanvasGestures } from './canvasGestures'
+import { useCompactEditor } from './compact'
 import { getMeasurer, isEditable, tryToggleWithPlacement } from './editing'
 import { primaryName } from './names'
 import { PAD_FACTOR } from './placement'
@@ -362,6 +363,7 @@ export default function EditorCanvas() {
   const [sizeError, setSizeError] = useState<string | null>(null)
   const gestures = useCanvasGestures(stageRef)
   const { moved } = gestures
+  const compact = useCompactEditor()
 
   // 1. The viewport: one ResizeObserver, and the first non-zero size fits the image.
   useEffect(() => {
@@ -579,6 +581,7 @@ export default function EditorCanvas() {
   // the objects, the marker sizes or the zoom (the 8 px floor is in screen pixels) change — not on
   // every pan. They sit on their own layer *below* the labels, so a label drawn inside a big
   // marker (M 42 swallows the Trapezium stars) is still the thing a click on it hits.
+  // A compact editor doubles the floor: a fingertip needs a bigger target than a cursor does.
   const hitCircles = useMemo(
     () =>
       objectOrder.map((id) => {
@@ -591,10 +594,19 @@ export default function EditorCanvas() {
             key={id}
             x={obj.x}
             y={obj.y}
-            radius={Math.max(markerRadius(obj, style), 8 / view.scale)}
+            radius={Math.max(markerRadius(obj, style), (compact ? 16 : 8) / view.scale)}
             fill="transparent"
             onMouseEnter={() => hover(id)}
             onMouseLeave={() => hover(null)}
+            // A finger cannot hover, so a tap does it in two steps (SPEC § 6.5): the first shows
+            // the ring and the name, the second on the same object toggles it. The hover stays,
+            // so a third tap toggles back; a tap anywhere else clears it. A single stray tap
+            // therefore never makes a label appear or vanish.
+            onTap={() => {
+              if (moved()) return
+              if (useEditor.getState().hoveredId !== id) hover(id)
+              else tryToggleWithPlacement(id, setToggleError)
+            }}
             // Left button only, and not after a pan or a label drag that happened to end over
             // this marker: the click Konva fires then is not a toggle. `tryToggleWithPlacement` catches a
             // placer that throws (a stale font) and says so, rather than a dead click.
@@ -604,7 +616,7 @@ export default function EditorCanvas() {
           />
         )
       }),
-    [objectOrder, objects, style, view.scale, hover, moved],
+    [objectOrder, objects, style, view.scale, hover, moved, compact],
   )
 
   // While a solve runs the toggle above no-ops; the cursor over a marker says so (#76). An effect,

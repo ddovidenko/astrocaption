@@ -180,6 +180,11 @@ body:has(> #root > main.editor-main) { height: 100vh; height: 100dvh; }
    still allow the pinch. On `body`, not `main`, because the site header sits outside `main`.
    overscroll-behavior: a pan that reaches the edge must not rubber-band the page. */
 body:has(> #root > main.editor-main) { touch-action: pan-x pan-y; overscroll-behavior: none; }
+/* iOS Safari zooms the whole page when a field under 16 px takes the focus, and leaves it zoomed:
+   that is how the label toolbar (0.8rem fields) came to fill an iPhone's screen (#57). */
+@media (pointer: coarse) {
+  body:has(> #root > main.editor-main) :is(input, select, textarea) { font-size: max(16px, 1em); }
+}
 .editor-body { display: grid; grid-template-columns: 1fr 320px; flex: 1; min-height: 0; }
 .editor-body.collapsed { grid-template-columns: 1fr 32px; }
 .editor-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
