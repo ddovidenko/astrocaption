@@ -108,7 +108,11 @@ export default function ColorField({
   // The document listeners are wired once per open, not once per render; as effect events they
   // still call this render's `closePicker`, so a drag that just changed the draft is what gets
   // committed, not whatever `onCommit` closed over when the picker opened.
-  const away = useEffectEvent((e: MouseEvent) => {
+  // A touch counts as well as a press: the editor canvas cancels its touchstarts (Konva, and the
+  // gesture layer for bare sky), so no compatibility mousedown ever follows a finger there and the
+  // picker would stay open over a selection that has moved on (SPEC § 6.5). Where one does follow,
+  // `closePicker`'s guard has already spent the close.
+  const away = useEffectEvent((e: MouseEvent | TouchEvent) => {
     if (wrap.current && !wrap.current.contains(e.target as Node)) closePicker(false)
   })
   const key = useEffectEvent((e: KeyboardEvent) => {
@@ -122,9 +126,11 @@ export default function ColorField({
   useEffect(() => {
     if (!open) return
     document.addEventListener('mousedown', away)
+    document.addEventListener('touchstart', away)
     document.addEventListener('keydown', key)
     return () => {
       document.removeEventListener('mousedown', away)
+      document.removeEventListener('touchstart', away)
       document.removeEventListener('keydown', key)
     }
   }, [open])

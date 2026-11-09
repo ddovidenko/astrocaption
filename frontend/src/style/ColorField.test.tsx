@@ -70,6 +70,32 @@ describe('ColorField commits exactly once per close', () => {
     expect(f.dialog()).toBeNull()
     expect(f.onCommit).toHaveBeenCalledTimes(1)
   })
+  // A finger on the editor canvas never becomes a mousedown: Konva cancels the touchstart there,
+  // so the browser sends no compatibility mouse events (SPEC § 6.5).
+  it('a touch away', () => {
+    const f = mount()
+    f.open()
+    fireEvent.touchStart(document.body)
+    expect(f.dialog()).toBeNull()
+    expect(f.onCommit).toHaveBeenCalledTimes(1)
+  })
+  it('a touch away followed by its compatibility mousedown', () => {
+    const f = mount()
+    f.open()
+    act(() => {
+      fireEvent.touchStart(document.body)
+      fireEvent.mouseDown(document.body)
+    })
+    expect(f.dialog()).toBeNull()
+    expect(f.onCommit).toHaveBeenCalledTimes(1)
+  })
+  it('a touch inside the picker leaves it open', () => {
+    const f = mount()
+    f.open()
+    fireEvent.touchStart(screen.getByRole('dialog').querySelector('.react-colorful__interactive')!)
+    expect(f.dialog()).not.toBeNull()
+    expect(f.onCommit).not.toHaveBeenCalled()
+  })
   it('the swatch toggled shut', () => {
     const f = mount()
     f.open()
