@@ -6,7 +6,7 @@ import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
 import LabelTextEditor from './LabelTextEditor'
 import LabelToolbar from './LabelToolbar'
 import { LabelTextShape } from './LabelTextShape'
-import { TOUCH_SLACK, useCanvasGestures } from './canvasGestures'
+import { useCanvasGestures } from './canvasGestures'
 import { useCompactEditor } from './compact'
 import { getMeasurer, isEditable, tryToggleWithPlacement } from './editing'
 import { primaryName } from './names'
@@ -157,7 +157,6 @@ interface EntryProps {
   /** The touch half of the gesture layer (SPEC § 6.5): see `CanvasGestures.label`. */
   onTouchPress: (id: number) => void
   onTap: (id: number) => void
-  blocksDrag: (e: Konva.KonvaEventObject<DragEvent>, id: number) => boolean
   moveLabel: (id: number, x: number, y: number, commit?: boolean) => void
   /** Whether Space is held: a pan gesture, which wins over selecting or dragging a label. Held in
    *  React state so `draggable` can turn off before Konva sees the press. */
@@ -179,15 +178,11 @@ const LabelEntry = memo(function LabelEntry({
   onDoubleClick,
   onTouchPress,
   onTap,
-  blocksDrag,
   moveLabel,
   spacePan,
   onDrawError,
 }: EntryProps) {
   const ring = markerStroke(obj, style)
-  // A drag the gesture layer refused (a finger on a label that is not selected): Konva still
-  // fires its dragend, which must not commit a move, pin the label or add an undo entry.
-  const refusedDrag = useRef(false)
   return (
     <Group>
       {/* Not the stored radius: the stroke sits half a marker width inside it so Konva's
@@ -224,16 +219,11 @@ const LabelEntry = memo(function LabelEntry({
           // Left button only: the middle button pans, and the right button opens the context
           // menu, whose swallowed mouseup would leave the label pressed for the wheel to resize.
           if (spacePan || e.evt.button !== 0) return
-          // Back to the mouse's own slack, after a finger may have widened it below.
-          e.currentTarget.dragDistance(Konva.dragDistance)
           onPress(label.object_id, e.evt.shiftKey)
         }}
-        onTouchStart={(e) => {
-          // A finger wobbles more than a mouse: a drag that began after 3 px would turn every
-          // other tap on a selected label into a move (and a pin, and an undo entry).
-          e.currentTarget.dragDistance(TOUCH_SLACK)
-          onTouchPress(label.object_id)
-        }}
+        // Touch (SPEC § 6.5): whether a finger may drag this label at all is the gesture layer's
+        // call, made through the stage's drag distance; the drag handlers below are the mouse's.
+        onTouchStart={() => onTouchPress(label.object_id)}
         onTap={() => onTap(label.object_id)}
         onClick={(e) => {
           if (e.evt.button === 0 && !spacePan) onClick(label.object_id, e.evt.shiftKey)
@@ -243,25 +233,13 @@ const LabelEntry = memo(function LabelEntry({
           // text editor to open, and the store would refuse the commit anyway.
           if (editable && e.evt.button === 0 && !spacePan) onDoubleClick(label.object_id)
         }}
-        onDragStart={(e) => {
-          if (blocksDrag(e, label.object_id)) {
-            // Konva allows stopping inside dragstart and then never moves the node. The flag
-            // goes up first: stopDrag fires dragend before it returns.
-            refusedDrag.current = true
-            e.target.stopDrag()
-            return
-          }
+        onDragStart={() => {
           // A drag begun without a press we saw (a synthetic one) still selects the label.
           const s = useEditor.getState()
           if (!s.selectedIds.has(label.object_id)) s.select(label.object_id)
         }}
-        onDragMove={(e) => {
-          if (!refusedDrag.current) moveLabel(label.object_id, e.target.x(), e.target.y(), false)
-        }}
-        onDragEnd={(e) => {
-          if (refusedDrag.current) refusedDrag.current = false
-          else moveLabel(label.object_id, e.target.x(), e.target.y())
-        }}
+        onDragMove={(e) => moveLabel(label.object_id, e.target.x(), e.target.y(), false)}
+        onDragEnd={(e) => moveLabel(label.object_id, e.target.x(), e.target.y())}
       >
         <LabelTextShape
           // A new font is a fresh attempt: remounting drops the shape's "already failed" flag, so
@@ -712,7 +690,6 @@ export default function EditorCanvas() {
               onDoubleClick={onLabelDoubleClick}
               onTouchPress={gestures.label.onTouchPress}
               onTap={gestures.label.onTap}
-              blocksDrag={gestures.label.blocksDrag}
               moveLabel={moveLabel}
               spacePan={gestures.spacePan}
               onDrawError={onDrawError}

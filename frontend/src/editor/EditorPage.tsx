@@ -6,6 +6,7 @@ import EditorCanvas from './EditorCanvas'
 import { isEditable } from './editing'
 import { loadEditor } from './load'
 import SidePanel from './SidePanel'
+import { PHONE_WIDTH_QUERY } from './compact'
 import { hasLivePreview, useEditor } from './store'
 
 /** A save that needs the owner: the message and its one way out. `onMouseDown` keeps the canvas
@@ -65,7 +66,7 @@ export default function EditorPage() {
   // Open beside the canvas on a desktop; closed on a phone, where it would cover most of the
   // image (#169). jsdom has no matchMedia, hence the guard.
   const [panelOpen, setPanelOpen] = useState(
-    () => typeof window.matchMedia !== 'function' || !window.matchMedia('(max-width: 640px)').matches
+    () => typeof window.matchMedia !== 'function' || !window.matchMedia(PHONE_WIDTH_QUERY).matches
   )
 
   useEffect(() => {

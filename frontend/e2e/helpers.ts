@@ -260,8 +260,9 @@ export interface TouchDriver {
   end(lifted?: TouchPoint[]): Promise<void>
   /** The browser takes the gesture away (an incoming call, a system gesture). */
   cancel(): Promise<void>
-  /** One finger down at `from`, moved in `steps` straight to `to`, and lifted. */
-  drag(from: TouchPoint, to: TouchPoint, steps?: number): Promise<void>
+  /** One finger down at the first point, moved through the others in turn, and lifted. Give it
+   *  at least two moves when the photo should pan: the first uses up the 10 px of tap slack. */
+  path(points: TouchPoint[]): Promise<void>
   /** Two fingers `fromDist` apart either side of `center`, moved in `steps` until they are
    *  `toDist` apart either side of `center + shift`, and lifted. */
   pinch(
@@ -284,12 +285,10 @@ export async function touchDriver(page: Page): Promise<TouchDriver> {
     move: async (points) => void (await send('touchMove', points)),
     end: async (lifted = []) => void (await send('touchEnd', lifted)),
     cancel: async () => void (await send('touchCancel', [])),
-    drag: async (from, to, steps = 5) => {
-      await driver.start([from])
-      for (let i = 1; i <= steps; i++) {
-        const t = i / steps
-        await driver.move([{ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }])
-      }
+    path: async ([first, ...rest]) => {
+      if (!first) return
+      await driver.start([first])
+      for (const point of rest) await driver.move([point])
       await driver.end()
     },
     pinch: async (center, fromDist, toDist, { steps = 5, shift = { x: 0, y: 0 } } = {}) => {

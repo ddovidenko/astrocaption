@@ -87,6 +87,15 @@ async function pointOnLabel(page: Page, box: Box, id: number): Promise<{ x: numb
   }
 }
 
+/** Somewhere off the canvas that is not a control, for a thumb to rest on: the image title in
+ *  the top bar. Finger 0, so a finger that joins it on the canvas must carry another id. */
+async function restingPoint(page: Page) {
+  const title = (await page.locator('.editor-toolbar strong').boundingBox())!
+  return { x: title.x + title.width / 2, y: title.y + title.height / 2, id: 0 }
+}
+
+const selectedIds = (page: Page) => page.evaluate(() => window.__astrocaptionEditor!.selectedIds())
+
 const pageZoom = (page: Page) =>
   page.evaluate(() => ({ scale: window.visualViewport!.scale, scrollX: window.scrollX, scrollY: window.scrollY }))
 const UNZOOMED = { scale: 1, scrollX: 0, scrollY: 0 }
@@ -126,10 +135,7 @@ test('touch: pinch and pan move the photo, never the page', async ({ page }) => 
   await fit.tap()
   const empty = await emptyPoint(page, box)
   const panFrom = await stageState(page)
-  await touch.start([empty])
-  await touch.move([{ x: empty.x - 15, y: empty.y }])
-  await touch.move([{ x: empty.x - 45, y: empty.y - 20 }])
-  await touch.end()
+  await touch.path([empty, { x: empty.x - 15, y: empty.y }, { x: empty.x - 45, y: empty.y - 20 }])
   const panned = await stageState(page)
   expect(panned.x - panFrom.x).toBeCloseTo(-30, 0)
   expect(panned.y - panFrom.y).toBeCloseTo(-20, 0)
@@ -160,7 +166,7 @@ test('touch: pinch and pan move the photo, never the page', async ({ page }) => 
   await touch.end()
   const afterLift = await stageState(page)
   expect([afterLift.x, afterLift.y, afterLift.scale]).toEqual([afterSpread.x, afterSpread.y, afterSpread.scale])
-  expect(await page.evaluate(() => window.__astrocaptionEditor!.selectedIds())).toEqual([])
+  expect(await selectedIds(page)).toEqual([])
 
   // 5. The browser takes a gesture away mid-pan (an incoming call): the next one starts clean.
   await fit.tap()
@@ -169,10 +175,7 @@ test('touch: pinch and pan move the photo, never the page', async ({ page }) => 
   await touch.move([{ x: again.x + 30, y: again.y }])
   await touch.cancel()
   const atCancel = await stageState(page)
-  await touch.start([again])
-  await touch.move([{ x: again.x + 15, y: again.y }])
-  await touch.move([{ x: again.x + 35, y: again.y + 10 }])
-  await touch.end()
+  await touch.path([again, { x: again.x + 15, y: again.y }, { x: again.x + 35, y: again.y + 10 }])
   const afterCancel = await stageState(page)
   expect(afterCancel.x - atCancel.x).toBeCloseTo(20, 0)
   expect(afterCancel.y - atCancel.y).toBeCloseTo(10, 0)
@@ -181,8 +184,7 @@ test('touch: pinch and pan move the photo, never the page', async ({ page }) => 
 
   // 6. A finger resting off the canvas (a thumb on the top bar, holding the device) is not part
   //    of a gesture on the photo: the one finger on the canvas still pans, and nothing zooms.
-  const title = (await page.locator('.editor-toolbar strong').boundingBox())!
-  const rest = { x: title.x + title.width / 2, y: title.y + title.height / 2, id: 0 }
+  const rest = await restingPoint(page)
   const on = { ...(await emptyPoint(page, box)), id: 1 }
   const restFrom = await stageState(page)
   await touch.start([rest])
@@ -204,14 +206,12 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
   const saveStatus = page.locator('.save-status')
   const undo = page.getByRole('button', { name: 'Undo', exact: true })
   const toolbar = page.getByRole('toolbar', { name: 'Selected labels' })
-  const selected = () => page.evaluate(() => window.__astrocaptionEditor!.selectedIds())
+  const selected = () => selectedIds(page)
   const view = async () => {
     const s = await stageState(page)
     return [s.x, s.y, s.scale]
   }
-  // Somewhere off the canvas that is not a control: the image title in the top bar.
-  const title = (await page.locator('.editor-toolbar strong').boundingBox())!
-  const rest = { x: title.x + title.width / 2, y: title.y + title.height / 2, id: 0 }
+  const rest = await restingPoint(page)
 
   await withAnnotationsRestored(page, imageId, async () => {
     const { id, corner, fittedScale } = await labelWithRoom(page, box)
@@ -234,10 +234,7 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
     {
       const from = await labelPoint()
       const before = await stageState(page)
-      await touch.start([from])
-      await touch.move([{ x: from.x + 15, y: from.y + 10 }])
-      await touch.move([{ x: from.x + 75, y: from.y + 50 }])
-      await touch.end()
+      await touch.path([from, { x: from.x + 15, y: from.y + 10 }, { x: from.x + 75, y: from.y + 50 }])
       const after = await stageState(page)
       expect(after.x - before.x).toBeCloseTo(60, 0)
       expect(after.y - before.y).toBeCloseTo(40, 0)
@@ -276,10 +273,7 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
     {
       const at = await labelPoint()
       const before = await view()
-      await touch.start([at])
-      await touch.move([{ x: at.x + 15, y: at.y + 10 }])
-      await touch.move([{ x: at.x + 50, y: at.y + 30 }])
-      await touch.end()
+      await touch.path([at, { x: at.x + 15, y: at.y + 10 }, { x: at.x + 50, y: at.y + 30 }])
       expect(await view()).toEqual(before)
       const moved = await drawn()
       expect(moved[0]! - home[0]!).toBeCloseTo(50 / scale, 0)
@@ -436,7 +430,7 @@ test('touch: two taps toggle an object; fields are finger-sized; the mouse still
   const undo = page.getByRole('button', { name: 'Undo', exact: true })
   const fit = page.getByRole('button', { name: 'Fit' })
   const labelCount = () => page.evaluate(() => window.__astrocaptionEditor!.labelCount)
-  const selected = () => page.evaluate(() => window.__astrocaptionEditor!.selectedIds())
+  const selected = () => selectedIds(page)
 
   await withAnnotationsRestored(page, imageId, async (doc) => {
     // An object with a small marker and nothing else within reach of a fingertip: no other
