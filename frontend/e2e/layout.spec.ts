@@ -40,6 +40,28 @@ test('a long unbroken title never widens the page', async ({ page, browser }) =>
     await expect(page.locator('#root > header')).toBeVisible()
     await expect(page.getByRole('button', { name: '100 %' })).toBeVisible()
     await expect(page.locator('.editor-toolbar .zoom-readout')).toBeVisible()
+    // The toolbar is one row, and only the title gives way when it is short of room: a window
+    // that is narrow but not a phone's, a long title, and the save state at its longest. Nothing
+    // else may be squeezed (a squeezed "100 %" drops its % sign to a second line), and nothing may
+    // move when the state changes from "Saved" to "Unsaved changes" and back.
+    await page.setViewportSize({ width: 900, height: 800 })
+    const height = async (selector: string) => (await page.locator(selector).boundingBox())!.height
+    const fit = page.getByRole('button', { name: 'Fit' })
+    const actual = page.getByRole('button', { name: '100 %' })
+    const status = page.locator('.editor-toolbar .save-status')
+    await expect(status).toHaveText('Saved')
+    const fitBefore = (await fit.boundingBox())!
+    // Written into the page, not waited for: the real state lasts as long as the autosave debounce.
+    await status.evaluate((el) => (el.textContent = 'Unsaved changes'))
+    const fitAfter = (await fit.boundingBox())!
+    expect((await actual.boundingBox())!.height, '"100 %" wrapped').toBe(fitAfter.height)
+    expect(await height('.editor-toolbar .zoom-readout'), 'the zoom readout wrapped').toBeLessThan(24)
+    expect(await height('.editor-toolbar .save-status'), 'the save state wrapped').toBeLessThan(24)
+    expect(fitAfter.x, 'the buttons moved when the save state changed').toBe(fitBefore.x)
+    expect((await page.locator('.editor-toolbar').boundingBox())!.height).toBeLessThanOrEqual(60)
+    await expectNoHorizontalOverflow(page, 'editor, narrow desktop window')
+    await status.evaluate((el) => (el.textContent = 'Saved'))
+    await page.setViewportSize({ width: 1280, height: 720 })
     await page.getByRole('link', { name: '← Images' }).click()
 
     const cardAgain = page.locator('article.card', { hasText: LONG })
@@ -130,6 +152,15 @@ test.describe('phone width', () => {
       // The title still shows, cut short, and names the image.
       await expect(page.locator('.editor-toolbar strong')).toBeInViewport({ ratio: 1 })
       expect((await page.locator('.editor-toolbar strong').boundingBox())!.width).toBeGreaterThan(40)
+      // The save state at its longest moves no control (they are under a finger) and adds no row.
+      const before = await Promise.all(controls.map(async (c) => (await c.boundingBox())!.x))
+      const status = page.locator('.editor-toolbar .save-status')
+      await status.evaluate((el) => (el.textContent = 'Unsaved changes'))
+      expect(await Promise.all(controls.map(async (c) => (await c.boundingBox())!.x))).toEqual(before)
+      expect((await page.locator('.editor-toolbar').boundingBox())!.height).toBeLessThanOrEqual(60)
+      await expect(status).toBeInViewport({ ratio: 1 })
+      await expectNoHorizontalOverflow(page, 'editor, unsaved')
+      await status.evaluate((el) => (el.textContent = 'Saved'))
 
       const visitor = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })
       const pub = await visitor.newPage()

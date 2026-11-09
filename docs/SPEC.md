@@ -415,8 +415,9 @@ because iOS Safari zooms the page when a smaller one takes the focus. Other page
 in a window up to 640 px wide. It affects sizes and layout only, never which gesture rules apply.
 It doubles the hit target around an object from 8 to 16 screen px, and it gives the image the
 height of the screen: the site header is put away on the editor screen (the back arrow leads to the
-images page, which has it), and the toolbar is one row of finger-sized controls (back, the title
-cut short, Fit, undo, redo, the save state). 100 % and the zoom readout are not shown there; a
+images page, which has it), and the toolbar is one row of finger-sized controls (back, Fit, undo,
+redo, then the title cut short and the save state, in that order so that a save state changing
+length never moves a control). 100 % and the zoom readout are not shown there; a
 pinch does that job. A save problem, which is a sentence and a button, takes a second row while it
 shows. At 390 px this moves the top of the image area from 330 px down the screen to about 55.
 The label toolbar is still the floating strip of § 6.2 there, wider than a phone's screen; a docked

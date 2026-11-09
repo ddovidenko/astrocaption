@@ -148,13 +148,20 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
 /* Editor (milestone 3 PR 4): the canvas takes the whole viewport below the header. */
 .editor-main { max-width: none; margin: 0; padding: 0; gap: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .editor-toolbar { display: flex; gap: 1rem; align-items: center; padding: 0.5rem 1rem; border-bottom: 1px solid var(--border); }
-.editor-toolbar a { text-decoration: none; white-space: nowrap; }
-/* One line in the toolbar: a long title is cut with an ellipsis so the zoom controls stay put. */
-.editor-toolbar strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-toolbar a { text-decoration: none; }
+/* One line in the toolbar, and only the title gives way when it is short of room: it is cut with
+   an ellipsis. Left to shrink, every item gives up a little width, and "100 %", the zoom readout
+   and "Unsaved changes" each break at their space (a long title in a window narrower than the
+   title is enough). */
+.editor-toolbar > * { flex: none; white-space: nowrap; }
+.editor-toolbar strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .editor-main > .notice { margin: 0.75rem 1rem 0; }
 .editor-main > .error, .editor-main > .meta { padding: 1.5rem; }
-.save-status { margin-left: auto; display: flex; gap: 0.5rem; align-items: center; color: var(--muted); font-size: 0.9rem; }
-.save-status.error { color: var(--danger); }
+/* min-width: room for the longest passing state ("Unsaved changes"), so the title and the buttons
+   beside it do not shift each time an edit turns "Saved" into it and back. A save problem is a
+   sentence and a button: that one may wrap, and gives way like the title does. */
+.save-status { margin-left: auto; display: flex; gap: 0.5rem; align-items: center; justify-content: flex-end; min-width: 9em; color: var(--muted); font-size: 0.9rem; }
+.save-status.error { flex: 0 1 auto; min-width: 0; white-space: normal; color: var(--danger); }
 .editor-toolbar .on-compact { display: none; }
 /* A compact editor (SPEC § 6.5, #57): a touch-first device, or a window as narrow as a phone; the
    same test as `useCompactEditor`. The photo needs the height, and at 390 px the site header and
@@ -165,15 +172,18 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
 @media (pointer: coarse), (max-width: 640px) {
   body:has(> #root > main.editor-main) > #root > header { display: none; }
   /* wrap: only a save problem (a sentence and a button) ever takes a second row. Everything else
-     fits one, because the title gives way: it starts from nothing and takes what is left. */
+     fits one, because the title gives way: it starts from nothing and takes what is left. The
+     title and the save state come last, so that a state that changes length ("Saved", "Unsaved
+     changes") only moves where the title is cut, never a button under a finger; a phone has no
+     width to reserve for the longest state, as the desktop row does. */
   .editor-toolbar { flex-wrap: wrap; gap: 0.25rem 0.4rem; padding: 0.25rem 0.5rem; }
-  .editor-toolbar strong { flex: 1 1 0; }
+  .editor-toolbar strong { flex: 1 1 0; order: 1; }
   .editor-toolbar .zoom-readout, .editor-toolbar .zoom-actual { display: none; }
   .editor-toolbar a, .editor-toolbar > button { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding: 0 0.6rem; }
   .editor-toolbar .on-wide { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .editor-toolbar .on-compact { display: inline; font-size: 1.25rem; line-height: 1; }
-  .save-status { font-size: 0.85rem; white-space: nowrap; }
-  .save-status.error { flex-basis: 100%; white-space: normal; padding-bottom: 0.25rem; }
+  .save-status { order: 2; min-width: 0; font-size: 0.85rem; }
+  .save-status.error { flex-basis: 100%; padding-bottom: 0.25rem; }
 }
 .save-status button { padding: 0.2rem 0.6rem; font-size: 0.85rem; }
 /* touch-action: every finger on the photo is the editor's (pinch-zoom, pan, drag: SPEC § 6.5);
