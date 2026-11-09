@@ -47,7 +47,8 @@ export interface LabelControls {
   }
   aliases: { value: string; onChange(value: string): void }
   leader: { value: string; onChange(value: string): void }
-  pin: { label: string; pressed: boolean; toggle(): void }
+  /** `mixed`: some of the selection is pinned and some is not (`pressed` is then false). */
+  pin: { label: string; pressed: boolean; mixed: boolean; toggle(): void }
   /** Places the selection again with the placer and unpins it. The placer measures text, so it
    *  can throw; then nothing was moved and `onError` is told. */
   resetPosition(): void
@@ -249,7 +250,12 @@ export function useLabelControls(onError?: (message: string) => void): LabelCont
       onChange: (v) => update(ids, { show_aliases: v === 'inherit' ? null : v === 'on' }),
     },
     leader: { value: leader, onChange: (v) => update(ids, { leader: v as LeaderMode }) },
-    pin: { label: pinLabel, pressed: pinned === true, toggle: () => update(ids, { pinned: pinned !== true }) },
+    pin: {
+      label: pinLabel,
+      pressed: pinned === true,
+      mixed: pinned === MIXED,
+      toggle: () => update(ids, { pinned: pinned !== true }),
+    },
     resetPosition: () => {
       try {
         resetPositions(ids)
