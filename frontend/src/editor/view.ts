@@ -28,6 +28,31 @@ export function zoomAt(view: View, cx: number, cy: number, factor: number, min =
   return { scale, x: cx - (cx - view.x) * k, y: cy - (cy - view.y) * k }
 }
 
+/** A point in stage-container pixels. */
+export interface ScreenPoint {
+  x: number
+  y: number
+}
+
+/** One frame of a two-finger gesture (SPEC § 6.5): `prevMid`/`prevDist` are the midpoint of the
+ *  two touches and the distance between them on the previous frame, `mid`/`dist` now. The world
+ *  point that was under the old midpoint ends up under the new one, and the scale follows the
+ *  spread of the fingers, clamped like `zoomAt`. Two fingers on one spot (a zero distance) say
+ *  nothing about scale, so the view comes back untouched rather than as NaN. */
+export function pinchView(
+  view: View,
+  prevMid: ScreenPoint,
+  prevDist: number,
+  mid: ScreenPoint,
+  dist: number,
+  min = MIN_SCALE,
+  max = MAX_SCALE,
+): View {
+  if (!(prevDist > 0) || !(dist > 0) || !Number.isFinite(dist / prevDist)) return view
+  const zoomed = zoomAt(view, prevMid.x, prevMid.y, dist / prevDist, min, max)
+  return { scale: zoomed.scale, x: zoomed.x + (mid.x - prevMid.x), y: zoomed.y + (mid.y - prevMid.y) }
+}
+
 export function toWorld(view: View, sx: number, sy: number): { x: number; y: number } {
   return { x: (sx - view.x) / view.scale, y: (sy - view.y) / view.scale }
 }
