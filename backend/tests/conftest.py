@@ -166,7 +166,7 @@ def upload(client: TestClient, path: Path, title: str | None = None) -> dict[str
     return body
 
 
-def list_ids(client: TestClient, path: str, **params: object) -> list[str]:
+def list_ids(client: TestClient, path: str, **params: str) -> list[str]:
     """The ids of one page of a list endpoint, asserting the page shape (SPEC § 8)."""
     resp = client.get(path, params=params)
     assert resp.status_code == 200, resp.text
