@@ -34,6 +34,9 @@ export interface LabelControls {
   /** Spread onto the size `<input>`: the draft it shows, its bounds and every handler (typing,
    *  Enter and blur to commit, the arrows as held previews, undo and redo handed to the editor). */
   sizeField: InputHTMLAttributes<HTMLInputElement>
+  /** Commits what is typed in the size field, as leaving the field does: for a layout whose
+   *  buttons refuse the focus and so never make it leave. */
+  commitSize(): void
   /** − / +: one commit for the selection, each label from its own effective size. */
   step(delta: number): void
   /** Spread onto `<ColorField label="Text colour" />`. */
@@ -170,8 +173,14 @@ export function useLabelControls(onError?: (message: string) => void): LabelCont
   }
   const commitPreview = () => useEditor.getState().commitPreview()
 
+  const commitTyped = () => {
+    commitPreview()
+    commitSize()
+  }
+
   return {
     ids,
+    commitSize: commitTyped,
     sizeField: {
       type: 'number',
       'aria-label': 'Font size',
@@ -187,10 +196,7 @@ export function useLabelControls(onError?: (message: string) => void): LabelCont
         if (e.target.validity.badInput) return
         setTyped(e.target.value)
       },
-      onBlur: () => {
-        commitPreview()
-        commitSize()
-      },
+      onBlur: commitTyped,
       onKeyDown: (e) => {
         // Undo/redo: the editor's shortcuts leave keys to a focused toolbar field, and after arrow
         // steps the focus is still here, so the field hands them to the editor's history itself —

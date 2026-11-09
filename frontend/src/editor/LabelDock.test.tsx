@@ -88,6 +88,19 @@ describe('LabelDock bar', () => {
     expect(dock()).toBeNull()
   })
 
+  it('Hide keeps a name and a size that were still being typed', () => {
+    render(<LabelDock box={box} />)
+    fireEvent.change(screen.getByLabelText('Font size'), { target: { value: '30' } })
+    openSheet()
+    fireEvent.change(rename(), { target: { value: 'Great Nebula' } })
+    // Hide refuses the focus, so neither field ever blurs.
+    fireEvent.click(screen.getByRole('button', { name: 'Hide' }))
+    expect(label(1)).toMatchObject({ enabled: false, text_override: 'Great Nebula', font_size: 30 })
+    // The hiding is the last change: one Undo brings the label back as it was left.
+    act(() => state().undoLast())
+    expect(label(1)).toMatchObject({ enabled: true, text_override: 'Great Nebula', font_size: 30 })
+  })
+
   it('Hide takes every selected label at once', () => {
     state().toggleSelect(2)
     render(<LabelDock box={box} />)
@@ -126,6 +139,18 @@ describe('LabelDock sheet', () => {
     window.removeEventListener('keydown', seen)
     expect(sheet()).toBeNull()
     expect(seen).not.toHaveBeenCalled() // the canvas's own Escape would clear the selection
+    expect([...state().selectedIds]).toEqual([1])
+  })
+
+  it('Escape closes it wherever the focus is', () => {
+    render(<LabelDock box={box} />)
+    openSheet() // More refuses the focus, so it is still on the body
+    const seen = vi.fn()
+    window.addEventListener('keydown', seen)
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    window.removeEventListener('keydown', seen)
+    expect(sheet()).toBeNull()
+    expect(seen).not.toHaveBeenCalled()
     expect([...state().selectedIds]).toEqual([1])
   })
 
@@ -194,20 +219,15 @@ describe('LabelDock sheet', () => {
     render(<LabelDock box={box} />)
     openSheet()
     fireEvent.change(rename(), { target: { value: 'Great Nebula' } })
-    // The selection moves on with the draft still in the field (no blur reached it).
-    act(() => state().select(2))
-    expect(label(2).text_override).toBeNull()
-    expect(label(1).text_override).toBeNull()
-    openSheet()
-    expect(rename().value).toBe('Alnitak')
-    // With the blur a press on the photo sends first, the name lands on the label it was for.
-    act(() => state().select(1))
-    openSheet()
-    fireEvent.change(rename(), { target: { value: 'Great Nebula' } })
-    fireEvent.blur(rename())
+    // The selection moves on with the name still in the field and no blur to commit it: a mouse
+    // press on another label selects it before anything else hears of the press.
     act(() => state().select(2))
     expect(label(1).text_override).toBe('Great Nebula')
     expect(label(2).text_override).toBeNull()
+    expect(state().undo).toHaveLength(2)
+    expect(sheet()).toBeNull()
+    openSheet()
+    expect(rename().value).toBe('Alnitak')
   })
 
   it('several labels: no Rename, "mixed" where they differ', () => {
@@ -252,6 +272,17 @@ describe('LabelDock sheet', () => {
     expect(sheet()).toBeNull()
   })
 
+  it('Clear overrides drops a name that was being typed instead of storing it first', () => {
+    state().updateLabels([1], { font_size: 40 })
+    render(<LabelDock box={box} />)
+    openSheet()
+    fireEvent.change(rename(), { target: { value: 'Great Nebula' } })
+    const before = state().undo.length
+    fireEvent.click(screen.getByRole('button', { name: 'Clear overrides' }))
+    expect(label(1)).toMatchObject({ font_size: null, text_override: null })
+    expect(state().undo).toHaveLength(before + 1)
+  })
+
   it('a Reset position that throws reports it and changes nothing', () => {
     placer.throws = true
     const onError = vi.fn()
@@ -269,9 +300,13 @@ describe('LabelDock sheet', () => {
     render(<LabelDock box={box} />)
     openSheet()
     fireEvent.change(rename(), { target: { value: 'Great Nebula' } })
+    const before = state().undo.length
     act(() => disableAll([1]))
     expect(dock()).toBeNull()
+    // The label is gone (an undo could have taken it): a name typed for it is not stored on the
+    // way out, which would also be a new change on top of that undo and cost the redo.
     expect(state().labels.get(1)?.text_override).toBeNull()
+    expect(state().undo).toHaveLength(before + 1)
 
     act(() => {
       state().undoLast()
@@ -289,13 +324,39 @@ describe('LabelDock sheet', () => {
 })
 
 describe('LabelDock keeps the selection in view', () => {
-  /** jsdom measures everything as 0 × 0: the sheet is given a height by hand. */
-  function sheetHeight(height: number) {
+  /** jsdom measures everything as 0 × 0: the sheet and the dock are given heights by hand. */
+  function sheetHeight(height: number, dockHeight = 0) {
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-      const h = this.classList.contains('label-sheet') ? height : 0
+      const h = this.classList.contains('label-sheet') ? height : this.classList.contains('label-dock') ? dockHeight : 0
       return { x: 0, y: 0, left: 0, top: 0, right: 0, bottom: h, width: 0, height: h, toJSON: () => ({}) } as DOMRect
     })
   }
+
+  it('appearing takes the bottom of the canvas: a label selected down there is moved up into view', () => {
+    sheetHeight(300, 60)
+    act(() => state().setView({ scale: 0.5, x: 0, y: 0 }))
+    // The canvas is 800 tall and is about to lose 60 to the dock; the box's bottom is at 780.
+    render(<LabelDock box={{ ...box, bottom: 1560 }} />)
+    expect(state().view).toEqual({ scale: 0.5, x: 0, y: -48 })
+  })
+
+  it('appearing leaves the view alone when the selection is clear of it', () => {
+    sheetHeight(300, 60)
+    act(() => state().setView({ scale: 0.5, x: 0, y: 0 }))
+    const before = state().view
+    render(<LabelDock box={{ ...box, bottom: 1400 }} />) // screen y 700, the dock starts at 740
+    expect(state().view).toBe(before)
+  })
+
+  it('a sheet taller than the canvas scrolls inside it and moves nothing', () => {
+    sheetHeight(900)
+    act(() => state().setView({ scale: 0.5, x: 0, y: 0 }))
+    const before = state().view
+    render(<LabelDock box={{ ...box, bottom: 1400 }} />)
+    openSheet()
+    expect(state().view).toBe(before) // there is no room left to show the label in
+    expect((sheet() as HTMLElement).style.maxHeight).toBe('792px')
+  })
 
   it('pans the photo up by just enough when the sheet would cover the selection', () => {
     sheetHeight(300)

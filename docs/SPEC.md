@@ -426,12 +426,15 @@ shows. At 390 px this moves the top of the image area from 330 px down the scree
 strip (it is wider than a phone, and floats where a finger is working) but a bar docked under the
 image, shown while at least one label is selected. It is the same set of controls: each applies
 to every selected label and is one undo entry. The canvas gets shorter when the bar appears, so
-no label is ever under it; the view is not refitted.
+no label is ever under it; the view is not refitted, but a label selected in the strip the bar
+takes is moved up by just enough to stay in view. With the side panel open at phone width the
+canvas pane is a sliver, and the bar is cut off with it, not drawn over the panel.
 
 - The bar, left to right: `−`, the size field, `+` (one joined control), the colour swatch, **Hide**,
-  **More**. Controls are 44 px tall with 16 px text, and the bar fits a 375 px phone on one row.
+  **More**. Controls are 44 px tall with 16 px text, and the bar just fits a 375 px phone on one row.
 - **Hide** switches the selected labels off, as `Delete` does (one change); the bar goes with the
-  selection, and Undo in the top bar brings the label back.
+  selection, and Undo in the top bar brings the label back. A size or a name still being typed is
+  stored first, so the label comes back as it was left.
 - The colour swatch opens the same picker as on the desktop, placed against the bar and upwards
   over the image. (A sheet replaces it in the last step of #57.)
 - **More** opens a sheet above the bar, over the bottom of the image, with the rest as full-width
@@ -442,9 +445,13 @@ no label is ever under it; the view is not refitted.
   text, a blank goes back to the catalogue name. (An inline field at the label's on-screen size
   would be under 16 px, and iOS would zoom the page.)
 - The sheet closes on a press on the image or anywhere else outside the bar, on More again, on
-  Escape, and when the selection changes. Reset position and Clear overrides act and close it.
-  Closing keeps a name that was still being typed, except on Escape and Clear overrides. It does
-  not drag and has no swipe to dismiss.
+  Escape (wherever the focus is; it does not also clear the selection), and when the selection
+  changes. Reset position and Clear overrides act and close it. Closing keeps a name that was
+  still being typed, stored on the label it was typed for, except on Escape and Clear overrides,
+  and except when that label is no longer there (an undo took it away, or a re-solve began). It
+  does not drag and has no swipe to dismiss.
+- The sheet is never taller than the canvas: on a short screen (a phone on its side) it scrolls,
+  and the view is then left where it is.
 - On a phone narrower than 375 px the bar's right edge may be cut off until the last step of #57.
 
 Pinned by `frontend/e2e/touch.spec.ts` (Chromium at 390 × 844 with touch input; two-finger input

@@ -404,9 +404,27 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
       await undo.tap()
       await expect.poll(drawn).toEqual(home)
       await expect(undo).toBeDisabled()
+      // The bar takes the bottom of the photo when it appears. A label selected down there is
+      // moved up into view, not left under the bar: pan it to 30 px above the canvas's lower
+      // edge, then tap it.
+      const canvas = page.locator('.editor-canvas')
+      const before = await stageState(page)
+      const l = before.labels.find((x) => x.id === id)!
+      const full = (await canvas.boundingBox())!
+      const down = full.y + full.height - 30 - (full.y + before.y + l.y * before.scale)
+      await touch.path([photo, { x: photo.x, y: photo.y + 15 }, { x: photo.x, y: photo.y + 15 + down }])
       const at = await labelPoint()
       await page.touchscreen.tap(at.x, at.y)
       await expect.poll(selected).toEqual([id])
+      await expect(page.locator('.label-dock')).toBeVisible()
+      await expect
+        .poll(async () => {
+          const s = await stageState(page)
+          const now = s.labels.find((x) => x.id === id)!
+          const shorter = (await canvas.boundingBox())!
+          return shorter.y + s.y + (now.y + now.h) * s.scale <= shorter.y + shorter.height
+        })
+        .toBe(true)
     }
 
     // 6d. More opens the sheet over the bottom of the photo, with the label still in view above
@@ -415,11 +433,20 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
     {
       const override = async () =>
         (await fetchAnnotations(page, imageId)).labels.find((x) => x.object_id === id)!.text_override
+      // The label sits just above the bar (6c left it there), so the sheet would cover it: the
+      // photo has to move for it to stay in view.
+      const viewBefore = await view()
       await toolbar.getByRole('button', { name: 'More' }).tap()
       await expect(sheet).toBeVisible()
+      expect(await view()).not.toEqual(viewBefore)
       const s = await stageState(page)
       const l = s.labels.find((x) => x.id === id)!
       expect(box.y + s.y + (l.y + l.h) * s.scale).toBeLessThanOrEqual((await sheet.boundingBox())!.y)
+      // No field in the sheet is under 16 px either (iOS would zoom the page on its focus).
+      const small = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('.label-dock input, .label-dock select'), (el) => parseFloat(getComputedStyle(el).fontSize)).filter((size) => size < 16),
+      )
+      expect(small).toEqual([])
       const field = sheet.getByRole('textbox', { name: 'Rename' })
       await field.fill('Touched')
       await field.press('Enter')
@@ -434,14 +461,34 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
       await expect(sheet).toBeHidden()
     }
 
-    // 6e. A tap on the photo closes the sheet. The bar fits a 375 px phone as well as this one.
+    // 6e. A tap on the photo closes the sheet, and keeps a name that was still being typed (no
+    //     Enter): the way a rename ends on a phone. The bar fits a 375 px phone as well as this one,
+    //     and with the side panel open it is cut off by the panel, not drawn over it.
     {
       await toolbar.getByRole('button', { name: 'More' }).tap()
       await expect(sheet).toBeVisible()
+      await sheet.getByRole('textbox', { name: 'Rename' }).fill('By tap')
       await page.touchscreen.tap(photo.x, photo.y)
       await expect(sheet).toBeHidden()
+      await expect
+        .poll(async () => (await fetchAnnotations(page, imageId)).labels.find((x) => x.object_id === id)!.text_override)
+        .toBe('By tap')
       const at = await labelPoint()
       await page.touchscreen.tap(at.x, at.y)
+      await expect.poll(selected).toEqual([id])
+      await page.getByRole('button', { name: 'Expand panel' }).tap()
+      // The open panel squeezes the pane to a sliver. Where the bar's Hide button would be drawn
+      // if the bar spilled out of it, a finger must find the panel.
+      const hide = (await toolbar.getByRole('button', { name: 'Hide' }).boundingBox())!
+      expect(hide.x, 'the pane is not narrower than the bar, so this proves nothing').toBeGreaterThan(
+        (await page.locator('.editor-pane').boundingBox())!.width,
+      )
+      const underFinger = await page.evaluate(
+        ([x, y]) => document.elementFromPoint(x!, y!)?.closest('.side-panel, .label-dock')?.className ?? null,
+        [hide.x + hide.width / 2, hide.y + hide.height / 2],
+      )
+      expect(underFinger, 'the docked bar is drawn over the open side panel').toContain('side-panel')
+      await page.getByRole('button', { name: 'Collapse panel' }).tap()
       await expect.poll(selected).toEqual([id])
       for (const width of [375, 390]) {
         await page.setViewportSize({ width, height: 844 })
