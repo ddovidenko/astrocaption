@@ -6,6 +6,7 @@ import {
   ensureSolvedImage,
   fetchAnnotations,
   fetchObjects,
+  putAnnotations,
   stageState,
   touchDriver,
   withAnnotationsRestored,
@@ -344,28 +345,39 @@ test('touch: two taps toggle an object; fields are finger-sized; the mouse still
   const selected = () => page.evaluate(() => window.__astrocaptionEditor!.selectedIds())
 
   await withAnnotationsRestored(page, imageId, async (doc) => {
-    // An object with no label showing, a small marker, and nothing else within reach of a
-    // fingertip: no other object's hit circle, and no label's text box (labels sit above the hit
-    // circles and would take the tap).
+    // An object with a small marker and nothing else within reach of a fingertip: no other
+    // object's hit circle, and no other label's text box (labels sit above the hit circles and
+    // would take the tap). Its own label is switched off first if it is on: the specs share one
+    // data dir, and which labels are enabled depends on what ran before.
     const fitted = await stageState(page)
     // Three times the fitted size: enough to aim at one object, and the smallest markers
     // (`marker_min_radius`) are still only a few pixels across on screen.
     const zoom = fitted.scale * 3
     const objects = await fetchObjects(page, imageId)
-    const enabled = new Set(doc.labels.filter((l) => l.enabled).map((l) => l.object_id))
     const radius = (o: { radius: number }) => Math.max(o.radius, doc.style.marker_min_radius)
     const reach = 60 / zoom
     const object = objects.find((o) => {
-      if (enabled.has(o.id) || radius(o) * zoom >= 6) return false
+      if (radius(o) * zoom >= 6) return false
       const x = fitted.x + o.x * fitted.scale
       const y = fitted.y + o.y * fitted.scale
       if (!(x > 60 && y > 60 && x < box.width - 60 && y < box.height - 60)) return false
       if (objects.some((p) => p.id !== o.id && Math.hypot(p.x - o.x, p.y - o.y) < radius(p) + reach)) return false
       return !fitted.labels.some(
-        (l) => o.x > l.x - reach && o.x < l.x + l.w + reach && o.y > l.y - reach && o.y < l.y + l.h + reach,
+        (l) =>
+          l.id !== o.id && o.x > l.x - reach && o.x < l.x + l.w + reach && o.y > l.y - reach && o.y < l.y + l.h + reach,
       )
     })
-    expect(object, 'no isolated, disabled, small object in the fixture').toBeTruthy()
+    expect(object, 'no isolated, small object in the fixture').toBeTruthy()
+    if (doc.labels.some((l) => l.object_id === object!.id && l.enabled)) {
+      await putAnnotations(page, imageId, {
+        style: doc.style,
+        labels: doc.labels.map((l) => (l.object_id === object!.id ? { ...l, enabled: false } : l)),
+        version: doc.version,
+      })
+      await page.reload()
+      await page.waitForFunction(() => window.__astrocaptionEditor?.labelPositions !== undefined)
+      await expect(saveStatus).toHaveText('Saved')
+    }
     const { id } = object!
     const centre = { x: box.x + fitted.x + object!.x * fitted.scale, y: box.y + fitted.y + object!.y * fitted.scale }
     await zoomAbout(page, centre, zoom)
