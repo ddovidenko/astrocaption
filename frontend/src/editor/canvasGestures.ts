@@ -13,9 +13,11 @@ import { pinchView, zoomAt, type ScreenPoint } from './view'
  *  to end by `gestures.spec.ts`, `labels.spec.ts` and `parity.spec.ts`.
  *
  *  Touch (SPEC § 6.5, #57) lives beside the mouse and is told apart per event, never per device:
- *  two fingers zoom and pan the photo together, one finger pans it. The mouse handlers never see
- *  a finger: every touchstart on the canvas is cancelled, so the browser sends no compatibility
- *  mouse events after it. Pinned by `touch.spec.ts`. */
+ *  two fingers zoom and pan the photo together, one finger pans it, a tap selects a label, and
+ *  only a label that is already selected moves under a finger (a drag on any other one pans, so
+ *  moving around a zoomed-in photo cannot nudge a label). The mouse handlers never see a finger:
+ *  every touchstart on the canvas is cancelled, so the browser sends no compatibility mouse
+ *  events after it. Pinned by `touch.spec.ts`. */
 export interface CanvasGestures {
   /** Whether Space is held: a pan gesture, which wins over selecting or dragging a label. Held in
    *  React state so `draggable` can turn off before Konva sees the press. */
@@ -33,11 +35,21 @@ export interface CanvasGestures {
     onTouchMove: (e: Konva.KonvaEventObject<TouchEvent>) => void
     onTouchEnd: (e: Konva.KonvaEventObject<TouchEvent>) => void
     onTouchCancel: (e: Konva.KonvaEventObject<TouchEvent>) => void
+    onTap: (e: Konva.KonvaEventObject<TouchEvent>) => void
   }
   label: {
     onPress: (id: number, shift: boolean) => void
     /** A press that turned out to be a click, not a drag (the hook checks `movedRef`). */
     onClick: (id: number, shift: boolean) => void
+    /** A finger landed on this label. Fires before the stage's own touchstart (Konva bubbles from
+     *  the shape), which reads it to leave a selected label's finger to the drag. */
+    onTouchPress: (id: number) => void
+    /** A finger tapped this label: it becomes the selection. */
+    onTap: (id: number) => void
+    /** Whether a drag Konva is about to start must be refused: one begun by a finger on a label
+     *  that is not selected, or by any finger of a gesture a second finger has joined. The caller
+     *  stops the drag inside `dragstart`, before the node has moved. */
+    blocksDrag: (e: Konva.KonvaEventObject<DragEvent>, id: number) => boolean
   }
   /** Whether the pointer travelled since the last mousedown: the click Konva fires after a pan, or
    *  after a label drag that ended over a marker, is not a toggle. Read at click time, not on
@@ -76,12 +88,17 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
   // slack; `pinch` is the previous frame of a two-finger gesture. `spent` is set when a second
   // finger lands and stays until the last one lifts: fingers rarely leave together, and the one
   // still down must not turn the end of a pinch into a pan.
+  // `onLabel`: the lone finger is on a selected label, so Konva's drag owns it and the photo
+  // stays put.
   const touchRef = useRef<{
     down: ScreenPoint | null
     pan: { sx: number; sy: number; vx: number; vy: number } | null
     pinch: { mid: ScreenPoint; dist: number } | null
     spent: boolean
-  }>({ down: null, pan: null, pinch: null, spent: false })
+    onLabel: boolean
+  }>({ down: null, pan: null, pinch: null, spent: false, onLabel: false })
+  // Set by a label's touchstart, read and cleared by the stage's, which fires right after it.
+  const touchedSelectedRef = useRef(false)
   const [spacePan, setSpacePan] = useState(false)
   const [panning, setPanning] = useState(false)
 
@@ -334,9 +351,19 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
       // Uncancelled, the browser follows a tap with mousedown, mouseup and click, and the mouse
       // handlers above would run a second time for the same finger.
       if (e.evt.cancelable) e.evt.preventDefault()
+      // For the same reason the focus never moves on its own, and the toolbar's size field
+      // commits on blur: without this, a size typed there would be dropped the moment the tap
+      // that follows changed the selection. The colour picker listens for the touch itself.
+      const focused = document.activeElement
+      if (focused instanceof HTMLElement && focused !== document.body) focused.blur()
+      const onLabel = touchedSelectedRef.current
+      touchedSelectedRef.current = false
       const points = touchPoints(stage, e.evt.touches)
       const t = touchRef.current
       if (points.length >= 2) {
+        // A label in mid-drag stays where it has got to: stopping fires the ordinary dragend,
+        // which commits the move as its one undo entry, and the two fingers take over.
+        if (Konva.isDragging()) Konva.DD.node?.stopDrag()
         t.down = null
         t.pan = null
         t.spent = true
@@ -347,7 +374,7 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
       const [point] = points
       if (!point) return
       movedRef.current = false
-      touchRef.current = { down: point, pan: null, pinch: null, spent: false }
+      touchRef.current = { down: point, pan: null, pinch: null, spent: false, onLabel }
     },
     [stageRef],
   )
@@ -371,8 +398,7 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
       if (!t.pan) {
         if (Math.hypot(point.x - t.down.x, point.y - t.down.y) <= TOUCH_SLACK) return
         movedRef.current = true
-        // A label Konva is dragging owns this finger; the photo stays where it is.
-        if (Konva.isDragging()) return
+        if (t.onLabel) return
         t.pan = { sx: point.x, sy: point.y, vx: s.view.x, vy: s.view.y }
         return
       }
@@ -386,8 +412,41 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
   const onTouchEnd = useCallback((e: Konva.KonvaEventObject<TouchEvent>) => {
     const t = touchRef.current
     t.pinch = null
-    if (e.evt.touches.length === 0) touchRef.current = { down: null, pan: null, pinch: null, spent: false }
+    if (e.evt.touches.length === 0) {
+      touchRef.current = { down: null, pan: null, pinch: null, spent: false, onLabel: false }
+    }
   }, [])
+
+  const onLabelTouchPress = useCallback((id: number) => {
+    touchedSelectedRef.current = useEditor.getState().selectedIds.has(id)
+  }, [])
+
+  // A tap is Konva's: a touch that ended on the shape it began on without becoming a drag. A pan
+  // that carried the label along under the finger also ends on it, which `movedRef` rules out.
+  const onLabelTap = useCallback((id: number) => {
+    if (movedRef.current) return
+    const s = useEditor.getState()
+    s.select(id)
+    s.hover(null)
+  }, [])
+
+  const blocksDrag = useCallback((e: Konva.KonvaEventObject<DragEvent>, id: number) => {
+    // Konva hands `dragstart` the native event that crossed the drag distance.
+    const type: string | undefined = (e.evt as Event | undefined)?.type
+    if (!type?.startsWith('touch')) return false
+    return touchRef.current.spent || !useEditor.getState().selectedIds.has(id)
+  }, [])
+
+  // A tap on bare canvas clears the selection and whatever a tap was showing the name of.
+  const onStageTap = useCallback(
+    (e: Konva.KonvaEventObject<TouchEvent>) => {
+      if (e.target !== stageRef.current || movedRef.current) return
+      const s = useEditor.getState()
+      s.select(null)
+      s.hover(null)
+    },
+    [stageRef],
+  )
 
   const moved = useCallback(() => movedRef.current, [])
 
@@ -406,7 +465,14 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
       onTouchMove,
       onTouchEnd,
       onTouchCancel: onTouchEnd,
+      onTap: onStageTap,
     },
-    label: { onPress: onLabelPress, onClick: onLabelClick },
+    label: {
+      onPress: onLabelPress,
+      onClick: onLabelClick,
+      onTouchPress: onLabelTouchPress,
+      onTap: onLabelTap,
+      blocksDrag,
+    },
   }
 }

@@ -1,6 +1,14 @@
 import { expect, test } from './fixtures'
 import type { Page } from '@playwright/test'
-import { ensureSetUpAndSignedIn, ensureSolvedImage, stageState, touchDriver } from './helpers'
+import {
+  currentImageId,
+  ensureSetUpAndSignedIn,
+  ensureSolvedImage,
+  fetchAnnotations,
+  stageState,
+  touchDriver,
+  withAnnotationsRestored,
+} from './helpers'
 
 // The editor under a finger (SPEC § 6.5, #57), at the size of an iPhone with touch input. Two
 // fingers zoom and pan the photo, one finger pans it, and the page itself never zooms or
@@ -126,4 +134,188 @@ test('touch: pinch and pan move the photo, never the page', async ({ page }) => 
   expect(afterCancel.y - atCancel.y).toBeCloseTo(10, 0)
   await expect(saveStatus).toHaveText('Saved')
   expect(await pageZoom(page)).toEqual(UNZOOMED)
+})
+
+test('touch: a label moves only once it is selected', async ({ page }) => {
+  const box = await openEditor(page)
+  const imageId = currentImageId(page)
+  const touch = await touchDriver(page)
+  const saveStatus = page.locator('.save-status')
+  const undo = page.getByRole('button', { name: 'Undo', exact: true })
+  const toolbar = page.getByRole('toolbar', { name: 'Selected labels' })
+  const selected = () => page.evaluate(() => window.__astrocaptionEditor!.selectedIds())
+  const view = async () => {
+    const s = await stageState(page)
+    return [s.x, s.y, s.scale]
+  }
+
+  await withAnnotationsRestored(page, imageId, async () => {
+    // A label with room around it. At the fitted size a label is a few pixels tall, so the view
+    // is zoomed in about the label first, as an owner would; the wheel does it here because it
+    // keeps the point under the cursor in place, which makes the label easy to find afterwards.
+    const fitted = await stageState(page)
+    const target = fitted.labels.find((l) => {
+      const x = fitted.x + l.x * fitted.scale
+      const y = fitted.y + l.y * fitted.scale
+      return x > 90 && y > 90 && x < box.width - 150 && y < box.height - 150
+    })
+    expect(target, 'no label with room around it').toBeTruthy()
+    const id = target!.id
+    const corner = { x: box.x + fitted.x + target!.x * fitted.scale, y: box.y + fitted.y + target!.y * fitted.scale }
+    await page.mouse.move(corner.x, corner.y)
+    // As many notches as it takes: how far one wheel event zooms depends on the emulated device.
+    for (let i = 0; i < 8 && (await stageState(page)).scale < fitted.scale * 5; i++) {
+      await page.mouse.wheel(0, -400)
+    }
+    expect((await stageState(page)).scale).toBeGreaterThanOrEqual(fitted.scale * 5)
+    const zoomed = await stageState(page)
+    const scale = zoomed.scale
+    /** A point inside the label's text box, wherever the label and the view are now. */
+    const labelPoint = async () => {
+      const s = await stageState(page)
+      const l = s.labels.find((x) => x.id === id)!
+      return {
+        x: box.x + s.x + l.x * s.scale + Math.min(8, (l.w * s.scale) / 2),
+        y: box.y + s.y + l.y * s.scale + Math.min(8, (l.h * s.scale) / 2),
+      }
+    }
+    const drawn = async () => {
+      const l = (await stageState(page)).labels.find((x) => x.id === id)!
+      return [l.x, l.y]
+    }
+    const stored = async () => {
+      const l = (await fetchAnnotations(page, imageId)).labels.find((x) => x.object_id === id)!
+      return [l.x, l.y]
+    }
+    const home = await stored()
+    expect(await drawn()).toEqual(home)
+    await expect(undo).toBeDisabled()
+
+    // 1. A drag that starts on an unselected label pans the photo and leaves the label alone.
+    {
+      const from = await labelPoint()
+      const before = await stageState(page)
+      await touch.start([from])
+      await touch.move([{ x: from.x + 15, y: from.y + 10 }])
+      await touch.move([{ x: from.x + 75, y: from.y + 50 }])
+      await touch.end()
+      const after = await stageState(page)
+      expect(after.x - before.x).toBeCloseTo(60, 0)
+      expect(after.y - before.y).toBeCloseTo(40, 0)
+      expect(await drawn()).toEqual(home)
+      expect(await selected()).toEqual([])
+      await expect(undo).toBeDisabled()
+      await expect(saveStatus).toHaveText('Saved')
+      expect(await stored()).toEqual(home)
+    }
+
+    // 2. A tap selects it.
+    {
+      const at = await labelPoint()
+      await page.touchscreen.tap(at.x, at.y)
+      await expect.poll(selected).toEqual([id])
+      await expect(toolbar).toBeVisible()
+    }
+
+    // 3. A finger that wobbles while tapping the selected label (more than the mouse's 3 px of
+    //    slack, less than touch's 10) does not move it.
+    {
+      const at = await labelPoint()
+      await touch.start([at])
+      await touch.move([{ x: at.x + 6, y: at.y }])
+      await touch.end()
+      expect(await drawn()).toEqual(home)
+      expect(await selected()).toEqual([id])
+      await expect(undo).toBeDisabled()
+    }
+
+    // 4. Dragging the selected label moves it with the finger, as one undo entry; the photo
+    //    stays where it is.
+    {
+      const at = await labelPoint()
+      const before = await view()
+      await touch.start([at])
+      await touch.move([{ x: at.x + 15, y: at.y + 10 }])
+      await touch.move([{ x: at.x + 50, y: at.y + 30 }])
+      await touch.end()
+      expect(await view()).toEqual(before)
+      const moved = await drawn()
+      expect(moved[0]! - home[0]!).toBeCloseTo(50 / scale, 0)
+      expect(moved[1]! - home[1]!).toBeCloseTo(30 / scale, 0)
+      await expect.poll(stored).toEqual(moved)
+      await expect(undo).toBeEnabled()
+      await undo.tap()
+      await expect.poll(drawn).toEqual(home)
+      await expect(undo).toBeDisabled()
+      await expect.poll(stored).toEqual(home)
+    }
+
+    // 5. A second finger landing mid-drag: the label stays where it had got to (one undo entry)
+    //    and the two fingers zoom the photo. Neither finger drags anything after that.
+    {
+      await expect.poll(selected).toEqual([id])
+      const at = await labelPoint()
+      const first = { x: at.x + 40, y: at.y, id: 0 }
+      const second = { x: at.x + 40, y: at.y + 120, id: 1 }
+      await touch.start([{ ...at, id: 0 }])
+      await touch.move([{ x: at.x + 20, y: at.y, id: 0 }])
+      await touch.move([first])
+      await touch.start([first, second])
+      await touch.move([{ ...first, y: first.y - 30 }, { ...second, y: second.y + 30 }])
+      await touch.end([{ ...first, y: first.y - 30 }])
+      await touch.move([{ ...first, x: first.x + 40, y: first.y + 10 }])
+      await touch.end()
+      const after = await stageState(page)
+      expect(after.scale).toBeGreaterThan(scale)
+      const moved = await drawn()
+      expect(moved[0]! - home[0]!).toBeCloseTo(40 / scale, 0)
+      expect(moved[1]!).toBeCloseTo(home[1]!, 0)
+      await expect(undo).toBeEnabled()
+      await undo.tap()
+      await expect.poll(drawn).toEqual(home)
+      await expect(undo).toBeDisabled()
+    }
+
+    // 6. Two fingers landing together, one of them on the selected label: a pinch, never a drag,
+    //    even when the other finger lifts first.
+    {
+      await expect.poll(selected).toEqual([id])
+      const at = await labelPoint()
+      const onLabel = { ...at, id: 0 }
+      const other = { x: at.x, y: at.y + 120, id: 1 }
+      const before = await stageState(page)
+      await touch.start([onLabel, other])
+      await touch.move([{ ...onLabel, y: onLabel.y - 20 }, { ...other, y: other.y + 20 }])
+      await touch.end([{ ...onLabel, y: onLabel.y - 20 }])
+      await touch.move([{ ...onLabel, x: onLabel.x + 40, y: onLabel.y + 20 }])
+      await touch.end()
+      expect((await stageState(page)).scale).toBeGreaterThan(before.scale)
+      expect(await drawn()).toEqual(home)
+      await expect(undo).toBeDisabled()
+    }
+
+    // 7. Touching the photo ends an edit in progress: a size typed in the toolbar, with no Enter,
+    //    is kept when the next touch lands on the canvas.
+    {
+      await expect.poll(selected).toEqual([id])
+      const size = toolbar.getByRole('spinbutton', { name: 'Font size' })
+      await size.tap()
+      await size.fill('41')
+      await page.touchscreen.tap(box.x + 20, box.y + box.height - 20)
+      await expect
+        .poll(async () => (await fetchAnnotations(page, imageId)).labels.find((x) => x.object_id === id)!.font_size)
+        .toBe(41)
+    }
+
+    // 8. A tap on bare canvas clears the selection.
+    {
+      const at = await labelPoint()
+      await page.touchscreen.tap(at.x, at.y)
+      await expect.poll(selected).toEqual([id])
+      await page.getByRole('button', { name: 'Fit' }).tap()
+      const bare = await emptyPoint(page, box)
+      await page.touchscreen.tap(bare.x, bare.y)
+      await expect.poll(selected).toEqual([])
+    }
+  })
 })
