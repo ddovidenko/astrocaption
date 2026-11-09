@@ -1,5 +1,5 @@
 import { expect, test } from './fixtures'
-import type { Page } from '@playwright/test'
+import type { Page, Route } from '@playwright/test'
 import { deleteImageIfPresent, ensureExported, ensureSetUpAndSignedIn, ensureSolvedImage, imagesTitled } from './helpers'
 
 // A title with no spaces (the filename stem is the default title, #175) must wrap or truncate,
@@ -13,6 +13,14 @@ async function expectNoHorizontalOverflow(page: Page, where: string): Promise<vo
     client: document.documentElement.clientWidth,
   }))
   expect(widths.scroll, `${where}: page scroll width vs viewport`).toBeLessThanOrEqual(widths.client)
+}
+
+/** Makes every autosave fail until it is taken off again, so the toolbar shows a save problem (a
+ *  sentence and a Retry button) for as long as a spec wants to look at it. */
+const ANNOTATIONS = '**/api/images/*/annotations'
+async function failSaves(route: Route): Promise<void> {
+  if (route.request().method() !== 'PUT') return route.fallback()
+  await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'Internal error' }) })
 }
 
 test('a long unbroken title never widens the page', async ({ page, browser }) => {
@@ -61,6 +69,35 @@ test('a long unbroken title never widens the page', async ({ page, browser }) =>
     expect((await page.locator('.editor-toolbar').boundingBox())!.height).toBeLessThanOrEqual(60)
     await expectNoHorizontalOverflow(page, 'editor, narrow desktop window')
     await status.evaluate((el) => (el.textContent = 'Saved'))
+    // A save problem is a sentence and a button. The title gives way to it first: the sentence is
+    // not squeezed into a column while the title keeps its room, and the button stays inside it.
+    await page.route(ANNOTATIONS, failSaves)
+    const anObject = page.getByRole('checkbox', { name: /^Show / }).first()
+    await anObject.click()
+    const problem = page.locator('.editor-toolbar .save-status.error')
+    await expect(problem).toBeVisible()
+    const retry = problem.getByRole('button')
+    await expect(retry).toBeInViewport({ ratio: 1 })
+    const bar = (await page.locator('.editor-toolbar').boundingBox())!
+    const problemBox = (await problem.boundingBox())!
+    const retryBox = (await retry.boundingBox())!
+    // There is room for the sentence on one line once the title has given way; squeezed, it
+    // breaks into a column of words.
+    const lines = await problem.evaluate((el) => {
+      const range = document.createRange()
+      range.selectNodeContents(el.firstChild!)
+      return new Set(Array.from(range.getClientRects(), (r) => Math.round(r.top))).size
+    })
+    expect(lines, 'the save problem was squeezed').toBe(1)
+    expect(retryBox.x + retryBox.width, 'the button spilled out of the save problem').toBeLessThanOrEqual(problemBox.x + problemBox.width + 0.5)
+    expect(problemBox.x + problemBox.width).toBeLessThanOrEqual(bar.x + bar.width)
+    expect((await actual.boundingBox())!.height, '"100 %" wrapped beside a save problem').toBe(fitAfter.height)
+    await expectNoHorizontalOverflow(page, 'editor, save problem')
+    await page.unroute(ANNOTATIONS, failSaves)
+    await retry.click()
+    await expect(status).toHaveText('Saved')
+    await anObject.click()
+    await expect(status).toHaveText('Saved')
     await page.setViewportSize({ width: 1280, height: 720 })
     await page.getByRole('link', { name: '← Images' }).click()
 
@@ -161,6 +198,28 @@ test.describe('phone width', () => {
       await expect(status).toBeInViewport({ ratio: 1 })
       await expectNoHorizontalOverflow(page, 'editor, unsaved')
       await status.evaluate((el) => (el.textContent = 'Saved'))
+      // A save problem takes a row of its own under the controls, with a finger-sized button.
+      await page.route(ANNOTATIONS, failSaves)
+      await page.getByRole('button', { name: 'Expand panel' }).click()
+      const anObject = page.getByRole('checkbox', { name: /^Show / }).first()
+      await anObject.click()
+      await page.getByRole('button', { name: 'Collapse panel' }).click()
+      const problem = page.locator('.editor-toolbar .save-status.error')
+      await expect(problem).toBeVisible()
+      const fitBox = (await page.getByRole('button', { name: 'Fit' }).boundingBox())!
+      expect((await problem.boundingBox())!.y, 'the save problem is not on its own row').toBeGreaterThanOrEqual(fitBox.y + fitBox.height)
+      const retry = problem.getByRole('button')
+      await expect(retry).toBeInViewport({ ratio: 1 })
+      expect((await retry.boundingBox())!.height, 'Retry is too small for a finger').toBeGreaterThanOrEqual(44)
+      expect(await Promise.all(controls.map(async (c) => (await c.boundingBox())!.x))).toEqual(before)
+      await expectNoHorizontalOverflow(page, 'editor, save problem')
+      await page.unroute(ANNOTATIONS, failSaves)
+      await retry.click()
+      await expect(status).toHaveText('Saved')
+      await page.getByRole('button', { name: 'Expand panel' }).click()
+      await anObject.click()
+      await page.getByRole('button', { name: 'Collapse panel' }).click()
+      await expect(status).toHaveText('Saved')
 
       const visitor = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })
       const pub = await visitor.newPage()

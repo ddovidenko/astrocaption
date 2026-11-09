@@ -28,7 +28,14 @@ function SaveStatus() {
   // `isEditable`, not `solved`: a failed re-solve still edits and still saves (SPEC § 5).
   const editable = useEditor(isEditable)
   const save = useEditor((s) => s.save)
-  if (!editable) return <span className="save-status">Read-only while solving</span>
+  // The compact row (SPEC § 6.5) has room for the first word only; the rest stays in the text.
+  if (!editable) {
+    return (
+      <span className="save-status">
+        Read-only<span className="on-wide"> while solving</span>
+      </span>
+    )
+  }
   switch (save.status) {
     case 'saving':
       return <span className="save-status">Saving…</span>

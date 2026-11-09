@@ -155,6 +155,13 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
    title is enough). */
 .editor-toolbar > * { flex: none; white-space: nowrap; }
 .editor-toolbar strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A save problem may shrink as well (it is a sentence, and can be longer than the row). Flexbox
+   shares a shortfall between everything that may shrink, by size, so beside a long title the
+   sentence would be crushed into a column while the title kept most of its room; and no shrink
+   factor on the title is large enough, since the sliver left to the sentence still breaks its
+   line. While a problem shows, the title is sized from nothing instead and takes what is left:
+   the sentence then keeps its full width unless it alone is too long for the row. */
+.editor-toolbar:has(> .save-status.error) strong { flex: 1 1 0; }
 .editor-main > .notice { margin: 0.75rem 1rem 0; }
 .editor-main > .error, .editor-main > .meta { padding: 1.5rem; }
 /* min-width: room for the longest passing state ("Unsaved changes"), so the title and the buttons
@@ -184,6 +191,7 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
   .editor-toolbar .on-compact { display: inline; font-size: 1.25rem; line-height: 1; }
   .save-status { order: 2; min-width: 0; font-size: 0.85rem; }
   .save-status.error { flex-basis: 100%; padding-bottom: 0.25rem; }
+  .save-status button { min-width: 44px; min-height: 44px; }
 }
 .save-status button { padding: 0.2rem 0.6rem; font-size: 0.85rem; }
 /* touch-action: every finger on the photo is the editor's (pinch-zoom, pan, drag: SPEC § 6.5);

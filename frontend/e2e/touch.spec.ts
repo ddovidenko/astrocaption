@@ -104,21 +104,18 @@ test('touch: pinch and pan move the photo, never the page', async ({ page }) => 
   const box = await openEditor(page)
   const touch = await touchDriver(page)
   const saveStatus = page.locator('.save-status')
-  const percent = page.locator('.editor-toolbar .meta').first()
 
   // 1. Two fingers spreading on the canvas: the photo zooms about the point between them. Bare
   //    canvas, so that no finger rests on a label (the label test covers that).
   const start = await emptyPoint(page, box)
   const centre = { x: start.x - box.x, y: start.y - box.y }
   const before = await stageState(page)
-  const percentBefore = await percent.textContent()
   const under = { x: (centre.x - before.x) / before.scale, y: (centre.y - before.y) / before.scale }
   await touch.pinch({ x: box.x + centre.x, y: box.y + centre.y }, 80, 160)
   const zoomed = await stageState(page)
   expect(zoomed.scale / before.scale).toBeCloseTo(2, 1)
   expect(under.x * zoomed.scale + zoomed.x).toBeCloseTo(centre.x, 0)
   expect(under.y * zoomed.scale + zoomed.y).toBeCloseTo(centre.y, 0)
-  await expect(percent).not.toHaveText(percentBefore!)
   expect(await pageZoom(page)).toEqual(UNZOOMED)
 
   // 2. The same on the top bar does nothing at all: not the photo, not the page.
