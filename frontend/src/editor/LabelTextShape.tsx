@@ -2,7 +2,7 @@ import { useRef } from 'react'
 import { Shape } from 'react-konva'
 import type Konva from 'konva'
 import type { FontOut, Label, StyleConfig } from '../api'
-import { ascentFor, fontShorthand, preferGeometricPrecision, type LabelBox, type LabelLines } from './metrics'
+import { ascentFor, effectiveColor, fontShorthand, preferGeometricPrecision, type LabelBox, type LabelLines } from './metrics'
 
 /** A refusal to draw this shape at all, raised here and worded for the page. Anything else the
  *  canvas throws is a browser failure whose message is not for the owner (CLAUDE.md: no raw
@@ -30,7 +30,7 @@ interface Props {
  *  Nothing here is chrome: this shape draws exactly what the export draws, so the parity render
  *  can keep it and hide the overlay layer (selection outline, hover ring) instead. */
 export function LabelTextShape({ label, style, font, box, text, onDrawError }: Props) {
-  const color = label.color ?? style.text_color
+  const color = effectiveColor(label, style)
   const failedRef = useRef(false)
   const draw = (ctx: Konva.Context) => {
     if (failedRef.current) return
