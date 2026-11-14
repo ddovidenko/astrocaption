@@ -456,6 +456,10 @@ canvas pane is a sliver, and the bar is cut off with it, not drawn over the pane
   still being typed, stored on the label it was typed for, except on Escape and Clear overrides,
   and except when that label is no longer there (an undo took it away, or a re-solve began). It
   does not drag and has no swipe to dismiss.
+- **Undo** in the top bar is a press outside the bar like any other, so with a name still being
+  typed it stores the name and that is the change it undoes: the tap takes back the typing, Redo
+  brings the typed name back, and the change before it is a second tap. This is the desktop rule
+  (§ 6.2: an undo while a number is being typed belongs to the typing), and nothing typed is lost.
 - A press on the canvas ends an edit in progress before it does anything else, for a mouse on a
   label as for a finger anywhere: a size or a name still being typed (in the bar, the sheet or
   the floating strip of § 6.2) is stored on the selection it was typed for, and only then does the
