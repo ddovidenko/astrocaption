@@ -59,8 +59,8 @@ export default function LabelDock({
   const [typedName, setTypedName, dropName] = useTaggedDraft<string>([name, selectedIds])
 
   const dockRef = useRef<HTMLDivElement>(null)
-  const moreRef = useRef<HTMLDivElement>(null)
-  const colorRef = useRef<HTMLDivElement>(null)
+  // The open sheet, whichever of the two it is: only one is ever mounted.
+  const sheetRef = useRef<HTMLDivElement>(null)
 
   /** Stores a name still in the field, as leaving the field does. */
   const commitName = () => {
@@ -100,7 +100,7 @@ export default function LabelDock({
   })
   const shown = controls !== null
   useLayoutEffect(() => reveal(dockRef.current), [shown])
-  useLayoutEffect(() => reveal(sheet === 'more' ? moreRef.current : sheet === 'color' ? colorRef.current : null), [sheet])
+  useLayoutEffect(() => reveal(sheetRef.current), [sheet])
 
   if (!controls) return null
 
@@ -112,7 +112,7 @@ export default function LabelDock({
   return (
     <div ref={dockRef} className="label-dock" role="toolbar" aria-label="Selected labels" style={sheetCap}>
       {moreOpen && (
-        <div ref={moreRef} className="label-sheet" role="group" aria-label="More label options">
+        <div ref={sheetRef} className="label-sheet" role="group" aria-label="More label options">
           {only !== null && (
             <label className="label-sheet-row">
               <span>Rename</span>
@@ -196,7 +196,7 @@ export default function LabelDock({
           // no press behind it (a keyboard undo pruning a multi-selection) closes it silently, as
           // it does the More sheet.
           open={sheet === 'color'}
-          panelRef={colorRef}
+          panelRef={sheetRef}
           onOpenChange={(next) => {
             if (!next) return dropSheet()
             commitName()

@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { HexColorInput, HexColorPicker } from 'react-colorful'
 import { useEscapeKey, usePressAway } from './pressAway'
 import { normalizeHex } from './styleForm'
@@ -64,7 +64,9 @@ export default function ColorField({
    *  once per change. */
   onOpenChange?: (open: boolean) => void
   /** Receives the picker's panel (the popover or the sheet) while it is open, for an owner that
-   *  has to measure it: the docked bar pans the selection clear of the sheet. */
+   *  has to measure it: the docked bar pans the selection clear of the sheet. A copy of the
+   *  field's own ref, which the field keeps using: nothing here depends on what the owner does
+   *  with this one. */
   panelRef?: RefObject<HTMLDivElement | null>
 }) {
   const [innerOpen, setInnerOpen] = useState(false)
@@ -94,8 +96,14 @@ export default function ColorField({
   }, [open])
   const wrap = useRef<HTMLDivElement>(null)
   const swatch = useRef<HTMLButtonElement>(null)
-  const ownPanel = useRef<HTMLDivElement>(null)
-  const popover = panelRef ?? ownPanel
+  const popover = useRef<HTMLDivElement>(null)
+  const attachPanel = useCallback(
+    (el: HTMLDivElement | null) => {
+      popover.current = el
+      if (panelRef) panelRef.current = el
+    },
+    [panelRef],
+  )
   const id = useId()
   const valueId = `${id}-value`
   const shown = value || fallback
@@ -141,7 +149,7 @@ export default function ColorField({
     const below = bound.bottom - wrapRect.bottom
     const above = wrapRect.top - bound.top
     setAlignUp(below < height && (above >= height || above > below))
-  }, [open, asSheet, popover])
+  }, [open, asSheet])
   /** Every way out of the picker: exactly one terminal callback per close, whichever event gets
    *  there first. `silent` is for the close that follows a callback of its own ("Use default",
    *  which has already fired `onClear`): a trailing bare `onCommit()` there would reach a caller
@@ -195,7 +203,7 @@ export default function ColorField({
       </button>
       {open && (
         <div
-          ref={popover}
+          ref={attachPanel}
           className={asSheet ? 'color-sheet' : `popover${alignRight ? ' popover-right' : ''}${alignUp ? ' popover-up' : ''}`}
           role="dialog"
           aria-label={`${label} picker`}
