@@ -178,6 +178,31 @@ describe('LabelDock sheet', () => {
     expect(state().undo).toHaveLength(2)
   })
 
+  it('Undo pressed over a name still being typed takes back the typing, and Redo returns it (#274)', () => {
+    // The top bar's Undo as EditorPage draws it: outside the dock, refusing the focus.
+    render(
+      <>
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => state().undoLast()}>
+          Undo
+        </button>
+        <LabelDock box={box} />
+      </>,
+    )
+    openSheet()
+    fireEvent.change(rename(), { target: { value: 'Great Nebula' } })
+    const undo = screen.getByRole('button', { name: 'Undo' })
+    fireEvent.mouseDown(undo)
+    fireEvent.click(undo)
+    // The press stored the name as a change of its own and the click undid that one. The typing
+    // is what the tap takes back (SPEC § 6.5): the change before it, label 2 switched on, stands.
+    expect(sheet()).toBeNull()
+    expect(label(1).text_override).toBeNull()
+    expect(label(2).enabled).toBe(true)
+    expect(state().undo).toHaveLength(1)
+    act(() => state().redoLast())
+    expect(label(1).text_override).toBe('Great Nebula')
+  })
+
   it('Escape drops a name that was being typed', () => {
     render(<LabelDock box={box} />)
     openSheet()
