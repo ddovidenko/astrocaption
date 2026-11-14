@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { useState } from 'react'
+import { createRef, useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ColorField from './ColorField'
 import { cancellingCanvas as canvas } from './testCanvas'
@@ -411,6 +411,18 @@ describe('ColorField as a sheet', () => {
     expect(f.onClear).toHaveBeenCalledTimes(1)
     expect(f.onCommit).not.toHaveBeenCalled()
     expect(onOpenChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it("hands its panel to the owner's ref for as long as it is open (#274)", () => {
+    // What the docked bar measures to pan the selection clear of the sheet.
+    const panelRef = createRef<HTMLDivElement>()
+    const f = mount({ presentation: 'sheet', panelRef })
+    expect(panelRef.current).toBeNull()
+    f.open()
+    expect(panelRef.current).toBe(f.dialog())
+    expect(panelRef.current).not.toBeNull()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(panelRef.current).toBeNull()
   })
 
   it('the popover presentation is the default and reports open and close too', () => {
