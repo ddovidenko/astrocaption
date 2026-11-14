@@ -18,6 +18,9 @@ export default function ColorField({
   onChange,
   onCommit,
   onClear,
+  presentation = 'popover',
+  onOpen,
+  onClose,
 }: {
   label: string
   /** The override, or '' for "use the built-in default". */
@@ -43,6 +46,14 @@ export default function ColorField({
    *  It is the *only* terminal callback for that click: the close it triggers is silent, so a
    *  caller holding a draft never has to guess which of the two to believe. */
   onClear?: () => void
+  /** How the picker shows: a popover placed beside the swatch where it fits (the default), or a
+   *  `sheet` laid out full width for whoever positions it (the docked label bar, SPEC § 6.5),
+   *  with no placement measurement. The commit rules are the same in both. */
+  presentation?: 'popover' | 'sheet'
+  /** The picker opened (after the swatch's click). */
+  onOpen?: () => void
+  /** The picker closed, by any route, once per close; fires for the silent close too. */
+  onClose?: () => void
 }) {
   const [open, setOpen] = useState(false)
   // Whether the popover would run off the right edge of its container (the side panel, a config
@@ -76,6 +87,7 @@ export default function ColorField({
     // Left-aligned and below until the layout effect has measured the popover it just rendered.
     setAlignRight(false)
     setAlignUp(false)
+    onOpen?.()
   }
   // Where the popover fits is measured from the popover itself once it is in the DOM, before the
   // browser paints it (#100, #104): its width differs by mode (the "Use default" button) and its
@@ -85,7 +97,7 @@ export default function ColorField({
   useLayoutEffect(() => {
     const wrapEl = wrap.current
     const popEl = popover.current
-    if (!open || !wrapEl || !popEl) return
+    if (presentation !== 'popover' || !open || !wrapEl || !popEl) return
     const wrapRect = wrapEl.getBoundingClientRect()
     const bound = (wrapEl.closest('.editor-canvas, .side-panel-body, .panel') ?? document.documentElement).getBoundingClientRect()
     const { width, height } = popEl.getBoundingClientRect()
@@ -93,7 +105,7 @@ export default function ColorField({
     const below = bound.bottom - wrapRect.bottom
     const above = wrapRect.top - bound.top
     setAlignUp(below < height && (above >= height || above > below))
-  }, [open])
+  }, [open, presentation])
   /** Every way out of the picker: exactly one terminal callback per close, whichever event gets
    *  there first. `silent` is for the close that follows a callback of its own ("Use default",
    *  which has already fired `onClear`): a trailing bare `onCommit()` there would reach a caller
@@ -102,6 +114,7 @@ export default function ColorField({
     if (!openRef.current) return
     openRef.current = false
     setOpen(false)
+    onClose?.()
     if (refocus) swatch.current?.focus() // a keyboard user lands back where they started
     if (!silent) onCommit?.()
   }
@@ -145,7 +158,7 @@ export default function ColorField({
       {open && (
         <div
           ref={popover}
-          className={`popover${alignRight ? ' popover-right' : ''}${alignUp ? ' popover-up' : ''}`}
+          className={presentation === 'sheet' ? 'color-sheet' : `popover${alignRight ? ' popover-right' : ''}${alignUp ? ' popover-up' : ''}`}
           role="dialog"
           aria-label={`${label} picker`}
         >

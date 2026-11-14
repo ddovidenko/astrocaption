@@ -120,6 +120,13 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
 .popover-row { display: flex; gap: 0.5rem; align-items: center; }
 .popover-row button { white-space: nowrap; }
 .popover-row input { width: 6.5rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 0.35rem 0.5rem; font: inherit; font-variant-numeric: tabular-nums; }
+/* The picker as a bottom sheet (SPEC § 6.5): the docked label bar positions it against itself and
+   caps it with `--sheet-max`. */
+.color-sheet { position: absolute; z-index: 10; left: 0; right: 0; bottom: 100%; max-height: var(--sheet-max, none); overflow-y: auto; display: grid; gap: 0.75rem; padding: 0.9rem; background: var(--panel); border-top: 1px solid var(--border); border-radius: 14px 14px 0 0; box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.55); }
+.color-sheet .react-colorful { width: 100%; height: 180px; }
+.color-sheet .popover-row { justify-content: space-between; }
+.color-sheet .popover-row input, .color-sheet .popover-row button { min-height: 44px; font-size: 1rem; }
+.color-sheet .popover-row input { width: 7.5rem; }
 .preview { display: block; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border); margin-bottom: 0.75rem; }
 @media (max-width: 640px) {
   .row2, .row2-action { grid-template-columns: 1fr; }

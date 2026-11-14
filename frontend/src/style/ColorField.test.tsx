@@ -43,6 +43,16 @@ function mount(over: Partial<Parameters<typeof ColorField>[0]> = {}) {
   return { onChange, onCommit, onClear, swatch, open: () => fireEvent.click(swatch), dialog: () => screen.queryByRole('dialog') }
 }
 
+/** The editor canvas, which cancels every touch that lands on it (SPEC § 6.5), as Konva and the
+ *  gesture layer do; the picker has to close on the touch itself. */
+function canvas() {
+  const el = document.createElement('div')
+  el.className = 'editor-canvas'
+  el.addEventListener('touchstart', (e) => e.preventDefault())
+  document.body.append(el)
+  return el
+}
+
 describe('ColorField commits exactly once per close', () => {
   it('Escape', () => {
     const f = mount()
@@ -74,13 +84,6 @@ describe('ColorField commits exactly once per close', () => {
   // so the browser sends no compatibility mouse events (SPEC § 6.5) and the touch itself has to
   // close the picker. Anywhere else a tap is followed by its mousedown as usual, and a touch that
   // turns out to be a scroll must leave the picker alone.
-  function canvas() {
-    const el = document.createElement('div')
-    el.className = 'editor-canvas'
-    el.addEventListener('touchstart', (e) => e.preventDefault()) // what Konva and the gesture layer do
-    document.body.append(el)
-    return el
-  }
   it('a touch on the editor canvas', () => {
     const f = mount()
     f.open()
@@ -266,5 +269,58 @@ describe('ColorField rendering', () => {
   it('disabled disables the swatch', () => {
     const f = mount({ disabled: true })
     expect(f.swatch).toHaveProperty('disabled', true)
+  })
+})
+
+describe('ColorField as a sheet', () => {
+  it('opens a full-width sheet, not a placed popover', () => {
+    mockRects({ left: 10, bottom: 100 }, { right: 300, bottom: 120 }) // would push a popover up and right
+    const f = mount({ presentation: 'sheet' })
+    f.open()
+    const dialog = f.dialog()!
+    expect(dialog.className).toBe('color-sheet')
+    expect(dialog.querySelector('.react-colorful')).not.toBeNull()
+    expect(dialog.querySelector('input')).not.toBeNull()
+    expect(f.swatch.getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('tells its owner when it opens and when it closes, once each', () => {
+    const onOpen = vi.fn()
+    const onClose = vi.fn()
+    const f = mount({ presentation: 'sheet', onOpen, onClose })
+    f.open()
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    expect(onClose).not.toHaveBeenCalled()
+    const el = canvas()
+    act(() => {
+      fireEvent.touchStart(el)
+      fireEvent.mouseDown(el)
+    })
+    expect(f.dialog()).toBeNull()
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(f.onCommit).toHaveBeenCalledTimes(1)
+  })
+
+  it('sheet: Use default clears and closes silently', () => {
+    const onClose = vi.fn()
+    const f = mount({ presentation: 'sheet', allowDefault: true, value: '#123456', onClose })
+    f.open()
+    fireEvent.click(screen.getByRole('button', { name: 'Use default' }))
+    expect(f.dialog()).toBeNull()
+    expect(f.onChange).toHaveBeenLastCalledWith('')
+    expect(f.onClear).toHaveBeenCalledTimes(1)
+    expect(f.onCommit).not.toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('the popover presentation is the default and reports open and close too', () => {
+    const onOpen = vi.fn()
+    const onClose = vi.fn()
+    const f = mount({ onOpen, onClose })
+    f.open()
+    expect(f.dialog()!.className).toMatch(/^popover/)
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })
