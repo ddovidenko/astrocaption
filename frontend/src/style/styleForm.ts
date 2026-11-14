@@ -132,3 +132,9 @@ export function normalizeHex(value: string): string {
   const digits = m[1] ?? ''
   return `#${digits.length === 3 ? [...digits].map((c) => c + c).join('') : digits}`
 }
+
+/** `#abc` or `abc`: the short form `normalizeHex` expands. A colour as it stands, and also the
+ *  first half of a six-digit one, which is why a hex field does not take it on the keystroke. */
+export function isShortHex(value: string): boolean {
+  return /^#?[0-9a-f]{3}$/i.test(value.trim())
+}

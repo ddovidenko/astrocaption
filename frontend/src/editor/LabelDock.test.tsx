@@ -463,6 +463,22 @@ describe('LabelDock colour sheet', () => {
     canvas.remove()
   })
 
+  it('a press on the photo stores a three-digit hex left in the colour sheet, as one change (#274)', () => {
+    render(<LabelDock box={box} />)
+    const before = state().undo.length
+    openColourSheet()
+    fireEvent.change(colourSheet()!.querySelector('input')!, { target: { value: '#ff8' } })
+    expect(label(1).color).toBeNull() // three digits wait for the close
+    const canvas = cancellingCanvas()
+    act(() => {
+      fireEvent.touchStart(canvas)
+    })
+    expect(colourSheet()).toBeNull()
+    expect(label(1).color).toBe('#ffff88')
+    expect(state().undo).toHaveLength(before + 1)
+    canvas.remove()
+  })
+
   it('Escape closes the colour sheet and goes no further, so the selection stays', () => {
     render(<LabelDock box={box} />)
     openColourSheet()
