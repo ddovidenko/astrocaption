@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ColorField from './ColorField'
+import { cancellingCanvas as canvas } from './testCanvas'
 
 afterEach(() => {
   cleanup()
@@ -27,7 +28,7 @@ function mount(over: Partial<Parameters<typeof ColorField>[0]> = {}) {
   const onChange = vi.fn()
   const onCommit = vi.fn()
   const onClear = vi.fn()
-  render(
+  const field = (props: Partial<Parameters<typeof ColorField>[0]>) => (
     <ColorField
       label="Text colour"
       value="#ffffff"
@@ -36,11 +37,20 @@ function mount(over: Partial<Parameters<typeof ColorField>[0]> = {}) {
       onChange={onChange}
       onCommit={onCommit}
       onClear={onClear}
-      {...over}
-    />,
+      {...props}
+    />
   )
+  const { rerender } = render(field(over))
   const swatch = screen.getByRole('button', { name: /Text colour/ })
-  return { onChange, onCommit, onClear, swatch, open: () => fireEvent.click(swatch), dialog: () => screen.queryByRole('dialog') }
+  return {
+    onChange,
+    onCommit,
+    onClear,
+    swatch,
+    open: () => fireEvent.click(swatch),
+    dialog: () => screen.queryByRole('dialog'),
+    rerender: (props: Partial<Parameters<typeof ColorField>[0]>) => rerender(field(props)),
+  }
 }
 
 describe('ColorField commits exactly once per close', () => {
@@ -74,13 +84,6 @@ describe('ColorField commits exactly once per close', () => {
   // so the browser sends no compatibility mouse events (SPEC § 6.5) and the touch itself has to
   // close the picker. Anywhere else a tap is followed by its mousedown as usual, and a touch that
   // turns out to be a scroll must leave the picker alone.
-  function canvas() {
-    const el = document.createElement('div')
-    el.className = 'editor-canvas'
-    el.addEventListener('touchstart', (e) => e.preventDefault()) // what Konva and the gesture layer do
-    document.body.append(el)
-    return el
-  }
   it('a touch on the editor canvas', () => {
     const f = mount()
     f.open()
@@ -266,5 +269,74 @@ describe('ColorField rendering', () => {
   it('disabled disables the swatch', () => {
     const f = mount({ disabled: true })
     expect(f.swatch).toHaveProperty('disabled', true)
+  })
+})
+
+describe('ColorField as a sheet', () => {
+  it('opens a full-width sheet, not a placed popover', () => {
+    mockRects({ left: 10, bottom: 100 }, { right: 300, bottom: 120 }) // would push a popover up and right
+    const f = mount({ presentation: 'sheet' })
+    f.open()
+    const dialog = f.dialog()!
+    expect(dialog.className).toBe('color-sheet')
+    // The sheet is positioned by whoever hosts the field, so the field itself must not be the
+    // containing block: the wrap says so with a class of its own.
+    expect(dialog.closest('.color-field')!.classList.contains('color-field-sheet')).toBe(true)
+    expect(dialog.querySelector('.react-colorful')).not.toBeNull()
+    expect(dialog.querySelector('input')).not.toBeNull()
+    expect(f.swatch.getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('tells its owner when it opens and when it closes, once each', () => {
+    const onOpenChange = vi.fn()
+    const f = mount({ presentation: 'sheet', onOpenChange })
+    f.open()
+    expect(onOpenChange.mock.calls).toEqual([[true]])
+    const el = canvas()
+    act(() => {
+      fireEvent.touchStart(el)
+      fireEvent.mouseDown(el)
+    })
+    expect(f.dialog()).toBeNull()
+    expect(onOpenChange.mock.calls).toEqual([[true], [false]])
+    expect(f.onCommit).toHaveBeenCalledTimes(1)
+  })
+
+  it('controlled: the owner can close it, and that close commits nothing', () => {
+    const onOpenChange = vi.fn()
+    const props = { presentation: 'sheet' as const, open: true, onOpenChange }
+    const f = mount(props)
+    expect(f.dialog()).not.toBeNull()
+    f.rerender({ ...props, open: false })
+    expect(f.dialog()).toBeNull()
+    expect(f.onCommit).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalled()
+    // Opened again by the swatch afterwards, the picker closes and commits as usual.
+    f.rerender({ ...props, open: true })
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onOpenChange.mock.calls).toEqual([[false]])
+    expect(f.onCommit).toHaveBeenCalledTimes(1)
+  })
+
+  it('sheet: Use default clears and closes silently', () => {
+    const onOpenChange = vi.fn()
+    const f = mount({ presentation: 'sheet', allowDefault: true, value: '#123456', onOpenChange })
+    f.open()
+    fireEvent.click(screen.getByRole('button', { name: 'Use default' }))
+    expect(f.dialog()).toBeNull()
+    expect(f.onChange).toHaveBeenLastCalledWith('')
+    expect(f.onClear).toHaveBeenCalledTimes(1)
+    expect(f.onCommit).not.toHaveBeenCalled()
+    expect(onOpenChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it('the popover presentation is the default and reports open and close too', () => {
+    const onOpenChange = vi.fn()
+    const f = mount({ onOpenChange })
+    f.open()
+    expect(f.dialog()!.className).toMatch(/^popover/)
+    expect(onOpenChange.mock.calls).toEqual([[true]])
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onOpenChange.mock.calls).toEqual([[true], [false]])
   })
 })

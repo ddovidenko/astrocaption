@@ -1,4 +1,4 @@
-import { useEffectEvent, useLayoutEffect, useRef, type MouseEvent } from 'react'
+import { useEffectEvent, useLayoutEffect, useRef, type CSSProperties, type MouseEvent } from 'react'
 import ColorField from '../style/ColorField'
 import { useEscapeKey, usePressAway } from '../style/pressAway'
 import { disableAll, renameLabel } from './editing'
@@ -11,7 +11,8 @@ import { revealAbove } from './view'
 
 const MARGIN = 8
 /** The least of the canvas a sheet must leave uncovered for moving the selection into it to be
- *  worth doing; under this (a phone on its side) the sheet scrolls and the photo stays put. */
+ *  worth doing; under this (a phone on its side) the More sheet scrolls and the photo stays put.
+ *  Also the strip of photo the colour sheet shrinks to leave, while its picker can. */
 const MIN_CLEAR = 48
 
 /** The per-label controls of a compact editor (SPEC § 6.5): a short bar docked under the photo,
@@ -19,11 +20,14 @@ const MIN_CLEAR = 48
  *  phone and sits where a finger is working; this is the same model (`useLabelControls`), so every
  *  control applies to every selected label and is one undo entry, laid out for a thumb.
  *
- *  The bar: size, colour, Hide (what Delete does on a keyboard) and More. The sheet: Rename (what
- *  a double-click does with a mouse; an inline field at the label's on-screen size would be
- *  smaller than 16 px and make iOS zoom the page), then Aliases, Leader, Pin, Reset position and
- *  Clear overrides. It is a child of the dock, drawn above it over the bottom of the photo, not a
- *  child of the canvas: every touch on the canvas is cancelled for the gesture layer.
+ *  The bar: size, colour, Hide (what Delete does on a keyboard) and More. Two sheets, one open at
+ *  a time, each drawn above the dock over the bottom of the photo and positioned against it (they
+ *  are inside the dock, not the canvas: every touch on the canvas is cancelled for the gesture
+ *  layer). The colour swatch opens the picker as one (`ColorField`'s sheet presentation, rendered
+ *  inside the bar; it keeps its own press-away, Escape and commit rules). More opens the other:
+ *  Rename (what a double-click does with a mouse; an inline field at the label's on-screen size
+ *  would be smaller than 16 px and make iOS zoom the page), then Aliases, Leader, Pin, Reset
+ *  position and Clear overrides.
  *
  *  `box` is the selection's union box in original pixels, as the strip receives it. */
 export default function LabelDock({
@@ -41,10 +45,10 @@ export default function LabelDock({
   const style = useEditor((s) => s.style)
   const canvasHeight = useEditor((s) => s.viewport.h)
 
-  // Open for the selection it was opened on: when the selection moves on (a tap on another
-  // label), the sheet is simply not open any more, with no effect to reset it.
-  const [opened, setOpened, dropOpened] = useTaggedDraft<true>([selectedIds])
-  const open = opened !== null
+  // Which sheet is open, for the selection it was opened on: when the selection moves on (a tap
+  // on another label), the sheet is simply not open any more, with no effect to reset it.
+  const [sheet, setSheet, dropSheet] = useTaggedDraft<'more' | 'color'>([selectedIds])
+  const moreOpen = sheet === 'more'
 
   // Rename is for one label. The draft is tagged with the name it was typed over and with the
   // selection, like the strip's size field: it can never show, or be committed, over another label.
@@ -55,7 +59,6 @@ export default function LabelDock({
   const [typedName, setTypedName, dropName] = useTaggedDraft<string>([name, selectedIds])
 
   const dockRef = useRef<HTMLDivElement>(null)
-  const sheetRef = useRef<HTMLDivElement>(null)
 
   /** Stores a name still in the field, as leaving the field does. */
   const commitName = () => {
@@ -70,21 +73,21 @@ export default function LabelDock({
   const close = (keepName = true) => {
     if (keepName) commitName()
     else dropName()
-    dropOpened()
+    dropSheet()
   }
 
-  usePressAway(dockRef, open, () => close())
+  usePressAway(dockRef, moreOpen, () => close())
 
   // Escape closes the sheet wherever the focus is (More refuses the focus, so it is usually
   // still on the page), dropping a name that was being typed.
-  useEscapeKey(open, () => close(false))
+  useEscapeKey(moreOpen, () => close(false))
 
   // The dock takes the bottom of the canvas when it appears (the canvas is a flex sibling and
-  // gets shorter), and the sheet covers more of it when it opens. Each time, a selection that
+  // gets shorter), and a sheet covers more of it when it opens. Each time, a selection that
   // would be under the new cover is moved up by just enough to show; nothing moves back
   // afterwards (the owner may have panned since). `cover` is what has just taken the canvas's
   // lowest pixels, as many as it is tall: for the dock, the store still holds the canvas's height
-  // from before it lost them; the sheet lies over the canvas from where the dock begins.
+  // from before it lost them; a sheet lies over the canvas from where the dock begins.
   const reveal = useEffectEvent((cover: HTMLElement | null) => {
     if (!cover) return
     const s = useEditor.getState()
@@ -95,23 +98,19 @@ export default function LabelDock({
   })
   const shown = controls !== null
   useLayoutEffect(() => reveal(dockRef.current), [shown])
-  useLayoutEffect(() => reveal(sheetRef.current), [open])
+  useLayoutEffect(() => reveal(dockRef.current?.querySelector<HTMLElement>('.label-sheet, .color-sheet') ?? null), [sheet])
 
   if (!controls) return null
 
   const noFocus = (e: MouseEvent) => e.preventDefault()
+  // What the stylesheet needs of the canvas: the cap both sheets take (the More sheet scrolls
+  // under it, the colour sheet shrinks) and the strip of photo the colour sheet leaves.
+  const sheetCap = { '--sheet-max': `${Math.max(0, canvasHeight - MARGIN)}px`, '--sheet-clear': `${MIN_CLEAR}px` } as CSSProperties
 
   return (
-    <div ref={dockRef} className="label-dock" role="toolbar" aria-label="Selected labels">
-      {open && (
-        <div
-          ref={sheetRef}
-          className="label-sheet"
-          role="group"
-          aria-label="More label options"
-          // Never taller than the canvas it lies over: on a short screen it scrolls instead.
-          style={{ maxHeight: Math.max(0, canvasHeight - MARGIN) }}
-        >
+    <div ref={dockRef} className="label-dock" role="toolbar" aria-label="Selected labels" style={sheetCap}>
+      {moreOpen && (
+        <div className="label-sheet" role="group" aria-label="More label options">
           {only !== null && (
             <label className="label-sheet-row">
               <span>Rename</span>
@@ -186,7 +185,21 @@ export default function LabelDock({
             +
           </button>
         </span>
-        <ColorField label="Text colour" {...controls.color} />
+        <ColorField
+          label="Text colour"
+          presentation="sheet"
+          {...controls.color}
+          // The dock holds which sheet is open: the swatch takes More's place (a name still being
+          // typed is stored first), the picker's own closes free it, and a selection change with
+          // no press behind it (a keyboard undo pruning a multi-selection) closes it silently, as
+          // it does the More sheet.
+          open={sheet === 'color'}
+          onOpenChange={(next) => {
+            if (!next) return dropSheet()
+            commitName()
+            setSheet('color')
+          }}
+        />
         <span className="label-dock-gap" />
         <button
           type="button"
@@ -205,9 +218,11 @@ export default function LabelDock({
         <button
           type="button"
           className="secondary"
-          aria-pressed={open}
+          aria-pressed={moreOpen}
           onMouseDown={noFocus}
-          onClick={() => (open ? close() : setOpened(true))}
+          // A press on More while the colour sheet is open is a press outside the picker: it has
+          // already closed (committing) by the time this click runs.
+          onClick={() => (moreOpen ? close() : setSheet('more'))}
         >
           More
         </button>

@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { HexColorInput, HexColorPicker } from 'react-colorful'
 import { useEscapeKey, usePressAway } from './pressAway'
 import { normalizeHex } from './styleForm'
@@ -18,6 +18,9 @@ export default function ColorField({
   onChange,
   onCommit,
   onClear,
+  presentation = 'popover',
+  open: openProp,
+  onOpenChange,
 }: {
   label: string
   /** The override, or '' for "use the built-in default". */
@@ -43,8 +46,26 @@ export default function ColorField({
    *  It is the *only* terminal callback for that click: the close it triggers is silent, so a
    *  caller holding a draft never has to guess which of the two to believe. */
   onClear?: () => void
+  /** How the picker shows: a popover placed beside the swatch where it fits (the default), or a
+   *  `sheet` laid out full width against the nearest positioned ancestor of the field (the docked
+   *  label bar, SPEC § 6.5), with no placement measurement; the field marks itself
+   *  `color-field-sheet` so as not to be that ancestor. The commit rules are the same in both. */
+  presentation?: 'popover' | 'sheet'
+  /** Whether the picker is open, when the owner keeps that state (the docked bar, which lets one
+   *  sheet be open at a time). Left out, the field keeps it. An owner closing it this way commits
+   *  nothing: that is for a close the person did not ask for, such as the selection moving on. */
+  open?: boolean
+  /** The picker opened (the swatch) or closed (any of its own routes, the silent one included),
+   *  once per change. */
+  onOpenChange?: (open: boolean) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [innerOpen, setInnerOpen] = useState(false)
+  const open = openProp ?? innerOpen
+  const asSheet = presentation === 'sheet'
+  const setOpen = (next: boolean) => {
+    setInnerOpen(next)
+    onOpenChange?.(next)
+  }
   // Whether the popover would run off the right edge of its container (the side panel, a config
   // page panel, or the viewport) if opened left-aligned under the swatch — decided by measurement
   // at open time, not by which grid column the field happens to land in: a `.span2` row ahead of
@@ -57,8 +78,12 @@ export default function ColorField({
   const [alignUp, setAlignUp] = useState(false)
   // Guards against a close reaching us twice for one interaction (mousedown fires on the
   // document before a blur's focusout bubbles, both before React re-renders `open`), so onCommit
-  // fires exactly once per close.
+  // fires exactly once per close. Follows `open` once a render has settled, so an owner's own
+  // change of the prop is caught up with.
   const openRef = useRef(false)
+  useEffect(() => {
+    openRef.current = open
+  }, [open])
   const wrap = useRef<HTMLDivElement>(null)
   const swatch = useRef<HTMLButtonElement>(null)
   const popover = useRef<HTMLDivElement>(null)
@@ -85,7 +110,7 @@ export default function ColorField({
   useLayoutEffect(() => {
     const wrapEl = wrap.current
     const popEl = popover.current
-    if (!open || !wrapEl || !popEl) return
+    if (asSheet || !open || !wrapEl || !popEl) return
     const wrapRect = wrapEl.getBoundingClientRect()
     const bound = (wrapEl.closest('.editor-canvas, .side-panel-body, .panel') ?? document.documentElement).getBoundingClientRect()
     const { width, height } = popEl.getBoundingClientRect()
@@ -93,7 +118,7 @@ export default function ColorField({
     const below = bound.bottom - wrapRect.bottom
     const above = wrapRect.top - bound.top
     setAlignUp(below < height && (above >= height || above > below))
-  }, [open])
+  }, [open, asSheet])
   /** Every way out of the picker: exactly one terminal callback per close, whichever event gets
    *  there first. `silent` is for the close that follows a callback of its own ("Use default",
    *  which has already fired `onClear`): a trailing bare `onCommit()` there would reach a caller
@@ -116,7 +141,7 @@ export default function ColorField({
 
   return (
     <div
-      className="field color-field"
+      className={asSheet ? 'field color-field color-field-sheet' : 'field color-field'}
       ref={wrap}
       onBlur={(e) => {
         // Tabbing out of the popover closes it; moving focus within it does not.
@@ -145,7 +170,7 @@ export default function ColorField({
       {open && (
         <div
           ref={popover}
-          className={`popover${alignRight ? ' popover-right' : ''}${alignUp ? ' popover-up' : ''}`}
+          className={asSheet ? 'color-sheet' : `popover${alignRight ? ' popover-right' : ''}${alignUp ? ' popover-up' : ''}`}
           role="dialog"
           aria-label={`${label} picker`}
         >

@@ -16,7 +16,9 @@ optional public gallery. The roadmap is in `docs/SPEC.md` § 13.
   named stars) come back as positions in your image's own pixels.
 - **Annotate.** Every object gets a marker and a label, auto-placed to avoid each other and the
   objects. Then it is yours: turn labels on and off, drag them, pin them, change the font, colours,
-  halo and sizes for the image or for one label, re-run the placer, undo.
+  halo and sizes for the image or for one label, re-run the placer, undo. Small corrections work by
+  touch too: on a phone, fingers zoom and pan, a tap selects a label, and its controls dock under
+  the photo.
 - **Export.** The server renders the same layout onto a full-resolution copy with Pillow, matching
   the original JPEG's encoding, so the export looks like the browser preview, pixel for pixel
   within a small tolerance that the test suite enforces.
