@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError, type GalleryItem, type HealthOut } from '../api'
@@ -306,7 +306,9 @@ describe('GalleryPage', () => {
     expect(api.gallery).toHaveBeenCalledWith({ kind: 'nebula', before: 'img-7' })
     fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-10-31' } })
     expect(await screen.findByText('?kind=nebula&until=2026-10-31')).toBeTruthy()
-    expect(api.gallery).toHaveBeenLastCalledWith({ kind: 'nebula', until: '2026-10-31', before: null })
+    // The URL is written in the commit and the request goes out in a passive effect after it,
+    // so the request is waited for in its own right, not inferred from the URL (#269).
+    await waitFor(() => expect(api.gallery).toHaveBeenLastCalledWith({ kind: 'nebula', until: '2026-10-31', before: null }))
   })
 
   it('drops the answer of a search the visitor has already moved on from', async () => {
