@@ -199,9 +199,10 @@ describe('ColorField typed hex', () => {
       )
     }
     render(<Held />)
-    fireEvent.click(screen.getByRole('button', { name: /Text colour/ }))
+    const swatch = screen.getByRole('button', { name: /Text colour/ })
+    fireEvent.click(swatch)
     const hex = screen.getByRole('dialog').querySelector('input')!
-    return { onCommit, onClear, seen, hex, type: (text: string) => fireEvent.change(hex, { target: { value: text } }) }
+    return { onCommit, onClear, seen, swatch, hex, type: (text: string) => fireEvent.change(hex, { target: { value: text } }) }
   }
 
   it('typed one key at a time, commits once: when the sixth digit lands (#274)', () => {
@@ -227,13 +228,39 @@ describe('ColorField typed hex', () => {
     expect(screen.queryByRole('dialog')).not.toBeNull()
   })
 
-  it('closing takes a three-digit hex, expanded, as the one commit of that close', () => {
+  // Each route out reads the three digits from the input before the popover goes, and the routes
+  // differ in what runs first (a blur passes through the hex input's own handler on the way).
+  it.each([
+    ['Escape', () => void fireEvent.keyDown(document, { key: 'Escape' })],
+    ['a press elsewhere', () => void fireEvent.mouseDown(document.body)],
+    ['the swatch toggled shut', (f: ReturnType<typeof mountHeld>) => void fireEvent.click(f.swatch)],
+    ['tabbing out of the picker', (f: ReturnType<typeof mountHeld>) => void fireEvent.blur(f.hex, { relatedTarget: document.body })],
+    [
+      'a press elsewhere with the focus in the field (mousedown then blur)',
+      (f: ReturnType<typeof mountHeld>) =>
+        act(() => {
+          f.hex.focus()
+          fireEvent.mouseDown(document.body)
+          fireEvent.blur(f.hex, { relatedTarget: document.body })
+        }),
+    ],
+  ])('closing by %s takes a three-digit hex, expanded, as the one commit of that close', (_route, close) => {
     const f = mountHeld()
     f.type('#ff8')
-    fireEvent.keyDown(document, { key: 'Escape' })
+    close(f)
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(f.seen).toEqual(['#ffff88'])
     expect(f.onCommit.mock.calls).toEqual([['#ffff88']])
+  })
+
+  // The config page's colour fields sit inside its form, where the browser would take Enter in
+  // any text field as "Save changes". fireEvent returns false when the default was prevented.
+  it.each(['#ff8', '#ff88', '#ff8800'])('Enter in the hex field (%s) is spent there: it never submits a form around it', (text) => {
+    const f = mountHeld()
+    f.type(text)
+    expect(fireEvent.keyDown(f.hex, { key: 'Enter' })).toBe(false)
+    // Any other key is left alone: typing must still reach the field.
+    expect(fireEvent.keyDown(f.hex, { key: 'a' })).toBe(true)
   })
 
   it('a hex left unfinished is not a colour: the close commits what the caller already has', () => {

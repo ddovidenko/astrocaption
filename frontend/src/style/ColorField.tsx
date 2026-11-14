@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { HexColorInput, HexColorPicker } from 'react-colorful'
 import { useEscapeKey, usePressAway } from './pressAway'
-import { normalizeHex } from './styleForm'
+import { isShortHex, normalizeHex } from './styleForm'
 
 /** A colour override: a swatch that opens an in-page picker, never the OS dialog.
  *
@@ -121,7 +121,8 @@ export default function ColorField({
     if (!isShortHex(hex)) take(hex)
   }
   /** The three-digit hex standing in the input, if that is what it holds. Read from the input, not
-   *  remembered: whatever replaces the text (a pick on the surface, more typing) withdraws it. */
+   *  remembered, so what is taken is what the field shows: more typing withdraws it, and so does a
+   *  pick on the surface that changes the colour (the input then shows the pick). */
   const shortHex = (): string | null => {
     const text = popover.current?.querySelector('input')?.value ?? ''
     return isShortHex(text) ? text : null
@@ -215,8 +216,13 @@ export default function ColorField({
               onChange={typed}
               prefixed
               onKeyDown={(e) => {
-                // Enter says the three digits are the whole colour; the picker stays open.
-                if (e.key === 'Enter' && isShortHex(e.currentTarget.value)) take(e.currentTarget.value)
+                if (e.key !== 'Enter') return
+                // Enter is spent here, whatever the field holds: on the config page the picker is
+                // inside the form, and the browser would otherwise read the key as "Save changes".
+                e.preventDefault()
+                // It says the three digits are the whole colour; the picker stays open.
+                const short = shortHex()
+                if (short) take(short)
               }}
             />
             {allowDefault && (
@@ -238,9 +244,4 @@ export default function ColorField({
       )}
     </div>
   )
-}
-
-/** `#abc` or `abc`: a colour as it stands, and also the first half of a six-digit one. */
-function isShortHex(text: string): boolean {
-  return /^#?[0-9a-f]{3}$/i.test(text.trim())
 }

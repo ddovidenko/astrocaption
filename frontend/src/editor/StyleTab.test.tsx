@@ -219,6 +219,16 @@ describe('StyleTab reset and colour', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(state().undo).toHaveLength(1) // the close committed the same value: no second entry
   })
+  it('three digits typed then closed are one commit of the expanded colour (#274)', async () => {
+    state().load(doc())
+    render(<StyleTab />)
+    fireEvent.click(screen.getByRole('button', { name: /Text colour/ }))
+    fireEvent.change(screen.getByRole('dialog').querySelector('input')!, { target: { value: '#ff8' } })
+    expect(state().undo).toHaveLength(0) // three digits wait for the close
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(state().style?.text_color).toBe('#ffff88')
+    expect(state().undo).toHaveLength(1)
+  })
   it('controls are disabled while the document is not editable', () => {
     const d = doc()
     state().load({ ...d, image: { ...d.image, solve_status: 'solving' } })

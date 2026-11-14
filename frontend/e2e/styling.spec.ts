@@ -63,16 +63,22 @@ test('the Style tab changes the font size live, autosaves it, and Ctrl+Z takes i
     // input strips the leading '#' and normalizeHex lower-cases nothing it is given, so the stored
     // value keeps whatever case the input round-trips — compare case-insensitively.
     // Typed one key at a time, as a person does: the first three digits are a colour of their own
-    // (#ffff88) and must neither be stored nor rewrite the field on the way to the sixth (#274).
+    // (#ffff88) and must neither rewrite the field on the way to the sixth nor be stored as a
+    // change (#274); the single undo further down is what shows the second.
     await page.getByRole('button', { name: /Text colour/ }).click()
     const hexInput = page.locator('.popover input')
     await hexInput.selectText()
     await hexInput.pressSequentially('ff8')
     await expect(hexInput).toHaveValue('#ff8')
-    expect((await stored()).style.text_color).toBe(before.style.text_color)
     await hexInput.pressSequentially('800')
     await page.keyboard.press('Escape')
     await expect.poll(async () => (await stored()).style.text_color, { timeout: 5_000 }).toMatch(/^#ff8800$/i)
+    await expect(page.locator('.save-status')).toHaveText('Saved')
+
+    // The typed colour was one change: one undo is back at the colour before it, not at #ffff88.
+    await page.locator('.editor-canvas').click({ position: { x: 5, y: 5 } })
+    await page.keyboard.press('Control+z')
+    await expect.poll(async () => (await stored()).style.text_color, { timeout: 5_000 }).toBe(before.style.text_color)
     await expect(page.locator('.save-status')).toHaveText('Saved')
 
     // Reset to site defaults: every field in the stored style matches what the server itself would
@@ -119,4 +125,27 @@ test('the style preview keeps a large label inside its strip', async ({ page }) 
       }),
     )
     .toEqual([true, true])
+})
+
+// #274: the config page's colour fields sit inside its form, where the browser takes Enter in a
+// text field as "Save changes". Enter in the hex field is how three digits are taken as a colour,
+// so it must stay in the picker: nothing is sent, and the page's other edits stay unsaved.
+test('Enter in a hex field on the config page takes the colour and saves nothing', async ({ page }) => {
+  await ensureSetUpAndSignedIn(page)
+  await page.goto('/config')
+  const writes: string[] = []
+  page.on('request', (request) => {
+    if (request.method() !== 'GET') writes.push(`${request.method()} ${new URL(request.url()).pathname}`)
+  })
+  const swatch = page.getByRole('button', { name: /Text colour/ })
+  await swatch.click()
+  const hexInput = page.locator('.popover input')
+  await hexInput.selectText()
+  await hexInput.pressSequentially('ff8')
+  await page.keyboard.press('Enter')
+  await expect(swatch).toContainText('#FFFF88')
+  await expect(page.locator('.popover')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.popover')).toHaveCount(0)
+  expect(writes).toEqual([])
 })
