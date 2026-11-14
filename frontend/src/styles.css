@@ -336,7 +336,9 @@ html:has(> body > #root > main.editor-main) { overscroll-behavior: none; }
    swatch shows its chip alone and the size field is narrow. z-index: its sheet and the colour
    popover open upwards, over the canvas. */
 .label-dock { position: relative; z-index: 6; background: var(--panel); border-top: 1px solid var(--border); }
-.label-dock-bar { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem; }
+/* Narrower than 375 px the bar does not fit on one row and scrolls sideways (SPEC § 6.5); the
+   sheets are children of the dock, not of the bar, so this never clips them. */
+.label-dock-bar { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem; overflow-x: auto; scrollbar-width: thin; }
 .label-dock-bar > * { flex: none; }
 .label-dock-bar .label-dock-gap { flex: 1 1 0; }
 .label-dock-bar button, .label-dock-bar input { min-height: 44px; font-size: 1rem; }

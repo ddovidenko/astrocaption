@@ -582,6 +582,21 @@ test('touch: the docked bar and its sheet do what the floating strip does', asyn
         await expectNoHorizontalOverflow(page, `editor with the docked bar at ${width} px`)
         expect((await page.locator('.label-dock-bar').boundingBox())!.height).toBeLessThanOrEqual(64)
       }
+      // Narrower than 375 px the bar does not fit on one row; it scrolls sideways within its
+      // pane (the sheets, children of the dock and not of the bar, are not clipped by this).
+      {
+        await page.setViewportSize({ width: 320, height: 568 })
+        const bar = page.locator('.label-dock-bar')
+        await expect.poll(async () => bar.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
+        await expectNoHorizontalOverflow(page, 'editor with the docked bar at 320 px')
+        await expect(toolbar.getByRole('button', { name: 'More' })).not.toBeInViewport({ ratio: 1 })
+        await bar.evaluate((el) => el.scrollTo({ left: el.scrollWidth }))
+        await expect(toolbar.getByRole('button', { name: 'More' })).toBeInViewport({ ratio: 1 })
+        expect((await bar.boundingBox())!.height, 'a scrollbar must not make the bar taller').toBeLessThanOrEqual(64)
+        await bar.evaluate((el) => el.scrollTo({ left: 0 }))
+        await page.setViewportSize({ width: 390, height: 844 })
+        await expect.poll(selected).toEqual([id])
+      }
     }
 
     // 5. Touching the photo ends an edit in progress: a size typed in the toolbar, with no Enter,
