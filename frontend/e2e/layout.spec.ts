@@ -173,6 +173,15 @@ test.describe('phone width', () => {
       const toolbar = (await page.locator('.editor-toolbar').boundingBox())!
       expect(toolbar.y).toBe(0)
       expect(toolbar.height).toBeLessThanOrEqual(60)
+      // The editor page is exactly as tall as the viewport, never taller: on iOS Safari `100vh`
+      // is the *large* viewport (the screen with the browser's bars folded away) while `100dvh`
+      // is the current one, and a body whose min-height is the former in a viewport of the
+      // latter is a page that scrolls, which folds the bars away and then draws them over the
+      // top bar and the docked label bar when they come back (seen on iOS 18.7). Chromium's two
+      // viewports are the same size, so the cause is pinned rather than the symptom: nothing
+      // may give the editor body a minimum height.
+      expect(await page.evaluate(() => getComputedStyle(document.body).minHeight)).toBe('0px')
+      expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true)
       // The canvas pane starts right under it; inside the pane only a notice (a sentence about
       // this image, when there is one) sits above the photo.
       expect((await page.locator('.editor-body').boundingBox())!.y).toBeLessThanOrEqual(64)

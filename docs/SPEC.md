@@ -762,4 +762,4 @@ Later (not v1): local ASTAP solver option, custom object entries (user-added lab
 
 - Nova rate limits: undocumented; we serialise solves (one at a time) and cache job results forever. Confirm behaviour under a burst of 5 uploads. (#56)
 - Object list size: wide fields can return 500+ HD stars. Decided 2026-09-11 (#37): `hd` entries are hidden by default and shown by the Objects tab's HD-stars toggle; a bright star that nova lists twice, as `bright` and as `hd` at the same pixel, keeps both rows (flagging the twin is post-v1 polish). The filter is tested against `tests/fixtures/nova-narrow/`: 8 objects, 5 `hd`, 3 labels enabled. (nova adds `hd` entries only to fields of about 1° radius or less: the 2.4° Orion recording has none.)
-- Touch editor (§ 6.5): not yet checked on a real iPhone (planned for the first release carrying it) or on any tablet (#263).
+- Touch editor (§ 6.5): checked on an iPhone (iOS 18.7, v0.1.2, 2026-11-14): the one finding, a page taller than the viewport that let Safari's bars cover the top bar and the docked label bar, is fixed; the pinch's cost (#262) is still to be judged there; not yet checked on any tablet (#263).
