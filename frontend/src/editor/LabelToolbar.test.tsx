@@ -293,6 +293,27 @@ describe('LabelToolbar', () => {
     expect(state().undo).toHaveLength(2)
   })
 
+  it('a hex typed one key at a time is one undo entry, and its three-digit prefix is never stored (#274)', () => {
+    render(<LabelToolbar box={box} />)
+    fireEvent.click(screen.getByRole('button', { name: /Text colour/ }))
+    const hex = screen.getByRole('dialog').querySelector('input')!
+    for (const text of ['#f', '#ff', '#ff8']) fireEvent.change(hex, { target: { value: text } })
+    expect(label(1).color).toBeNull()
+    expect(hex.value).toBe('#ff8')
+    for (const text of ['#ff88', '#ff880', '#ff8800']) fireEvent.change(hex, { target: { value: text } })
+    expect(label(1).color).toBe('#ff8800')
+    expect(state().undo).toHaveLength(2) // toggleObject + the one colour
+  })
+
+  it('a three-digit hex is stored, expanded, when the picker closes: one undo entry', () => {
+    render(<LabelToolbar box={box} />)
+    fireEvent.click(screen.getByRole('button', { name: /Text colour/ }))
+    fireEvent.change(screen.getByRole('dialog').querySelector('input')!, { target: { value: '#ff8' } })
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(label(1).color).toBe('#ffff88')
+    expect(state().undo).toHaveLength(2)
+  })
+
   it('pin toggles the whole selection; reset unpins and moves; clear overrides clears', () => {
     state().moveLabel(1, 5, 5) // pinned now
     state().toggleSelect(2)

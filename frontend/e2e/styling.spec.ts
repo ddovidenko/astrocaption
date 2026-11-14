@@ -62,8 +62,15 @@ test('the Style tab changes the font size live, autosaves it, and Ctrl+Z takes i
     // carrying the just-typed value rather than a render-behind draft (#B). react-colorful's hex
     // input strips the leading '#' and normalizeHex lower-cases nothing it is given, so the stored
     // value keeps whatever case the input round-trips — compare case-insensitively.
+    // Typed one key at a time, as a person does: the first three digits are a colour of their own
+    // (#ffff88) and must neither be stored nor rewrite the field on the way to the sixth (#274).
     await page.getByRole('button', { name: /Text colour/ }).click()
-    await page.locator('.popover input').fill('ff8800')
+    const hexInput = page.locator('.popover input')
+    await hexInput.selectText()
+    await hexInput.pressSequentially('ff8')
+    await expect(hexInput).toHaveValue('#ff8')
+    expect((await stored()).style.text_color).toBe(before.style.text_color)
+    await hexInput.pressSequentially('800')
     await page.keyboard.press('Escape')
     await expect.poll(async () => (await stored()).style.text_color, { timeout: 5_000 }).toMatch(/^#ff8800$/i)
     await expect(page.locator('.save-status')).toHaveText('Saved')

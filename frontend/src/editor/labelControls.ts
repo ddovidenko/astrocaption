@@ -232,7 +232,8 @@ export function useLabelControls(onError?: (message: string) => void): LabelCont
     // A drag only moves the draft, so the picker surface tracks the pointer; the close commits
     // it as one entry (a close with no drag carries no draft and commits nothing, and a draft
     // that landed back on the stored colour is a patch `updateLabels` drops). A typed hex
-    // arrives with the commit and is committed on the keystroke; "Use default" clears the
+    // arrives with the commit and is committed on the keystroke that completes it (the sixth
+    // digit; three digits wait for Enter or the close, #274); "Use default" clears the
     // override and cancels the draft outright — ColorField fires one terminal callback per
     // close, so a clear never also arrives here as a commit. Every path drops the draft, so
     // the stored value shows again.
