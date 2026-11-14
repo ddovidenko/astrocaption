@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ColorField from './ColorField'
 import { cancellingCanvas as canvas } from './testCanvas'
@@ -170,6 +171,88 @@ describe('ColorField typed hex', () => {
     expect(f.onCommit).toHaveBeenCalledTimes(1)
     expect(f.onCommit).toHaveBeenLastCalledWith('#ff8800')
     expect(f.dialog()).not.toBeNull()
+  })
+
+  /** The field as its callers hold it: the value follows `onChange`, the way a draft does, so the
+   *  hex input is fed back whatever the field reported. `mount` pins the value and cannot show
+   *  what that feedback does to a hex still being typed. */
+  function mountHeld(over: Partial<Parameters<typeof ColorField>[0]> = {}) {
+    const onCommit = vi.fn()
+    const onClear = vi.fn()
+    const seen: string[] = []
+    function Held() {
+      const [value, setValue] = useState('#ffffff')
+      return (
+        <ColorField
+          label="Text colour"
+          value={value}
+          fallback="#000000"
+          allowDefault={false}
+          onChange={(hex) => {
+            seen.push(hex)
+            setValue(hex)
+          }}
+          onCommit={onCommit}
+          onClear={onClear}
+          {...over}
+        />
+      )
+    }
+    render(<Held />)
+    fireEvent.click(screen.getByRole('button', { name: /Text colour/ }))
+    const hex = screen.getByRole('dialog').querySelector('input')!
+    return { onCommit, onClear, seen, hex, type: (text: string) => fireEvent.change(hex, { target: { value: text } }) }
+  }
+
+  it('typed one key at a time, commits once: when the sixth digit lands (#274)', () => {
+    const f = mountHeld()
+    for (const text of ['#f', '#ff', '#ff8']) f.type(text)
+    // Three digits are a colour too (#ffff88), but taking it here would be an undo entry for a
+    // colour nobody asked for, and would rewrite the field under the cursor.
+    expect(f.hex.value).toBe('#ff8')
+    expect(f.onCommit).not.toHaveBeenCalled()
+    expect(f.seen).toEqual([])
+    for (const text of ['#ff88', '#ff880', '#ff8800']) f.type(text)
+    expect(f.onCommit.mock.calls).toEqual([['#ff8800']])
+    expect(f.seen).toEqual(['#ff8800'])
+  })
+
+  it('Enter takes a three-digit hex, expanded, and keeps the picker open', () => {
+    const f = mountHeld()
+    f.type('#ff8')
+    fireEvent.keyDown(f.hex, { key: 'Enter' })
+    expect(f.seen).toEqual(['#ffff88'])
+    expect(f.onCommit.mock.calls).toEqual([['#ffff88']])
+    expect(f.hex.value).toBe('#ffff88')
+    expect(screen.queryByRole('dialog')).not.toBeNull()
+  })
+
+  it('closing takes a three-digit hex, expanded, as the one commit of that close', () => {
+    const f = mountHeld()
+    f.type('#ff8')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(f.seen).toEqual(['#ffff88'])
+    expect(f.onCommit.mock.calls).toEqual([['#ffff88']])
+  })
+
+  it('a hex left unfinished is not a colour: the close commits what the caller already has', () => {
+    const f = mountHeld()
+    for (const text of ['#ff8', '#ff88']) f.type(text)
+    fireEvent.keyDown(f.hex, { key: 'Enter' })
+    expect(f.onCommit).not.toHaveBeenCalled()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(f.seen).toEqual([])
+    expect(f.onCommit.mock.calls).toEqual([[]])
+  })
+
+  it('Use default over a typed three-digit hex clears, and the hex is not committed', () => {
+    const f = mountHeld({ allowDefault: true })
+    f.type('#ff8')
+    fireEvent.click(screen.getByRole('button', { name: 'Use default' }))
+    expect(f.seen).toEqual([''])
+    expect(f.onClear).toHaveBeenCalledTimes(1)
+    expect(f.onCommit).not.toHaveBeenCalled()
   })
 })
 

@@ -28,8 +28,9 @@ export interface StyleFormProps {
   fontNote?: string | null
   onChange: <K extends keyof StyleFormValues>(key: K, value: StyleFormValues[K]) => void
   /** A colour picker closed, a hex was typed, or "Use default" was clicked — commit the current
-   *  value. `hex` is set for a typed commit (the just-typed value) and '' for a clear; undefined
-   *  for a close, where the caller commits whatever it already has for `key`. Only the Style tab
+   *  value. `hex` is set for a typed commit (the just-typed value, also when a close finds three
+   *  digits typed) and '' for a clear; undefined for any other close, where the caller commits
+   *  whatever it already has for `key`. Only the Style tab
    *  (values mode) passes it: the config page's form is committed by its own submit button. */
   onColorCommit?: (key: ColorKey, hex?: string) => void
   /** values mode only: a number field lost focus, or Enter was pressed in it — commit its

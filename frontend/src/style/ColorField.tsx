@@ -7,7 +7,10 @@ import { normalizeHex } from './styleForm'
  *
  *  Exactly one terminal callback leaves this component per interaction: `onCommit` for every
  *  close and for a typed hex, `onClear` for "Use default" — never both, so a caller with a live
- *  draft needs no one-shot flag of its own to tell a clear from the close that follows it. */
+ *  draft needs no one-shot flag of its own to tell a clear from the close that follows it.
+ *
+ *  A typed hex is taken when its sixth digit lands. Three digits are taken, expanded, only on
+ *  Enter or by the close: on the keystroke they would be a commit for the first half of a colour. */
 export default function ColorField({
   label,
   value,
@@ -39,7 +42,8 @@ export default function ColorField({
   /** A colour picker closed or a hex was typed — commit the current value. A typed commit carries
    *  the just-typed hex, since the draft `onChange` set a moment earlier has not necessarily
    *  reached the caller's own state yet (StyleTab reads `draft` a render behind a keystroke); a
-   *  close carries nothing, so the caller commits whatever it already has. */
+   *  close carries nothing, so the caller commits whatever it already has — unless it found a
+   *  three-digit hex waiting in the input, which it then carries as a typed commit does. */
   onCommit?: (hex?: string) => void
   /** "Use default" was clicked (allowDefault only). Without it the caller sees `onChange('')`
    *  followed by a bare `onCommit()`, which a stateless caller cannot tell from a plain close.
@@ -91,9 +95,23 @@ export default function ColorField({
   const valueId = `${id}-value`
   const shown = value || fallback
   const pick = (hex: string) => onChange(normalizeHex(hex))
-  const typed = (hex: string) => {
+  const take = (hex: string) => {
     pick(hex)
     onCommit?.(normalizeHex(hex))
+  }
+  // The hex input reports every valid colour, and three digits are one: `#ff8` on the way to
+  // `#ff8800`. Taking it on the keystroke stored `#ffff88` as a change of its own and, because the
+  // input follows the value it is given, rewrote the field under the cursor (#274). So the short
+  // form waits in the input, where `shortHex` finds it, for Enter or for the picker to close; six
+  // digits cannot be the start of anything longer and are taken at once.
+  const typed = (hex: string) => {
+    if (!isShortHex(hex)) take(hex)
+  }
+  /** The three-digit hex standing in the input, if that is what it holds. Read from the input, not
+   *  remembered: whatever replaces the text (a pick on the surface, more typing) withdraws it. */
+  const shortHex = (): string | null => {
+    const text = popover.current?.querySelector('input')?.value ?? ''
+    return isShortHex(text) ? text : null
   }
   const openPicker = () => {
     openRef.current = true
@@ -126,9 +144,12 @@ export default function ColorField({
   const closePicker = (refocus: boolean, { silent = false }: { silent?: boolean } = {}) => {
     if (!openRef.current) return
     openRef.current = false
+    // Before the popover goes: a three-digit hex left in the input is this close's commit.
+    const short = silent ? null : shortHex()
     setOpen(false)
     if (refocus) swatch.current?.focus() // a keyboard user lands back where they started
-    if (!silent) onCommit?.()
+    if (short) take(short)
+    else if (!silent) onCommit?.()
   }
 
   // A press anywhere else closes the picker, committing what it holds (see `usePressAway` for why
@@ -176,7 +197,15 @@ export default function ColorField({
         >
           <HexColorPicker color={shown} onChange={pick} />
           <div className="popover-row">
-            <HexColorInput color={shown} onChange={typed} prefixed />
+            <HexColorInput
+              color={shown}
+              onChange={typed}
+              prefixed
+              onKeyDown={(e) => {
+                // Enter says the three digits are the whole colour; the picker stays open.
+                if (e.key === 'Enter' && isShortHex(e.currentTarget.value)) take(e.currentTarget.value)
+              }}
+            />
             {allowDefault && (
               <button
                 type="button"
@@ -196,4 +225,9 @@ export default function ColorField({
       )}
     </div>
   )
+}
+
+/** `#abc` or `abc`: a colour as it stands, and also the first half of a six-digit one. */
+function isShortHex(text: string): boolean {
+  return /^#?[0-9a-f]{3}$/i.test(text.trim())
 }
