@@ -408,6 +408,14 @@ test('touch: the docked bar and its sheet do what the floating strip does', asyn
   // bottom of the pane once a label is selected.
   const photo = { x: box.x + 20, y: box.y + 20 }
   const sheet = page.getByRole('group', { name: 'More label options' })
+  const swatch = toolbar.getByRole('button', { name: /Text colour/ })
+  const picker = page.getByRole('dialog', { name: 'Text colour picker' })
+  const dock = page.locator('.label-dock')
+  /** A sheet spans the dock. */
+  const expectSheetWidth = async (el: typeof picker) => {
+    const [a, b] = await Promise.all([el.boundingBox(), dock.boundingBox()])
+    expect(Math.abs(a!.width - b!.width), 'a sheet is as wide as the dock').toBeLessThanOrEqual(1)
+  }
 
   await withAnnotationsRestored(page, imageId, async () => {
     const { id, corner, fittedScale } = await labelWithRoom(page, box)
@@ -443,20 +451,18 @@ test('touch: the docked bar and its sheet do what the floating strip does', asyn
       const chip = toolbar.locator('.swatch-chip')
       const chipColor = () => chip.evaluate((el) => getComputedStyle(el).backgroundColor)
       const before = await chipColor()
-      await toolbar.getByRole('button', { name: /Text colour/ }).tap()
-      const picker = page.getByRole('dialog', { name: 'Text colour picker' })
+      await swatch.tap()
       await expect(picker).toBeVisible()
       await expect(picker).toBeInViewport({ ratio: 1 })
-      const dockBox = (await page.locator('.label-dock').boundingBox())!
-      const pickerBox = (await picker.boundingBox())!
-      expect(Math.abs(pickerBox.width - dockBox.width), 'a sheet is as wide as the dock').toBeLessThanOrEqual(1)
-      expect(pickerBox.y + pickerBox.height, 'the sheet sits on the bar').toBeLessThanOrEqual(dockBox.y + 1)
+      await expectSheetWidth(picker)
+      const [pickerBox, dockBox] = await Promise.all([picker.boundingBox(), dock.boundingBox()])
+      expect(pickerBox!.y + pickerBox!.height, 'the sheet sits on the bar').toBeLessThanOrEqual(dockBox!.y + 1)
       // More takes the sheet's place, then the swatch takes it back (nothing picked yet, so
       // nothing is committed on the way).
       await toolbar.getByRole('button', { name: 'More' }).tap()
       await expect(picker).toBeHidden()
       await expect(sheet).toBeVisible()
-      await toolbar.getByRole('button', { name: /Text colour/ }).tap()
+      await swatch.tap()
       await expect(sheet).toBeHidden()
       await expect(picker).toBeVisible()
       await expect(undo).toBeDisabled()
@@ -466,12 +472,11 @@ test('touch: the docked bar and its sheet do what the floating strip does', asyn
       await expect.poll(chipColor).not.toBe(before)
       expect(await storedColor()).toBeNull()
       await expect(undo).toBeDisabled()
-      // A tap on the photo closes it and commits the pick as one change.
-      const picked = await chipColor() // "rgb(r, g, b)"
-      const pickedHex = '#' + picked.match(/\d+/g)!.map((n) => Number(n).toString(16).padStart(2, '0')).join('')
+      // A tap on the photo closes it and commits the pick (the hex field shows it) as one change.
+      const pickedHex = await picker.locator('input').inputValue()
       await page.touchscreen.tap(photo.x, photo.y)
       await expect(picker).toBeHidden()
-      await expect.poll(async () => (await storedColor())?.toLowerCase() ?? null, { timeout: 5_000 }).toBe(pickedHex)
+      await expect.poll(async () => (await storedColor())?.toLowerCase() ?? null, { timeout: 5_000 }).toBe(pickedHex.toLowerCase())
       await expect(undo).toBeEnabled()
       await undo.tap()
       await expect.poll(storedColor, { timeout: 5_000 }).toBeNull()
@@ -479,24 +484,6 @@ test('touch: the docked bar and its sheet do what the floating strip does', asyn
       // That touch may have landed on anything; back to the label.
       const at = await labelPoint()
       await page.touchscreen.tap(at.x, at.y)
-      await expect.poll(selected).toEqual([id])
-      // A phone on its side leaves the canvas short. The picker's own surfaces refuse a scrolling
-      // finger (react-colorful sets touch-action: none on them), so the sheet must fit the canvas
-      // without scrolling: the picker shrinks and Use default stays on screen.
-      await page.setViewportSize({ width: 844, height: 390 })
-      await expect.poll(selected).toEqual([id])
-      await toolbar.getByRole('button', { name: /Text colour/ }).tap()
-      await expect(picker).toBeVisible()
-      await expect(picker.getByRole('button', { name: 'Use default' })).toBeInViewport({ ratio: 1 })
-      expect(await picker.evaluate((el) => el.scrollHeight <= el.clientHeight), 'the colour sheet must not need to scroll').toBe(true)
-      // What the sheet leaves of the photo is a strip along the top of the canvas (the picker has
-      // a 96 px floor, so here it is under the 48 px the dock aims for); a tap there still closes it.
-      const canvas = (await page.locator('.editor-canvas').boundingBox())!
-      const pickerTop = (await picker.boundingBox())!.y
-      expect(pickerTop - canvas.y, 'the sheet leaves a strip of photo to tap').toBeGreaterThanOrEqual(16)
-      await page.touchscreen.tap(canvas.x + 20, canvas.y + 8)
-      await expect(picker).toBeHidden()
-      await page.setViewportSize({ width: 390, height: 844 })
       await expect.poll(selected).toEqual([id])
     }
 
@@ -627,10 +614,29 @@ test('touch: the docked bar and its sheet do what the floating strip does', asyn
         await expectNoHorizontalOverflow(page, `editor with the docked bar at ${width} px`)
         expect((await page.locator('.label-dock-bar').boundingBox())!.height).toBeLessThanOrEqual(64)
       }
+      // A phone on its side leaves the canvas short. The picker's own surfaces refuse a scrolling
+      // finger (react-colorful sets touch-action: none on them), so the sheet must fit the canvas
+      // without scrolling: the picker shrinks and Use default stays on screen.
+      {
+        await page.setViewportSize({ width: 844, height: 390 })
+        await expect.poll(selected).toEqual([id])
+        await swatch.tap()
+        await expect(picker).toBeVisible()
+        await expect(picker.getByRole('button', { name: 'Use default' })).toBeInViewport({ ratio: 1 })
+        expect(await picker.evaluate((el) => el.scrollHeight <= el.clientHeight), 'the colour sheet must not need to scroll').toBe(true)
+        // What the sheet leaves of the photo is a strip along the top of the canvas (the picker
+        // has a 96 px floor, so here it is under the 48 px the dock aims for); a tap there still
+        // closes it.
+        const [canvas, pickerBox] = await Promise.all([page.locator('.editor-canvas').boundingBox(), picker.boundingBox()])
+        expect(pickerBox!.y - canvas!.y, 'the sheet leaves a strip of photo to tap').toBeGreaterThanOrEqual(16)
+        await page.touchscreen.tap(canvas!.x + 20, canvas!.y + 8)
+        await expect(picker).toBeHidden()
+      }
       // Narrower than 375 px the bar does not fit on one row; it scrolls sideways within its
       // pane. The sheets are positioned against the dock, so the bar's overflow does not clip them.
       {
         await page.setViewportSize({ width: 320, height: 568 })
+        await expect.poll(selected).toEqual([id])
         const bar = page.locator('.label-dock-bar')
         await expect.poll(async () => bar.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
         await expectNoHorizontalOverflow(page, 'editor with the docked bar at 320 px')
@@ -640,10 +646,9 @@ test('touch: the docked bar and its sheet do what the floating strip does', asyn
         expect((await bar.boundingBox())!.height, 'a scrollbar must not make the bar taller').toBeLessThanOrEqual(64)
         await bar.evaluate((el) => el.scrollTo({ left: 0 }))
         // The colour sheet is rendered inside the bar; the bar's overflow must not clip it.
-        await toolbar.getByRole('button', { name: /Text colour/ }).tap()
-        const picker = page.getByRole('dialog', { name: 'Text colour picker' })
+        await swatch.tap()
         await expect(picker).toBeInViewport({ ratio: 1 })
-        expect(Math.abs((await picker.boundingBox())!.width - (await page.locator('.label-dock').boundingBox())!.width)).toBeLessThanOrEqual(1)
+        await expectSheetWidth(picker)
         await page.touchscreen.tap(photo.x, photo.y)
         await expect(picker).toBeHidden()
         await page.setViewportSize({ width: 390, height: 844 })

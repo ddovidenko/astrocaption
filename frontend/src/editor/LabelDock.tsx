@@ -11,7 +11,8 @@ import { revealAbove } from './view'
 
 const MARGIN = 8
 /** The least of the canvas a sheet must leave uncovered for moving the selection into it to be
- *  worth doing; under this (a phone on its side) the sheet scrolls and the photo stays put. */
+ *  worth doing; under this (a phone on its side) the More sheet scrolls and the photo stays put.
+ *  Also the strip of photo the colour sheet shrinks to leave, while its picker can. */
 const MIN_CLEAR = 48
 
 /** The per-label controls of a compact editor (SPEC § 6.5): a short bar docked under the photo,
@@ -23,9 +24,10 @@ const MIN_CLEAR = 48
  *  a time, each drawn above the dock over the bottom of the photo and positioned against it (they
  *  are inside the dock, not the canvas: every touch on the canvas is cancelled for the gesture
  *  layer). The colour swatch opens the picker as one (`ColorField`'s sheet presentation, rendered
- *  inside the bar; it keeps its own press-away, Escape and commit rules). More opens the other: Rename (what a double-click does with a mouse;
- *  an inline field at the label's on-screen size would be smaller than 16 px and make iOS zoom the
- *  page), then Aliases, Leader, Pin, Reset position and Clear overrides.
+ *  inside the bar; it keeps its own press-away, Escape and commit rules). More opens the other:
+ *  Rename (what a double-click does with a mouse; an inline field at the label's on-screen size
+ *  would be smaller than 16 px and make iOS zoom the page), then Aliases, Leader, Pin, Reset
+ *  position and Clear overrides.
  *
  *  `box` is the selection's union box in original pixels, as the strip receives it. */
 export default function LabelDock({
@@ -101,8 +103,9 @@ export default function LabelDock({
   if (!controls) return null
 
   const noFocus = (e: MouseEvent) => e.preventDefault()
-  // Neither sheet is ever taller than the canvas it lies over: on a short screen it scrolls instead.
-  const sheetCap = { '--sheet-max': `${Math.max(0, canvasHeight - MARGIN)}px` } as CSSProperties
+  // What the stylesheet needs of the canvas: the cap both sheets take (the More sheet scrolls
+  // under it, the colour sheet shrinks) and the strip of photo the colour sheet leaves.
+  const sheetCap = { '--sheet-max': `${Math.max(0, canvasHeight - MARGIN)}px`, '--sheet-clear': `${MIN_CLEAR}px` } as CSSProperties
 
   return (
     <div ref={dockRef} className="label-dock" role="toolbar" aria-label="Selected labels" style={sheetCap}>
@@ -183,20 +186,19 @@ export default function LabelDock({
           </button>
         </span>
         <ColorField
-          // Remounted, closed, when the selection changes under it with no press to close it (a
-          // keyboard undo pruning a multi-selection): the same exit the More sheet takes.
-          key={[...selectedIds].join()}
           label="Text colour"
           presentation="sheet"
           {...controls.color}
-          // Opening it takes More's place, with a name still being typed stored first; closing
-          // (by any of the picker's own routes) frees the place again. The picker cannot be open
-          // while More is, so there is nothing to guard here.
-          onOpen={() => {
+          // The dock holds which sheet is open: the swatch takes More's place (a name still being
+          // typed is stored first), the picker's own closes free it, and a selection change with
+          // no press behind it (a keyboard undo pruning a multi-selection) closes it silently, as
+          // it does the More sheet.
+          open={sheet === 'color'}
+          onOpenChange={(next) => {
+            if (!next) return dropSheet()
             commitName()
             setSheet('color')
           }}
-          onClose={dropSheet}
         />
         <span className="label-dock-gap" />
         <button

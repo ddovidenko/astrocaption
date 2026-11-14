@@ -5,6 +5,7 @@ import { disableAll } from './editing'
 import LabelDock from './LabelDock'
 import { useEditor } from './store'
 import { makeDoc } from './testDoc'
+import { cancellingCanvas } from '../style/testCanvas'
 
 // `Reset position` runs the browser placer, which measures text on a real canvas — vitest has
 // none, so the module's function is replaced: it records its call, or throws on demand.
@@ -43,6 +44,9 @@ const sheet = () => screen.queryByRole('group', { name: 'More label options' })
 const more = () => screen.getByRole('button', { name: 'More' })
 const rename = () => screen.getByLabelText('Rename') as HTMLInputElement
 const openSheet = () => fireEvent.click(more())
+const swatch = () => screen.getByRole('button', { name: /Text colour/ })
+const colourSheet = () => screen.queryByRole('dialog', { name: 'Text colour picker' })
+const openColourSheet = () => fireEvent.click(swatch())
 /** Whether the elements come in this order in the document. */
 function inOrder(els: Element[]): boolean {
   return els.every((el, i) => i === 0 || Boolean(els[i - 1]!.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING))
@@ -64,7 +68,7 @@ describe('LabelDock bar', () => {
         screen.getByRole('button', { name: 'Smaller' }),
         screen.getByLabelText('Font size'),
         screen.getByRole('button', { name: 'Larger' }),
-        screen.getByRole('button', { name: /Text colour/ }),
+        swatch(),
         screen.getByRole('button', { name: 'Hide' }),
         more(),
       ]),
@@ -373,7 +377,7 @@ describe('LabelDock keeps the selection in view', () => {
     sheetHeight(300)
     act(() => state().setView({ scale: 0.5, x: 0, y: 0 }))
     render(<LabelDock box={{ ...box, bottom: 1400 }} />)
-    fireEvent.click(screen.getByRole('button', { name: /Text colour/ }))
+    openColourSheet()
     expect(state().view).toEqual({ scale: 0.5, x: 0, y: -208 })
   })
 
@@ -390,12 +394,9 @@ describe('LabelDock keeps the selection in view', () => {
 })
 
 describe('LabelDock colour sheet', () => {
-  const swatch = () => screen.getByRole('button', { name: /Text colour/ })
-  const colourSheet = () => screen.queryByRole('dialog', { name: 'Text colour picker' })
-
   it('the swatch opens a sheet, not a popover', () => {
     render(<LabelDock box={box} />)
-    fireEvent.click(swatch())
+    openColourSheet()
     expect(colourSheet()!.className).toBe('color-sheet')
     expect(sheet()).toBeNull()
   })
@@ -403,7 +404,7 @@ describe('LabelDock colour sheet', () => {
   it('only one sheet at a time: the swatch closes More, More closes the colour sheet', () => {
     render(<LabelDock box={box} />)
     openSheet()
-    fireEvent.click(swatch())
+    openColourSheet()
     expect(sheet()).toBeNull()
     expect(colourSheet()).not.toBeNull()
     expect(more().getAttribute('aria-pressed')).toBe('false')
@@ -417,20 +418,17 @@ describe('LabelDock colour sheet', () => {
     render(<LabelDock box={box} />)
     openSheet()
     fireEvent.change(rename(), { target: { value: 'Typed' } })
-    fireEvent.click(swatch())
+    openColourSheet()
     expect(label(1).text_override).toBe('Typed')
   })
 
   it('a press on the photo closes the colour sheet, committing the pick as one change', () => {
     render(<LabelDock box={box} />)
     const before = state().undo.length
-    fireEvent.click(swatch())
+    openColourSheet()
     const hex = colourSheet()!.querySelector('input')!
     fireEvent.change(hex, { target: { value: '#ff8800' } }) // a typed hex commits at once
-    const canvas = document.createElement('div')
-    canvas.className = 'editor-canvas'
-    document.body.append(canvas)
-    canvas.addEventListener('touchstart', (e) => e.preventDefault())
+    const canvas = cancellingCanvas()
     act(() => {
       fireEvent.touchStart(canvas)
     })
@@ -442,7 +440,7 @@ describe('LabelDock colour sheet', () => {
 
   it('Escape closes the colour sheet and goes no further, so the selection stays', () => {
     render(<LabelDock box={box} />)
-    fireEvent.click(swatch())
+    openColourSheet()
     const seen = vi.fn()
     window.addEventListener('keydown', seen)
     fireEvent.keyDown(document, { key: 'Escape' })
@@ -457,7 +455,7 @@ describe('LabelDock colour sheet', () => {
     act(() => state().updateLabels([1], { color: '#123456' }))
     const before = state().undo.length
     render(<LabelDock box={box} />)
-    fireEvent.click(swatch())
+    openColourSheet()
     fireEvent.click(screen.getByRole('button', { name: 'Use default' }))
     expect(colourSheet()).toBeNull()
     expect(label(1).color).toBeNull()
@@ -468,7 +466,7 @@ describe('LabelDock colour sheet', () => {
 
   it('the colour sheet lies inside the dock that caps it at the canvas height', () => {
     render(<LabelDock box={box} />)
-    fireEvent.click(swatch())
+    openColourSheet()
     const capped = colourSheet()!.closest<HTMLElement>('[style*="--sheet-max"]')
     expect(capped).toBe(dock())
     expect(capped!.style.getPropertyValue('--sheet-max')).toBe('792px')
@@ -478,7 +476,7 @@ describe('LabelDock colour sheet', () => {
     act(() => state().select(1))
     act(() => state().toggleSelect(2))
     render(<LabelDock box={box} />)
-    fireEvent.click(swatch())
+    openColourSheet()
     expect(colourSheet()).not.toBeNull()
     act(() => state().undoLast()) // label 2 goes dark again: the selection is pruned to label 1
     expect([...state().selectedIds]).toEqual([1])
