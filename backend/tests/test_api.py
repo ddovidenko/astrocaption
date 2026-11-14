@@ -1073,7 +1073,10 @@ def test_rename_refuses_an_empty_or_overlong_title_and_an_unknown_image(
     assert padded.json()["title"] == "y" * 200
     assert client.put("/api/images/nope/title", json={"title": "Orion"}).status_code == 404
     # While a solve is queued or running the row's updated_at is the solve's clock (abandonment,
-    # the card's "stuck" rule): the name still lands, but without the stamp.
+    # the card's "stuck" rule): the name still lands, but without the stamp. The upload's own
+    # solve has to be over first: finishing between the two reads below, it would move the stamp
+    # itself (seen once in 200 runs under load).
+    wait_for_status(client, image["id"], {"solved"})
     Database(settings.db_path).update_image(image["id"], {"solve_status": SolveStatus.SOLVING})
     before = client.get(f"/api/images/{image['id']}").json()["updated_at"]
     resp = client.put(f"/api/images/{image['id']}/title", json={"title": "Belt"})
