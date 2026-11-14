@@ -55,6 +55,21 @@ export interface CanvasGestures {
   moved: () => boolean
 }
 
+/** The per-label controls, in either layout: the floating strip, or the docked bar and sheet of
+ *  a compact editor. A key typed inside them belongs to the control that has the focus. */
+const LABEL_CONTROLS = '.label-toolbar, .label-dock'
+
+/** Takes the focus off whatever field has it, so that it commits what was typed (the size field
+ *  and the Rename field both commit on blur) while the selection it was typed for still stands.
+ *  The canvas has to do this itself in two cases where the browser would be too late or would
+ *  never do it: a touch, whose touchstart is cancelled, so the focus never moves on its own; and
+ *  a mouse press on a label, which selects that label before the browser moves the focus, so the
+ *  blur would arrive after the drafts of the old selection were already gone. */
+function endEditInProgress(): void {
+  const focused = document.activeElement
+  if (focused instanceof HTMLElement && focused !== document.body) focused.blur()
+}
+
 /** How far a finger may wander and still be a tap, in screen pixels. The mouse's slack is 3. */
 const TOUCH_SLACK = 10
 
@@ -129,10 +144,11 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
     const inField = (withButton = false) => {
       const el = document.activeElement
       if (!el) return false
-      // Everything inside the floating toolbar counts as a field, whatever it is: the colour
+      // Everything inside the label controls (the floating toolbar, or the docked bar and its
+      // sheet) counts as a field, whatever it is: the colour
       // swatch and the picker are buttons and inputs, and Escape there closes the popover while
       // Delete/Backspace edits a hex — neither may clear the selection or disable its labels.
-      if (el.closest('.label-toolbar')) return true
+      if (el.closest(LABEL_CONTROLS)) return true
       const tags = withButton ? ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'] : ['INPUT', 'TEXTAREA', 'SELECT']
       return tags.includes(el.tagName)
     }
@@ -148,7 +164,7 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
       // checkbox (an Objects-tab row keeps the focus after a click), which has none, so the
       // editor's history answers from there. Every other shortcut still treats it as a field.
       const el = document.activeElement
-      const checkboxFocused = el instanceof HTMLInputElement && el.type === 'checkbox' && !el.closest('.label-toolbar')
+      const checkboxFocused = el instanceof HTMLInputElement && el.type === 'checkbox' && !el.closest(LABEL_CONTROLS)
       if ((e.ctrlKey || e.metaKey) && !e.altKey && (!inField() || checkboxFocused)) {
         const key = e.key.toLowerCase()
         if (key === 'z' && !e.shiftKey) {
@@ -165,7 +181,7 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
       // Escape on a toolbar *button* (the colour swatch, refocused when its picker closed on the
       // previous Escape) is the editor's: a second Escape clears the selection (#104). The
       // toolbar's fields keep it, as they keep every key.
-      const toolbarButton = el instanceof HTMLButtonElement && el.closest('.label-toolbar') !== null
+      const toolbarButton = el instanceof HTMLButtonElement && el.closest(LABEL_CONTROLS) !== null
       if ((inField() && !(e.key === 'Escape' && toolbarButton)) || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === 'f' || e.key === 'F') useEditor.getState().fit()
       else if (e.key === '1') useEditor.getState().actual()
@@ -201,6 +217,7 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
   // A press selects: plain replaces the selection unless the label is already in it (so a drag
   // of one selected label moves the whole group), shift toggles membership.
   const onLabelPress = useCallback((id: number, shift: boolean) => {
+    endEditInProgress()
     const s = useEditor.getState()
     if (shift) s.toggleSelect(id)
     else if (!s.selectedIds.has(id)) s.select(id)
@@ -361,11 +378,10 @@ export function useCanvasGestures(stageRef: RefObject<Konva.Stage | null>): Canv
       // Uncancelled, the browser follows a tap with mousedown, mouseup and click, and the mouse
       // handlers above would run a second time for the same finger.
       if (e.evt.cancelable) e.evt.preventDefault()
-      // For the same reason the focus never moves on its own, and the toolbar's size field
-      // commits on blur: without this, a size typed there would be dropped the moment the tap
-      // that follows changed the selection. The colour picker listens for the touch itself.
-      const focused = document.activeElement
-      if (focused instanceof HTMLElement && focused !== document.body) focused.blur()
+      // For the same reason the focus never moves on its own: without this, a size or a name
+      // typed in the label controls would be dropped the moment the tap that follows changed the
+      // selection. The colour picker listens for the touch itself.
+      endEditInProgress()
       const onLabel = touchedSelectedRef.current
       touchedSelectedRef.current = false
       const points = touchPoints(stage, e.evt.touches)

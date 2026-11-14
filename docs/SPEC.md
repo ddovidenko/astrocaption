@@ -316,6 +316,7 @@ Interactions:
 - **Mouse wheel while holding left button on a label**: changes that label's font size (± 1 px per notch, clamped 6–500 px in original-pixel units), shown live and committed as one change when the button is released. Wheel does *not* zoom during this.
 - **Double-click** a label: edit its text inline (override name), in the label's font at its on-screen size. Enter or leaving the field commits the trimmed text; blank resets to the catalogue name; `Esc` cancels.
 - **Click** selects one label; **shift-click** toggles a label in or out of the selection; clicking empty canvas or `Esc` clears it. A shift-press on a selected label takes it out of the selection, so a drag that continues from that press moves that label alone (#106: accepted, shift-press is a selection gesture).
+- In a compact editor (a touch-first device or a phone-width window) these controls are a docked bar and a sheet instead: § 6.5.
 - The selection shows a floating toolbar above its bounding box, kept inside the canvas. Every control applies to every selected label and is one change (one undo entry): font size (stepper and field, 6–500; a typed value is rounded and clamped into the range, blank = the global size and blank when the selection is mixed; ArrowUp/ArrowDown in the field step like the stepper, from a typed value if there is one, and holding one is a single change committed when the key comes up or the field loses focus; the field has no native spinner, and Ctrl+Z / Ctrl+Y there reach the editor's history unless a number is being typed), text colour (picker; "Use default" clears the override; Escape closes the picker and a second Escape clears the selection), aliases (inherit / on / off), leader (auto / on / off), Pin, Reset position (places the label again with the browser placer around every other enabled label and marker, and unpins it), Clear overrides (size, colour, aliases, leader and text). Selects read "mixed" when the selected labels differ.
 
 ### 6.3 Side panel
@@ -420,8 +421,42 @@ redo, then the title cut short and the save state, in that order so that a save 
 length never moves a control). 100 % and the zoom readout are not shown there; a
 pinch does that job. A save problem, which is a sentence and a button, takes a second row while it
 shows. At 390 px this moves the top of the image area from 330 px down the screen to about 55.
-The label toolbar is still the floating strip of § 6.2 there, wider than a phone's screen; a docked
-bar replaces it in a compact editor in the next step of #57.
+
+**The docked label bar.** In a compact editor the per-label controls of § 6.2 are not the floating
+strip (it is wider than a phone, and floats where a finger is working) but a bar docked under the
+image, shown while at least one label is selected. It is the same set of controls: each applies
+to every selected label and is one undo entry. The canvas gets shorter when the bar appears, so
+no label is ever under it; the view is not refitted, but a label selected in the strip the bar
+takes is moved up by just enough to stay in view. With the side panel open at phone width the
+canvas pane is a sliver, and the bar is cut off with it, not drawn over the panel.
+
+- The bar, left to right: `−`, the size field, `+` (one joined control), the colour swatch, **Hide**,
+  **More**. Controls are 44 px tall with 16 px text, and the bar just fits a 375 px phone on one row.
+- **Hide** switches the selected labels off, as `Delete` does (one change); the bar goes with the
+  selection, and Undo in the top bar brings the label back. A size or a name still being typed is
+  stored first, so the label comes back as it was left.
+- The colour swatch opens the same picker as on the desktop, placed against the bar and upwards
+  over the image. (A sheet replaces it in the last step of #57.)
+- **More** opens a sheet above the bar, over the bottom of the image, with the rest as full-width
+  rows: **Rename** (only with exactly one label selected), **Aliases**, **Leader**, **Pin in place**,
+  **Reset position**, **Clear overrides**. If the selection would be hidden behind the sheet, the
+  view pans up by just enough to show it, and does not pan back on closing.
+- **Rename** is what a double-click is with a mouse: Enter or leaving the field commits the trimmed
+  text, a blank goes back to the catalogue name. (An inline field at the label's on-screen size
+  would be under 16 px, and iOS would zoom the page.)
+- The sheet closes on a press on the image or anywhere else outside the bar, on More again, on
+  Escape (wherever the focus is; it does not also clear the selection), and when the selection
+  changes. Reset position and Clear overrides act and close it. Closing keeps a name that was
+  still being typed, stored on the label it was typed for, except on Escape and Clear overrides,
+  and except when that label is no longer there (an undo took it away, or a re-solve began). It
+  does not drag and has no swipe to dismiss.
+- A press on the canvas ends an edit in progress before it does anything else, for a mouse on a
+  label as for a finger anywhere: a size or a name still being typed (in the bar, the sheet or
+  the floating strip of § 6.2) is stored on the selection it was typed for, and only then does the
+  selection move.
+- The sheet is never taller than the canvas: on a short screen (a phone on its side) it scrolls,
+  and the view is then left where it is.
+- On a phone narrower than 375 px the bar's right edge may be cut off until the last step of #57.
 
 Pinned by `frontend/e2e/touch.spec.ts` (Chromium at 390 × 844 with touch input; two-finger input
 through the DevTools protocol). Not automatable: iOS Safari's own focus zoom and page pinch. The

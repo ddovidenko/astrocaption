@@ -4,6 +4,7 @@ import Konva from 'konva'
 import { useShallow } from 'zustand/react/shallow'
 import type { FontOut, Label, ObjectOut, StyleConfig } from '../api'
 import LabelTextEditor from './LabelTextEditor'
+import LabelDock from './LabelDock'
 import LabelToolbar from './LabelToolbar'
 import { LabelTextShape } from './LabelTextShape'
 import { useCanvasGestures } from './canvasGestures'
@@ -728,8 +729,10 @@ export default function EditorCanvas() {
             {primaryName(hovered.catalog_names, style.name_preference)}
           </div>
         )}
-        {/* Hidden while the text editor is open, so the two overlays never stack. */}
-        {selectionBox && editing === null && <LabelToolbar box={selectionBox} onError={setToolbarError} />}
+        {/* Hidden while the text editor is open, so the two overlays never stack. A compact
+            editor docks the same controls under the canvas instead (below): the strip is wider
+            than a phone and floats where a finger is working (SPEC § 6.5). */}
+        {!compact && selectionBox && editing === null && <LabelToolbar box={selectionBox} onError={setToolbarError} />}
         {editing && (
           <LabelTextEditor
             key={editing.label.object_id}
@@ -742,6 +745,8 @@ export default function EditorCanvas() {
           />
         )}
       </div>
+      {/* After the canvas, so the pane's column gives it the bottom edge and the canvas the rest. */}
+      {compact && selectionBox && editing === null && <LabelDock box={selectionBox} onError={setToolbarError} />}
     </>
   )
 }

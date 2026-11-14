@@ -308,3 +308,12 @@ export async function touchDriver(page: Page): Promise<TouchDriver> {
   }
   return driver
 }
+
+/** Nothing may make the page wider than the window: no page needs a sideways scroll (#169). */
+export async function expectNoHorizontalOverflow(page: Page, where: string): Promise<void> {
+  const widths = await page.evaluate(() => ({
+    scroll: document.documentElement.scrollWidth,
+    client: document.documentElement.clientWidth,
+  }))
+  expect(widths.scroll, `${where}: page scroll width vs viewport`).toBeLessThanOrEqual(widths.client)
+}

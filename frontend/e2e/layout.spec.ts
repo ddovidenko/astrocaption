@@ -1,19 +1,18 @@
 import { expect, test } from './fixtures'
-import type { Page, Route } from '@playwright/test'
-import { deleteImageIfPresent, ensureExported, ensureSetUpAndSignedIn, ensureSolvedImage, imagesTitled } from './helpers'
+import type { Route } from '@playwright/test'
+import {
+  deleteImageIfPresent,
+  ensureExported,
+  ensureSetUpAndSignedIn,
+  ensureSolvedImage,
+  expectNoHorizontalOverflow,
+  imagesTitled,
+} from './helpers'
 
 // A title with no spaces (the filename stem is the default title, #175) must wrap or truncate,
 // never widen the page. Checked wherever a title is a heading: the owner's card, the editor
 // toolbar and the public image view.
 const LONG = 'M16_M17_IC4703_NGC6605_IC4707_IC4706_NGC6596_IC4701_NGC6561_OSC_ALPT_Siril_master_aligned_stretched_GraXpert_Photoshop_Lightroom_v002_small'
-
-async function expectNoHorizontalOverflow(page: Page, where: string): Promise<void> {
-  const widths = await page.evaluate(() => ({
-    scroll: document.documentElement.scrollWidth,
-    client: document.documentElement.clientWidth,
-  }))
-  expect(widths.scroll, `${where}: page scroll width vs viewport`).toBeLessThanOrEqual(widths.client)
-}
 
 /** Makes every autosave fail until it is taken off again, so the toolbar shows a save problem (a
  *  sentence and a Retry button) for as long as a spec wants to look at it. */

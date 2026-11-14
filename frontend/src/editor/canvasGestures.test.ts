@@ -137,4 +137,22 @@ describe('useCanvasGestures keys', () => {
     key('keydown', { code: 'Space', key: ' ' })
     expect(result.current.spacePan).toBe(false)
   })
+
+  // A mouse press on a label selects it before the browser has moved the focus, so a field that
+  // was being typed in would only hear its blur after the selection it belongs to was gone, and
+  // drop what was typed. The press ends the edit first, as a touch on the canvas does (§ 6.5).
+  it('a press on a label ends an edit in progress before the selection moves', () => {
+    const { result } = mount()
+    act(() => useEditor.getState().toggleObject(2, { x: 100, y: 100 }))
+    act(() => useEditor.getState().select(1))
+    const field = document.createElement('input')
+    document.body.append(field)
+    field.focus()
+    const selectedAtBlur: number[][] = []
+    field.addEventListener('blur', () => selectedAtBlur.push([...useEditor.getState().selectedIds]))
+    act(() => result.current.label.onPress(2, false))
+    expect(selectedAtBlur).toEqual([[1]])
+    expect([...useEditor.getState().selectedIds]).toEqual([2])
+    expect(document.activeElement).toBe(document.body)
+  })
 })

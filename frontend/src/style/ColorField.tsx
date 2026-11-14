@@ -1,5 +1,6 @@
-import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
 import { HexColorInput, HexColorPicker } from 'react-colorful'
+import { useEscapeKey, usePressAway } from './pressAway'
 import { normalizeHex } from './styleForm'
 
 /** A colour override: a swatch that opens an in-page picker, never the OS dialog.
@@ -105,41 +106,13 @@ export default function ColorField({
     if (!silent) onCommit?.()
   }
 
-  // The document listeners are wired once per open, not once per render; as effect events they
-  // still call this render's `closePicker`, so a drag that just changed the draft is what gets
-  // committed, not whatever `onCommit` closed over when the picker opened.
-  const away = useEffectEvent((e: MouseEvent) => {
-    if (wrap.current && !wrap.current.contains(e.target as Node)) closePicker(false)
-  })
-  // A cancelled touchstart counts as that press. The editor canvas cancels every touch that
-  // lands on it (Konva for its shapes, the gesture layer for bare sky: SPEC § 6.5), so the
-  // browser sends no compatibility mousedown after it and the picker would stay open over a
-  // selection that has moved on. Reading the cancel itself, not where the touch landed, keeps
-  // this to exactly the touches no mousedown follows: a tap elsewhere brings its own, and a
-  // touch that turns out to be a scroll of the panel leaves the picker alone.
-  const cancelledTouch = useEffectEvent((e: TouchEvent) => {
-    if (e.defaultPrevented && wrap.current && !wrap.current.contains(e.target as Node)) closePicker(false)
-  })
-  const key = useEffectEvent((e: KeyboardEvent) => {
-    if (e.key !== 'Escape') return
-    // This Escape is spent here: the editor's own listener (on the window, so it runs after this
-    // one) would otherwise read the swatch it is about to refocus as the thing to act on and
-    // clear the selection in the same keystroke (#104). The next Escape is the editor's.
-    e.stopPropagation()
-    closePicker(true)
-  })
-  useEffect(() => {
-    if (!open) return
-    document.addEventListener('mousedown', away)
-    // Passive: it only reads the event, and must not hold up the start of a scroll.
-    document.addEventListener('touchstart', cancelledTouch, { passive: true })
-    document.addEventListener('keydown', key)
-    return () => {
-      document.removeEventListener('mousedown', away)
-      document.removeEventListener('touchstart', cancelledTouch)
-      document.removeEventListener('keydown', key)
-    }
-  }, [open])
+  // A press anywhere else closes the picker, committing what it holds (see `usePressAway` for why
+  // a cancelled touch counts as one). It calls this render's `closePicker`, so a drag that just
+  // changed the draft is what gets committed, not whatever `onCommit` closed over on opening.
+  usePressAway(wrap, open, () => closePicker(false))
+  // Escape closes it too, and is spent on that (see `useEscapeKey`): the editor would otherwise
+  // read the swatch about to be refocused as the thing to act on and clear the selection.
+  useEscapeKey(open, () => closePicker(true))
 
   return (
     <div

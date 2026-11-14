@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { disableAll, enableWithPlacement, isEditable, resetPositions, toggleWithPlacement } from './editing'
+import { disableAll, enableWithPlacement, isEditable, renameLabel, resetPositions, toggleWithPlacement } from './editing'
 import { placeNewLabel } from './placement'
 import { useEditor, type LoadedDocument } from './store'
 import { makeDoc, withThirdObject } from './testDoc'
@@ -165,5 +165,41 @@ describe('isEditable', () => {
     expect(isEditable(state('solving'))).toBe(false)
     useEditor.getState().reset()
     expect(isEditable(useEditor.getState())).toBe(false)
+  })
+})
+
+// One rule for a typed name, whoever asks: the double-click editor over a label, and the Rename
+// row of the docked bar's sheet (SPEC § 6.2, § 6.5).
+describe('renameLabel', () => {
+  const state = () => useEditor.getState()
+
+  it('stores the trimmed text as the override, as one change', () => {
+    state().load(doc)
+    expect(renameLabel(1, '  Great Nebula ', 'M 42')).toBe('renamed')
+    expect(state().labels.get(1)?.text_override).toBe('Great Nebula')
+    expect(state().undo).toHaveLength(1)
+  })
+
+  it('a blank goes back to the catalogue name', () => {
+    state().load(doc)
+    renameLabel(1, 'Great Nebula', 'M 42')
+    expect(renameLabel(1, '   ', 'Great Nebula')).toBe('renamed')
+    expect(state().labels.get(1)?.text_override).toBeNull()
+  })
+
+  it('text that is what the field opened on changes nothing', () => {
+    state().load(doc)
+    expect(renameLabel(1, ' M 42 ', 'M 42')).toBe('unchanged')
+    expect(state().labels.get(1)?.text_override ?? null).toBeNull()
+    expect(state().undo).toHaveLength(0)
+  })
+
+  it('is refused while the image is being solved', () => {
+    const solving = makeDoc()
+    solving.image = { ...solving.image, solve_status: 'solving' }
+    state().load(solving)
+    expect(renameLabel(1, 'Great Nebula', 'M 42')).toBe('refused')
+    expect(state().labels.get(1)?.text_override ?? null).toBeNull()
+    expect(state().changeSeq).toBe(0)
   })
 })

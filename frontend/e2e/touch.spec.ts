@@ -4,6 +4,7 @@ import {
   currentImageId,
   ensureSetUpAndSignedIn,
   ensureSolvedImage,
+  expectNoHorizontalOverflow,
   fetchAnnotations,
   fetchObjects,
   putAnnotations,
@@ -251,6 +252,10 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
       await touch.end()
       await expect.poll(selected).toEqual([id])
       await expect(toolbar).toBeVisible()
+      // In a compact editor the controls are the bar docked under the photo, not the strip that
+      // floats over it (which is wider than this screen).
+      await expect(page.locator('.label-dock')).toBeVisible()
+      await expect(page.locator('.label-toolbar')).toHaveCount(0)
     }
 
     // 3. A finger that wobbles while tapping the selected label (more than the mouse's 3 px of
@@ -364,38 +369,7 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
       await expect(undo).toBeDisabled()
     }
 
-    // 6b. The toolbar's colour picker is drawn over the canvas: a finger inside it works it, and
-    //     only a touch on the photo closes it.
-    {
-      await expect.poll(selected).toEqual([id])
-      await toolbar.getByRole('button', { name: /Text colour/ }).tap()
-      const picker = toolbar.getByRole('dialog')
-      await expect(picker).toBeVisible()
-      await picker.locator('input').tap()
-      await expect(picker).toBeVisible()
-      await page.touchscreen.tap(box.x + 20, box.y + box.height - 20)
-      await expect(picker).toBeHidden()
-      // That touch may have landed on anything; back to the label.
-      const at = await labelPoint()
-      await page.touchscreen.tap(at.x, at.y)
-      await expect.poll(selected).toEqual([id])
-      await expect(undo).toBeDisabled()
-    }
-
-    // 7. Touching the photo ends an edit in progress: a size typed in the toolbar, with no Enter,
-    //    is kept when the next touch lands on the canvas.
-    {
-      await expect.poll(selected).toEqual([id])
-      const size = toolbar.getByRole('spinbutton', { name: 'Font size' })
-      await size.tap()
-      await size.fill('41')
-      await page.touchscreen.tap(box.x + 20, box.y + box.height - 20)
-      await expect
-        .poll(async () => (await fetchAnnotations(page, imageId)).labels.find((x) => x.object_id === id)!.font_size)
-        .toBe(41)
-    }
-
-    // 8. A tap on bare canvas clears the selection.
+    // 7. A tap on bare canvas clears the selection.
     {
       const at = await labelPoint()
       await page.touchscreen.tap(at.x, at.y)
@@ -415,6 +389,212 @@ test('touch: a label moves only once it is selected', async ({ page }) => {
       const clear = await emptyPoint(page, box)
       await page.touchscreen.tap(clear.x, clear.y)
       await expect.poll(selected).toEqual([])
+    }
+  })
+})
+
+test('touch: the docked bar and its sheet do what the floating strip does', async ({ page }) => {
+  const box = await openEditor(page)
+  const imageId = currentImageId(page)
+  const touch = await touchDriver(page)
+  const undo = page.getByRole('button', { name: 'Undo', exact: true })
+  const toolbar = page.getByRole('toolbar', { name: 'Selected labels' })
+  const selected = () => selectedIds(page)
+  const view = async () => {
+    const s = await stageState(page)
+    return [s.x, s.y, s.scale]
+  }
+  // A point on the photo well away from the label under test and from the dock, which takes the
+  // bottom of the pane once a label is selected.
+  const photo = { x: box.x + 20, y: box.y + 20 }
+  const sheet = page.getByRole('group', { name: 'More label options' })
+
+  await withAnnotationsRestored(page, imageId, async () => {
+    const { id, corner, fittedScale } = await labelWithRoom(page, box)
+    await zoomAbout(page, corner, fittedScale * 5)
+    const labelPoint = () => pointOnLabel(page, box, id)
+    const drawn = async () => {
+      const l = (await stageState(page)).labels.find((x) => x.id === id)!
+      return [l.x, l.y]
+    }
+    const stored = async () => {
+      const l = (await fetchAnnotations(page, imageId)).labels.find((x) => x.object_id === id)!
+      return [l.x, l.y]
+    }
+    const home = await stored()
+    expect(await drawn()).toEqual(home)
+    await expect(undo).toBeDisabled()
+
+    // A tap selects the label, and in a compact editor its controls are the bar docked under
+    // the photo (the gesture test above covers the tap itself).
+    {
+      const at = await labelPoint()
+      await page.touchscreen.tap(at.x, at.y)
+      await expect.poll(selected).toEqual([id])
+      await expect(page.locator('.label-dock')).toBeVisible()
+    }
+
+    // 1. The toolbar's colour picker is drawn over the canvas: a finger inside it works it, and
+    //    only a touch on the photo closes it.
+    {
+      await expect.poll(selected).toEqual([id])
+      await toolbar.getByRole('button', { name: /Text colour/ }).tap()
+      const picker = toolbar.getByRole('dialog')
+      await expect(picker).toBeVisible()
+      // All of it on the screen: the swatch is near the left edge, and the picker is wider than
+      // the room to either side of it.
+      await expect(picker).toBeInViewport({ ratio: 1 })
+      await picker.locator('input').tap()
+      await expect(picker).toBeVisible()
+      await page.touchscreen.tap(photo.x, photo.y)
+      await expect(picker).toBeHidden()
+      // That touch may have landed on anything; back to the label.
+      const at = await labelPoint()
+      await page.touchscreen.tap(at.x, at.y)
+      await expect.poll(selected).toEqual([id])
+      await expect(undo).toBeDisabled()
+    }
+
+    // 2. Hide switches the label off, as the Delete key does; the bar goes with the selection,
+    //    and the undo arrow in the top bar brings the label back.
+    {
+      await toolbar.getByRole('button', { name: 'Hide' }).tap()
+      await expect.poll(async () => (await stageState(page)).labels.some((l) => l.id === id)).toBe(false)
+      await expect(page.locator('.label-dock')).toHaveCount(0)
+      await expect(undo).toBeEnabled()
+      await undo.tap()
+      await expect.poll(drawn).toEqual(home)
+      await expect(undo).toBeDisabled()
+      // The bar takes the bottom of the photo when it appears. A label selected down there is
+      // moved up into view, not left under the bar: pan it to 30 px above the canvas's lower
+      // edge, then tap it.
+      const canvas = page.locator('.editor-canvas')
+      const before = await stageState(page)
+      const l = before.labels.find((x) => x.id === id)!
+      const full = (await canvas.boundingBox())!
+      const down = full.y + full.height - 30 - (full.y + before.y + l.y * before.scale)
+      await touch.path([photo, { x: photo.x, y: photo.y + 15 }, { x: photo.x, y: photo.y + 15 + down }])
+      const at = await labelPoint()
+      await page.touchscreen.tap(at.x, at.y)
+      await expect.poll(selected).toEqual([id])
+      await expect(page.locator('.label-dock')).toBeVisible()
+      await expect
+        .poll(async () => {
+          const s = await stageState(page)
+          const now = s.labels.find((x) => x.id === id)!
+          const shorter = (await canvas.boundingBox())!
+          return shorter.y + s.y + (now.y + now.h) * s.scale <= shorter.y + shorter.height
+        })
+        .toBe(true)
+    }
+
+    // 3. More opens the sheet over the bottom of the photo, with the label still in view above
+    //    it. Rename there is what a double-click is with a mouse; Clear overrides takes the name
+    //    back and closes the sheet.
+    {
+      const override = async () =>
+        (await fetchAnnotations(page, imageId)).labels.find((x) => x.object_id === id)!.text_override
+      // The label sits just above the bar (step 2 left it there), so the sheet would cover it: the
+      // photo has to move for it to stay in view.
+      const viewBefore = await view()
+      await toolbar.getByRole('button', { name: 'More' }).tap()
+      await expect(sheet).toBeVisible()
+      expect(await view()).not.toEqual(viewBefore)
+      const s = await stageState(page)
+      const l = s.labels.find((x) => x.id === id)!
+      expect(box.y + s.y + (l.y + l.h) * s.scale).toBeLessThanOrEqual((await sheet.boundingBox())!.y)
+      // No field in the sheet is under 16 px either (iOS would zoom the page on its focus).
+      const small = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('.label-dock input, .label-dock select'), (el) => parseFloat(getComputedStyle(el).fontSize)).filter((size) => size < 16),
+      )
+      expect(small).toEqual([])
+      const field = sheet.getByRole('textbox', { name: 'Rename' })
+      await field.fill('Touched')
+      await field.press('Enter')
+      await expect.poll(override).toBe('Touched')
+      await expect(sheet).toBeVisible()
+      // A long name in the field widens nothing (it is cut in the field, not the page).
+      await field.fill('A name that is a good deal longer than any phone is wide, sixty chars')
+      await expectNoHorizontalOverflow(page, 'editor, a long name in Rename')
+      await field.fill('Touched')
+      await sheet.getByRole('button', { name: 'Clear overrides' }).tap()
+      await expect.poll(override).toBeNull()
+      await expect(sheet).toBeHidden()
+    }
+
+    // 4. A tap on the photo closes the sheet, and keeps a name that was still being typed (no
+    //    Enter): the way a rename ends on a phone. The bar fits a 375 px phone as well as this one,
+    //    and with the side panel open it is cut off by the panel, not drawn over it.
+    {
+      await toolbar.getByRole('button', { name: 'More' }).tap()
+      await expect(sheet).toBeVisible()
+      await sheet.getByRole('textbox', { name: 'Rename' }).fill('By tap')
+      await page.touchscreen.tap(photo.x, photo.y)
+      await expect(sheet).toBeHidden()
+      await expect
+        .poll(async () => (await fetchAnnotations(page, imageId)).labels.find((x) => x.object_id === id)!.text_override)
+        .toBe('By tap')
+      const at = await labelPoint()
+      await page.touchscreen.tap(at.x, at.y)
+      await expect.poll(selected).toEqual([id])
+      // The same with a mouse on another label (a narrow desktop window, a trackpad on a tablet):
+      // the press selects that label, but not before the name is stored on the one it was for.
+      await toolbar.getByRole('button', { name: 'More' }).tap()
+      await sheet.getByRole('textbox', { name: 'Rename' }).fill('By mouse')
+      const s = await stageState(page)
+      const sheetTop = (await sheet.boundingBox())!.y
+      const other = s.labels
+        .filter((l) => l.id !== id)
+        .map((l) => ({
+          id: l.id,
+          x: box.x + s.x + l.x * s.scale + Math.min(8, (l.w * s.scale) / 2),
+          y: box.y + s.y + l.y * s.scale + Math.min(8, (l.h * s.scale) / 2),
+        }))
+        .find((p) => p.x > box.x + 10 && p.x < box.x + box.width - 10 && p.y > box.y + 10 && p.y < sheetTop - 10)
+      expect(other, 'no other label in view above the sheet').toBeTruthy()
+      await page.mouse.click(other!.x, other!.y)
+      await expect.poll(selected).toEqual([other!.id])
+      await expect
+        .poll(async () => (await fetchAnnotations(page, imageId)).labels.find((x) => x.object_id === id)!.text_override)
+        .toBe('By mouse')
+      await page.mouse.move(0, 0)
+      const back = await labelPoint()
+      await page.touchscreen.tap(back.x, back.y)
+      await expect.poll(selected).toEqual([id])
+      await page.getByRole('button', { name: 'Expand panel' }).tap()
+      // The open panel squeezes the pane to a sliver. Where the bar's Hide button would be drawn
+      // if the bar spilled out of it, a finger must find the panel.
+      const hide = (await toolbar.getByRole('button', { name: 'Hide' }).boundingBox())!
+      expect(hide.x, 'the pane is not narrower than the bar, so this proves nothing').toBeGreaterThan(
+        (await page.locator('.editor-pane').boundingBox())!.width,
+      )
+      const underFinger = await page.evaluate(
+        ([x, y]) => document.elementFromPoint(x!, y!)?.closest('.side-panel, .label-dock')?.className ?? null,
+        [hide.x + hide.width / 2, hide.y + hide.height / 2],
+      )
+      expect(underFinger, 'the docked bar is drawn over the open side panel').toContain('side-panel')
+      await page.getByRole('button', { name: 'Collapse panel' }).tap()
+      await expect.poll(selected).toEqual([id])
+      for (const width of [375, 390]) {
+        await page.setViewportSize({ width, height: 844 })
+        await expect(toolbar.getByRole('button', { name: 'More' })).toBeInViewport({ ratio: 1 })
+        await expect(toolbar.getByRole('button', { name: 'Smaller' })).toBeInViewport({ ratio: 1 })
+        await expectNoHorizontalOverflow(page, `editor with the docked bar at ${width} px`)
+        expect((await page.locator('.label-dock-bar').boundingBox())!.height).toBeLessThanOrEqual(64)
+      }
+    }
+
+    // 5. Touching the photo ends an edit in progress: a size typed in the toolbar, with no Enter,
+    //    is kept when the next touch lands on the canvas.
+    {
+      await expect.poll(selected).toEqual([id])
+      const size = toolbar.getByRole('spinbutton', { name: 'Font size' })
+      await size.tap()
+      await size.fill('41')
+      await page.touchscreen.tap(photo.x, photo.y)
+      await expect
+        .poll(async () => (await fetchAnnotations(page, imageId)).labels.find((x) => x.object_id === id)!.font_size)
+        .toBe(41)
     }
   })
 })
@@ -519,7 +699,7 @@ test('touch: two taps toggle an object; fields are finger-sized; the mouse still
     await expect(tooltip).toBeHidden()
 
     // 5. No field on the editor screen is under 16 px with a coarse pointer: iOS zooms the whole
-    //    page when a smaller one takes the focus. The floating toolbar (a label selected) and the
+    //    page when a smaller one takes the focus. The docked bar (a label selected) and the
     //    side panel (open) are both on screen for the count.
     const label = await labelWithRoom(page, box)
     await zoomAbout(page, label.corner, label.fittedScale * 5)
