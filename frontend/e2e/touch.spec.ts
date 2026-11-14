@@ -434,25 +434,50 @@ test('touch: the docked bar and its sheet do what the floating strip does', asyn
       await expect(page.locator('.label-dock')).toBeVisible()
     }
 
-    // 1. The toolbar's colour picker is drawn over the canvas: a finger inside it works it, and
-    //    only a touch on the photo closes it.
+    // 1. The swatch opens the colour picker as a sheet over the bottom of the photo. A pick shows
+    //    on the swatch chip and nowhere else until the sheet closes; a tap on the photo closes it,
+    //    changes the label and adds one undo entry. More and the colour sheet take turns.
     {
       await expect.poll(selected).toEqual([id])
+      const storedColor = async () => (await fetchAnnotations(page, imageId)).labels.find((x) => x.object_id === id)!.color
+      const chip = toolbar.locator('.swatch-chip')
+      const chipColor = () => chip.evaluate((el) => getComputedStyle(el).backgroundColor)
+      const before = await chipColor()
       await toolbar.getByRole('button', { name: /Text colour/ }).tap()
-      const picker = toolbar.getByRole('dialog')
+      const picker = page.getByRole('dialog', { name: 'Text colour picker' })
       await expect(picker).toBeVisible()
-      // All of it on the screen: the swatch is near the left edge, and the picker is wider than
-      // the room to either side of it.
       await expect(picker).toBeInViewport({ ratio: 1 })
-      await picker.locator('input').tap()
+      const dockBox = (await page.locator('.label-dock').boundingBox())!
+      const pickerBox = (await picker.boundingBox())!
+      expect(Math.abs(pickerBox.width - dockBox.width), 'a sheet is as wide as the dock').toBeLessThanOrEqual(1)
+      expect(pickerBox.y + pickerBox.height, 'the sheet sits on the bar').toBeLessThanOrEqual(dockBox.y + 1)
+      // More takes the sheet's place, then the swatch takes it back (nothing picked yet, so
+      // nothing is committed on the way).
+      await toolbar.getByRole('button', { name: 'More' }).tap()
+      await expect(picker).toBeHidden()
+      await expect(sheet).toBeVisible()
+      await toolbar.getByRole('button', { name: /Text colour/ }).tap()
+      await expect(sheet).toBeHidden()
       await expect(picker).toBeVisible()
+      await expect(undo).toBeDisabled()
+      // A pick: a tap in the saturation square. The chip follows; the label does not yet.
+      const sat = (await picker.locator('.react-colorful__saturation').boundingBox())!
+      await page.touchscreen.tap(sat.x + sat.width * 0.8, sat.y + sat.height * 0.2)
+      await expect.poll(chipColor).not.toBe(before)
+      expect(await storedColor()).toBeNull()
+      await expect(undo).toBeDisabled()
+      // A tap on the photo closes it and commits the pick as one change.
       await page.touchscreen.tap(photo.x, photo.y)
       await expect(picker).toBeHidden()
+      await expect.poll(storedColor, { timeout: 5_000 }).toMatch(/^#[0-9a-f]{6}$/i)
+      await expect(undo).toBeEnabled()
+      await undo.tap()
+      await expect.poll(storedColor, { timeout: 5_000 }).toBeNull()
+      await expect(undo).toBeDisabled()
       // That touch may have landed on anything; back to the label.
       const at = await labelPoint()
       await page.touchscreen.tap(at.x, at.y)
       await expect.poll(selected).toEqual([id])
-      await expect(undo).toBeDisabled()
     }
 
     // 2. Hide switches the label off, as the Delete key does; the bar goes with the selection,

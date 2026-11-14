@@ -432,11 +432,16 @@ canvas pane is a sliver, and the bar is cut off with it, not drawn over the pane
 
 - The bar, left to right: `−`, the size field, `+` (one joined control), the colour swatch, **Hide**,
   **More**. Controls are 44 px tall with 16 px text, and the bar just fits a 375 px phone on one row.
+  Narrower than that, the bar scrolls sideways; its sheets are not cut off with it.
 - **Hide** switches the selected labels off, as `Delete` does (one change); the bar goes with the
   selection, and Undo in the top bar brings the label back. A size or a name still being typed is
   stored first, so the label comes back as it was left.
-- The colour swatch opens the same picker as on the desktop, placed against the bar and upwards
-  over the image. (A sheet replaces it in the last step of #57.)
+- The colour swatch opens the picker as a sheet above the bar, full width, with the same picker,
+  hex field and **Use default** as the desktop popover. A pick shows on the swatch chip while the
+  sheet is open; the label on the image changes when the sheet closes, as one undo entry; a typed
+  hex commits at once; Use default clears the override. Only one sheet is open at a time: the swatch
+  closes More and More closes the colour sheet, each committing on the way out. The view pans up
+  for it as for More.
 - **More** opens a sheet above the bar, over the bottom of the image, with the rest as full-width
   rows: **Rename** (only with exactly one label selected), **Aliases**, **Leader**, **Pin in place**,
   **Reset position**, **Clear overrides**. If the selection would be hidden behind the sheet, the
@@ -456,7 +461,6 @@ canvas pane is a sliver, and the bar is cut off with it, not drawn over the pane
   selection move.
 - The sheet is never taller than the canvas: on a short screen (a phone on its side) it scrolls,
   and the view is then left where it is.
-- On a phone narrower than 375 px the bar's right edge may be cut off until the last step of #57.
 
 Pinned by `frontend/e2e/touch.spec.ts` (Chromium at 390 × 844 with touch input; two-finger input
 through the DevTools protocol). Not automatable: iOS Safari's own focus zoom and page pinch. The
@@ -758,4 +762,4 @@ Later (not v1): local ASTAP solver option, custom object entries (user-added lab
 
 - Nova rate limits: undocumented; we serialise solves (one at a time) and cache job results forever. Confirm behaviour under a burst of 5 uploads. (#56)
 - Object list size: wide fields can return 500+ HD stars. Decided 2026-09-11 (#37): `hd` entries are hidden by default and shown by the Objects tab's HD-stars toggle; a bright star that nova lists twice, as `bright` and as `hd` at the same pixel, keeps both rows (flagging the twin is post-v1 polish). The filter is tested against `tests/fixtures/nova-narrow/`: 8 objects, 5 `hd`, 3 labels enabled. (nova adds `hd` entries only to fields of about 1° radius or less: the 2.4° Orion recording has none.)
-- Touch editor (§ 6.5): not yet checked on a real iPhone (planned once a release carries the docked label bar) or on any tablet (#57).
+- Touch editor (§ 6.5): not yet checked on a real iPhone (planned for the first release carrying it) or on any tablet (#263).
