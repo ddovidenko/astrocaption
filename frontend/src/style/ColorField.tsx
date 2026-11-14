@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { HexColorInput, HexColorPicker } from 'react-colorful'
 import { useEscapeKey, usePressAway } from './pressAway'
 import { normalizeHex } from './styleForm'
@@ -24,6 +24,7 @@ export default function ColorField({
   presentation = 'popover',
   open: openProp,
   onOpenChange,
+  panelRef,
 }: {
   label: string
   /** The override, or '' for "use the built-in default". */
@@ -62,6 +63,11 @@ export default function ColorField({
   /** The picker opened (the swatch) or closed (any of its own routes, the silent one included),
    *  once per change. */
   onOpenChange?: (open: boolean) => void
+  /** Receives the picker's panel (the popover or the sheet) while it is open, for an owner that
+   *  has to measure it: the docked bar pans the selection clear of the sheet. A copy of the
+   *  field's own ref, which the field keeps using: nothing here depends on what the owner does
+   *  with this one. */
+  panelRef?: RefObject<HTMLDivElement | null>
 }) {
   const [innerOpen, setInnerOpen] = useState(false)
   const open = openProp ?? innerOpen
@@ -91,6 +97,13 @@ export default function ColorField({
   const wrap = useRef<HTMLDivElement>(null)
   const swatch = useRef<HTMLButtonElement>(null)
   const popover = useRef<HTMLDivElement>(null)
+  const attachPanel = useCallback(
+    (el: HTMLDivElement | null) => {
+      popover.current = el
+      if (panelRef) panelRef.current = el
+    },
+    [panelRef],
+  )
   const id = useId()
   const valueId = `${id}-value`
   const shown = value || fallback
@@ -190,7 +203,7 @@ export default function ColorField({
       </button>
       {open && (
         <div
-          ref={popover}
+          ref={attachPanel}
           className={asSheet ? 'color-sheet' : `popover${alignRight ? ' popover-right' : ''}${alignUp ? ' popover-up' : ''}`}
           role="dialog"
           aria-label={`${label} picker`}
