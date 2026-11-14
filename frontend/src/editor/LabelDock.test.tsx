@@ -328,7 +328,8 @@ describe('LabelDock keeps the selection in view', () => {
   /** jsdom measures everything as 0 × 0: the sheet and the dock are given heights by hand. */
   function sheetHeight(height: number, dockHeight = 0) {
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-      const h = this.classList.contains('label-sheet') ? height : this.classList.contains('label-dock') ? dockHeight : 0
+      const isSheet = this.classList.contains('label-sheet') || this.classList.contains('color-sheet')
+      const h = isSheet ? height : this.classList.contains('label-dock') ? dockHeight : 0
       return { x: 0, y: 0, left: 0, top: 0, right: 0, bottom: h, width: 0, height: h, toJSON: () => ({}) } as DOMRect
     })
   }
@@ -356,7 +357,7 @@ describe('LabelDock keeps the selection in view', () => {
     render(<LabelDock box={{ ...box, bottom: 1400 }} />)
     openSheet()
     expect(state().view).toBe(before) // there is no room left to show the label in
-    expect((sheet() as HTMLElement).style.maxHeight).toBe('792px')
+    expect((dock() as HTMLElement).style.getPropertyValue('--sheet-max')).toBe('792px')
   })
 
   it('pans the photo up by just enough when the sheet would cover the selection', () => {
@@ -365,6 +366,14 @@ describe('LabelDock keeps the selection in view', () => {
     render(<LabelDock box={{ ...box, bottom: 1400 }} />) // the box's bottom is at screen y 700
     openSheet()
     // The canvas is 800 tall and the sheet covers its lowest 300: 700 + 8 has to come up to 500.
+    expect(state().view).toEqual({ scale: 0.5, x: 0, y: -208 })
+  })
+
+  it('pans the photo up when the colour sheet would cover the selection', () => {
+    sheetHeight(300)
+    act(() => state().setView({ scale: 0.5, x: 0, y: 0 }))
+    render(<LabelDock box={{ ...box, bottom: 1400 }} />)
+    fireEvent.click(screen.getByRole('button', { name: /Text colour/ }))
     expect(state().view).toEqual({ scale: 0.5, x: 0, y: -208 })
   })
 
@@ -377,5 +386,71 @@ describe('LabelDock keeps the selection in view', () => {
     expect(state().view).toBe(before)
     fireEvent.click(more())
     expect(state().view).toBe(before)
+  })
+})
+
+describe('LabelDock colour sheet', () => {
+  const swatch = () => screen.getByRole('button', { name: /Text colour/ })
+  const colourSheet = () => screen.queryByRole('dialog', { name: 'Text colour picker' })
+
+  it('the swatch opens a sheet, not a popover', () => {
+    render(<LabelDock box={box} />)
+    fireEvent.click(swatch())
+    expect(colourSheet()!.className).toBe('color-sheet')
+    expect(sheet()).toBeNull()
+  })
+
+  it('only one sheet at a time: the swatch closes More, More closes the colour sheet', () => {
+    render(<LabelDock box={box} />)
+    openSheet()
+    fireEvent.click(swatch())
+    expect(sheet()).toBeNull()
+    expect(colourSheet()).not.toBeNull()
+    expect(more().getAttribute('aria-pressed')).toBe('false')
+    fireEvent.mouseDown(more()) // the press that closes the picker
+    fireEvent.click(more())
+    expect(colourSheet()).toBeNull()
+    expect(sheet()).not.toBeNull()
+  })
+
+  it('opening the colour sheet stores a name that was being typed', () => {
+    render(<LabelDock box={box} />)
+    openSheet()
+    fireEvent.change(rename(), { target: { value: 'Typed' } })
+    fireEvent.click(swatch())
+    expect(label(1).text_override).toBe('Typed')
+  })
+
+  it('a press on the photo closes the colour sheet, committing the pick as one change', () => {
+    render(<LabelDock box={box} />)
+    const before = state().undo.length
+    fireEvent.click(swatch())
+    const hex = colourSheet()!.querySelector('input')!
+    fireEvent.change(hex, { target: { value: '#ff8800' } }) // a typed hex commits at once
+    const canvas = document.createElement('div')
+    canvas.className = 'editor-canvas'
+    document.body.append(canvas)
+    canvas.addEventListener('touchstart', (e) => e.preventDefault())
+    act(() => {
+      fireEvent.touchStart(canvas)
+    })
+    expect(colourSheet()).toBeNull()
+    expect(label(1).color).toBe('#ff8800')
+    expect(state().undo).toHaveLength(before + 1)
+    canvas.remove()
+  })
+
+  it('Escape closes the colour sheet and keeps the selection', () => {
+    render(<LabelDock box={box} />)
+    fireEvent.click(swatch())
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(colourSheet()).toBeNull()
+    expect([...state().selectedIds]).toEqual([1])
+    expect(dock()).not.toBeNull()
+  })
+
+  it('the colour sheet is capped at the canvas height too', () => {
+    render(<LabelDock box={box} />)
+    expect((dock() as HTMLElement).style.getPropertyValue('--sheet-max')).toBe('792px')
   })
 })
