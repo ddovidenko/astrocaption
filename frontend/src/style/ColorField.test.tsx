@@ -279,6 +279,9 @@ describe('ColorField as a sheet', () => {
     f.open()
     const dialog = f.dialog()!
     expect(dialog.className).toBe('color-sheet')
+    // The sheet is positioned by whoever hosts the field, so the field itself must not be the
+    // containing block: the wrap says so with a class of its own.
+    expect(dialog.closest('.color-field')!.classList.contains('color-field-sheet')).toBe(true)
     expect(dialog.querySelector('.react-colorful')).not.toBeNull()
     expect(dialog.querySelector('input')).not.toBeNull()
     expect(f.swatch.getAttribute('aria-expanded')).toBe('true')

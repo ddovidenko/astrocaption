@@ -20,10 +20,10 @@ const MIN_CLEAR = 48
  *  control applies to every selected label and is one undo entry, laid out for a thumb.
  *
  *  The bar: size, colour, Hide (what Delete does on a keyboard) and More. Two sheets, one open at
- *  a time, each a child of the dock drawn above it over the bottom of the photo (not a child of
- *  the canvas: every touch on the canvas is cancelled for the gesture layer). The colour swatch
- *  opens the picker as one (`ColorField`'s sheet presentation; it keeps its own press-away,
- *  Escape and commit rules). More opens the other: Rename (what a double-click does with a mouse;
+ *  a time, each drawn above the dock over the bottom of the photo and positioned against it (they
+ *  are inside the dock, not the canvas: every touch on the canvas is cancelled for the gesture
+ *  layer). The colour swatch opens the picker as one (`ColorField`'s sheet presentation, rendered
+ *  inside the bar; it keeps its own press-away, Escape and commit rules). More opens the other: Rename (what a double-click does with a mouse;
  *  an inline field at the label's on-screen size would be smaller than 16 px and make iOS zoom the
  *  page), then Aliases, Leader, Pin, Reset position and Clear overrides.
  *
@@ -183,18 +183,20 @@ export default function LabelDock({
           </button>
         </span>
         <ColorField
+          // Remounted, closed, when the selection changes under it with no press to close it (a
+          // keyboard undo pruning a multi-selection): the same exit the More sheet takes.
+          key={[...selectedIds].join()}
           label="Text colour"
           presentation="sheet"
           {...controls.color}
           // Opening it takes More's place, with a name still being typed stored first; closing
-          // (by any of the picker's own routes) frees the place again.
+          // (by any of the picker's own routes) frees the place again. The picker cannot be open
+          // while More is, so there is nothing to guard here.
           onOpen={() => {
             commitName()
             setSheet('color')
           }}
-          onClose={() => {
-            if (sheet === 'color') dropSheet()
-          }}
+          onClose={dropSheet}
         />
         <span className="label-dock-gap" />
         <button

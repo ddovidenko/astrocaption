@@ -47,8 +47,9 @@ export default function ColorField({
    *  caller holding a draft never has to guess which of the two to believe. */
   onClear?: () => void
   /** How the picker shows: a popover placed beside the swatch where it fits (the default), or a
-   *  `sheet` laid out full width for whoever positions it (the docked label bar, SPEC § 6.5),
-   *  with no placement measurement. The commit rules are the same in both. */
+   *  `sheet` laid out full width against the nearest positioned ancestor of the field (the docked
+   *  label bar, SPEC § 6.5), with no placement measurement; the field then marks itself
+   *  `color-field-sheet` so that it is not that ancestor. The commit rules are the same in both. */
   presentation?: 'popover' | 'sheet'
   /** The picker opened (after the swatch's click). */
   onOpen?: () => void
@@ -129,7 +130,7 @@ export default function ColorField({
 
   return (
     <div
-      className="field color-field"
+      className={presentation === 'sheet' ? 'field color-field color-field-sheet' : 'field color-field'}
       ref={wrap}
       onBlur={(e) => {
         // Tabbing out of the popover closes it; moving focus within it does not.

@@ -440,17 +440,49 @@ describe('LabelDock colour sheet', () => {
     canvas.remove()
   })
 
-  it('Escape closes the colour sheet and keeps the selection', () => {
+  it('Escape closes the colour sheet and goes no further, so the selection stays', () => {
     render(<LabelDock box={box} />)
     fireEvent.click(swatch())
+    const seen = vi.fn()
+    window.addEventListener('keydown', seen)
     fireEvent.keyDown(document, { key: 'Escape' })
+    window.removeEventListener('keydown', seen)
     expect(colourSheet()).toBeNull()
+    expect(seen).not.toHaveBeenCalled() // the canvas's own Escape would clear the selection
     expect([...state().selectedIds]).toEqual([1])
     expect(dock()).not.toBeNull()
   })
 
-  it('the colour sheet is capped at the canvas height too', () => {
+  it('Use default clears the colour as one change and closes the sheet, with nothing put back', () => {
+    act(() => state().updateLabels([1], { color: '#123456' }))
+    const before = state().undo.length
     render(<LabelDock box={box} />)
-    expect((dock() as HTMLElement).style.getPropertyValue('--sheet-max')).toBe('792px')
+    fireEvent.click(swatch())
+    fireEvent.click(screen.getByRole('button', { name: 'Use default' }))
+    expect(colourSheet()).toBeNull()
+    expect(label(1).color).toBeNull()
+    expect(state().undo).toHaveLength(before + 1)
+    expect(sheet()).toBeNull()
+    expect(more().getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('the colour sheet lies inside the dock that caps it at the canvas height', () => {
+    render(<LabelDock box={box} />)
+    fireEvent.click(swatch())
+    const capped = colourSheet()!.closest<HTMLElement>('[style*="--sheet-max"]')
+    expect(capped).toBe(dock())
+    expect(capped!.style.getPropertyValue('--sheet-max')).toBe('792px')
+  })
+
+  it('goes away with a selection change that no press caused, as the More sheet does', () => {
+    act(() => state().select(1))
+    act(() => state().toggleSelect(2))
+    render(<LabelDock box={box} />)
+    fireEvent.click(swatch())
+    expect(colourSheet()).not.toBeNull()
+    act(() => state().undoLast()) // label 2 goes dark again: the selection is pruned to label 1
+    expect([...state().selectedIds]).toEqual([1])
+    expect(colourSheet()).toBeNull()
+    expect(dock()).not.toBeNull()
   })
 })

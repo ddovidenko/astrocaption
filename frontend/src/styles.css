@@ -104,6 +104,9 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
 .dot { width: 0.6rem; height: 0.6rem; border-radius: 999px; background: var(--border); }
 .dot.ok { background: var(--ok); }
 .color-field { position: relative; }
+/* In sheet mode the field is not the sheet's containing block: the sheet spans whoever hosts
+   the field (the docked label bar, which is `position: relative`). */
+.color-field-sheet { position: static; }
 .swatch { display: flex; align-items: center; gap: 0.6rem; width: 100%; padding: 0.35rem 0.5rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-weight: 500; text-align: left; }
 .swatch-chip { width: 1.5rem; height: 1.5rem; border-radius: 3px; border: 1px solid rgba(255, 255, 255, 0.15); flex: none; }
 .swatch-hex { font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
@@ -120,10 +123,15 @@ form.config { display: grid; gap: 1.5rem; max-width: 680px; margin: 0 auto; widt
 .popover-row { display: flex; gap: 0.5rem; align-items: center; }
 .popover-row button { white-space: nowrap; }
 .popover-row input { width: 6.5rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 0.35rem 0.5rem; font: inherit; font-variant-numeric: tabular-nums; }
-/* The picker as a bottom sheet (SPEC § 6.5): the docked label bar positions it against itself and
-   caps it with `--sheet-max`. */
-.color-sheet { position: absolute; z-index: 10; left: 0; right: 0; bottom: 100%; max-height: var(--sheet-max, none); overflow-y: auto; display: grid; gap: 0.75rem; padding: 0.9rem; background: var(--panel); border-top: 1px solid var(--border); border-radius: 14px 14px 0 0; box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.55); }
-.color-sheet .react-colorful { width: 100%; height: 180px; }
+/* The picker as a bottom sheet (SPEC § 6.5): the same container as the docked bar's More sheet
+   (`.label-sheet`, below). `--sheet-max` is the canvas height, set by the dock. The picker's own
+   surfaces refuse a scrolling finger (react-colorful gives them touch-action: none), so rather
+   than scroll on a short screen (a phone on its side) the picker shrinks until the sheet fits and
+   leaves 48 px of photo showing where it can: its height is what is left of the cap after that
+   strip, the padding, the gap and the 44 px row, and never under 96 px (a 72 px square plus the
+   hue bar), which on the shortest phones leaves a thinner strip. */
+.color-sheet { display: grid; gap: 0.75rem; padding: 0.9rem; }
+.color-sheet .react-colorful { width: 100%; height: clamp(96px, calc(var(--sheet-max, 999px) - 48px - 7rem), 180px); }
 .color-sheet .popover-row { justify-content: space-between; }
 .color-sheet .popover-row input, .color-sheet .popover-row button { min-height: 44px; font-size: 1rem; }
 .color-sheet .popover-row input { width: 7.5rem; }
@@ -333,16 +341,21 @@ html:has(> body > #root > main.editor-main) { overscroll-behavior: none; }
    under the canvas, so the canvas gets shorter when it shows and no label is ever beneath it.
    Controls are 44 px tall with 16 px text: a fingertip fits, and iOS does not zoom the page when a
    field takes the focus. It must fit a 343 px pane (a 375 px phone) on one row, which is why the
-   swatch shows its chip alone and the size field is narrow. z-index: its sheet and the colour
-   popover open upwards, over the canvas. */
+   swatch shows its chip alone and the size field is narrow. z-index: its two sheets open upwards,
+   over the canvas. */
 .label-dock { position: relative; z-index: 6; background: var(--panel); border-top: 1px solid var(--border); }
-/* Narrower than 375 px the bar does not fit on one row and scrolls sideways (SPEC § 6.5); the
-   sheets are children of the dock, not of the bar, so this never clips them. */
-.label-dock-bar { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem; overflow-x: auto; scrollbar-width: thin; }
+/* Narrower than 375 px the bar does not fit on one row and scrolls sideways (SPEC § 6.5), with no
+   scrollbar: touch screens draw none, and a classic one under the controls would make the bar
+   taller. The colour sheet is rendered *inside* the bar (ColorField draws it in its own field),
+   and escapes this clip only because its containing block is the dock: nothing between the dock
+   and the sheet may be positioned, which `.color-field-sheet { position: static }` sees to. The
+   bar's control sizes stop at the sheet, which has its own. */
+.label-dock-bar { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem; overflow-x: auto; scrollbar-width: none; }
+.label-dock-bar::-webkit-scrollbar { display: none; }
 .label-dock-bar > * { flex: none; }
 .label-dock-bar .label-dock-gap { flex: 1 1 0; }
-.label-dock-bar button, .label-dock-bar input { min-height: 44px; font-size: 1rem; }
-.label-dock-bar button { min-width: 44px; padding: 0 0.6rem; }
+.label-dock-bar :is(button, input):not(.color-sheet *) { min-height: 44px; font-size: 1rem; }
+.label-dock-bar button:not(.color-sheet *) { min-width: 44px; padding: 0 0.6rem; }
 /* − [size] + as one joined control. */
 .label-dock-stepper { display: inline-flex; }
 .label-dock-stepper button { padding: 0; border-radius: 0; }
@@ -351,17 +364,17 @@ html:has(> body > #root > main.editor-main) { overscroll-behavior: none; }
 .label-dock-stepper input[type='number'] { width: 2.75rem; margin: 0 -1px; padding: 0; border-radius: 0; text-align: center; appearance: textfield; -moz-appearance: textfield; }
 .label-dock-stepper input[type='number']::-webkit-inner-spin-button,
 .label-dock-stepper input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-/* The colour popover is placed against the dock, not against its own swatch: it is wider than
-   the room on either side of the swatch on a phone, and would be cut off by the screen's edge.
-   Always upwards, over the photo (there is nothing below the dock). These two rules deliberately
-   outrank the `popover-up` / `popover-right` classes ColorField still measures for itself here. */
-.label-dock .color-field { display: flex; position: static; }
+/* The swatch is its chip alone: the bar must fit a 375 px phone. */
+.label-dock .color-field { display: flex; }
 .label-dock .color-field .field-label, .label-dock .swatch-hex { display: none; }
 .label-dock .swatch { width: auto; justify-content: center; }
 .label-dock .swatch-chip { width: 1.4rem; height: 1.4rem; }
-/* The sheet: what does not fit on the bar, as full-width rows, drawn above the dock over the
-   bottom of the photo. A child of the dock, not of the canvas, whose touches are all cancelled. */
-.label-sheet { position: absolute; left: 0; right: 0; bottom: 100%; max-height: var(--sheet-max, none); overflow-y: auto; padding: 0.35rem 0.9rem 0.25rem; background: var(--panel); border-top: 1px solid var(--border); border-radius: 14px 14px 0 0; box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.55); }
+/* The sheets, drawn above the dock over the bottom of the photo, never taller than the canvas
+   (`--sheet-max`, set by the dock). Inside the dock, not the canvas, whose touches are all
+   cancelled. The More sheet: what does not fit on the bar, as full-width rows; it scrolls on a
+   short screen. The colour sheet (`.color-sheet`, with the ColorField rules) shrinks instead. */
+.label-sheet, .color-sheet { position: absolute; z-index: 10; left: 0; right: 0; bottom: 100%; max-height: var(--sheet-max, none); overflow-y: auto; background: var(--panel); border-top: 1px solid var(--border); border-radius: 14px 14px 0 0; box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.55); }
+.label-sheet { padding: 0.35rem 0.9rem 0.25rem; }
 .label-sheet-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: 100%; min-height: 48px; padding: 0; background: none; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; color: var(--text); font: inherit; font-size: 1rem; font-weight: 400; text-align: left; cursor: pointer; }
 .label-sheet-row:last-child { border-bottom: 0; }
 .label-sheet-row input, .label-sheet-row select { flex: 0 1 13rem; min-width: 0; min-height: 40px; font-size: 1rem; }
