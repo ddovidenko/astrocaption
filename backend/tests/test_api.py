@@ -158,8 +158,12 @@ def test_list_images_search_and_filters(client: TestClient, sample_jpeg: Path) -
     assert ids(q="m 27") == [m27]
     assert ids(q="  ") == [other, m27, veil]
     assert ids(q="nothing-here") == []
-    # Every upload is solved by the fake solver, or still on its way: both chips are accepted.
-    assert set(ids(status="solved") + ids(status="solving")) == {veil, m27, other}
+    # The fake solver solves every upload; wait for the last of them before filtering by status,
+    # so that an upload cannot change state between the two requests (#261).
+    for image_id in (veil, m27, other):
+        wait_for_status(client, image_id, {"solved"})
+    assert ids(status="solved") == [other, m27, veil]
+    assert ids(status="solving") == []
     assert ids(status="failed") == []
     assert ids(published="true") == []
     assert ids(published="false") == [other, m27, veil]
