@@ -630,11 +630,17 @@ test('touch: the docked bar and its sheet do what the floating strip does', asyn
         await expect(picker).toBeVisible()
         await expect(picker.getByRole('button', { name: 'Use default' })).toBeInViewport({ ratio: 1 })
         expect(await picker.evaluate((el) => el.scrollHeight <= el.clientHeight), 'the colour sheet must not need to scroll').toBe(true)
-        // What the sheet leaves of the photo is a strip along the top of the canvas (the picker
-        // has a 96 px floor, so here it is under the 48 px the dock aims for); a tap there still
-        // closes it.
-        const [canvas, pickerBox] = await Promise.all([page.locator('.editor-canvas').boundingBox(), picker.boundingBox()])
-        expect(pickerBox!.y - canvas!.y, 'the sheet leaves a strip of photo to tap').toBeGreaterThanOrEqual(16)
+        // What the sheet leaves of the photo is a strip along the top of the canvas, the 48 px
+        // the dock aims for: on a canvas this short the hex field and Use default sit beside the
+        // picker, not under it, so the picker keeps a usable height too. A tap on the strip
+        // closes the sheet.
+        const [canvas, pickerBox, surface] = await Promise.all([
+          page.locator('.editor-canvas').boundingBox(),
+          picker.boundingBox(),
+          picker.locator('.react-colorful').boundingBox(),
+        ])
+        expect(pickerBox!.y - canvas!.y, 'the sheet leaves a strip of photo to tap').toBeGreaterThanOrEqual(48)
+        expect(surface!.height, 'the picker is not squeezed flat').toBeGreaterThanOrEqual(96)
         await page.touchscreen.tap(canvas!.x + 20, canvas!.y + 8)
         await expect(picker).toBeHidden()
       }

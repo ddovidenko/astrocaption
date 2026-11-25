@@ -442,7 +442,10 @@ canvas pane is a sliver, and the bar is cut off with it, not drawn over the pane
   typed in full commits at once (three digits on Enter or with the sheet, § 6.2); Use default
   clears the override. Only one sheet is open at a time: the swatch
   closes More and More closes the colour sheet, each committing on the way out. The view pans up
-  for it as for More.
+  for it as for More. The colour sheet does not scroll (the picker takes every drag on it): on a
+  short screen (a phone on its side) the hex field and Use default stand beside the picker, not
+  under it, and the picker shrinks, so that a strip of the image stays in reach to tap (48 px,
+  less only on the shortest phones).
 - **More** opens a sheet above the bar, over the bottom of the image, with the rest as full-width
   rows: **Rename** (only with exactly one label selected), **Aliases**, **Leader**, **Pin in place**,
   **Reset position**, **Clear overrides**. If the selection would be hidden behind the sheet, the
