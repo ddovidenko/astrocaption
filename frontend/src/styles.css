@@ -371,12 +371,22 @@ html:has(> body > #root > main.editor-main) { overscroll-behavior: none; }
    finger (react-colorful gives them touch-action: none), so rather than scroll on a short screen
    the picker shrinks until the sheet fits and leaves `--sheet-clear` of photo showing: its height
    is the cap less that strip and the sheet's own chrome (padding, gap and the 44 px row come to
-   about 5.3rem; 7rem leaves a margin), and never under 96 px (a 72 px square plus the hue bar),
-   which on the shortest phones leaves a thinner strip. */
+   about 5.3rem; 7rem leaves a margin), and never under 96 px (a 72 px square plus the hue bar).
+   That floor would eat the strip on a phone held sideways, so there (below) the row goes beside
+   the picker and only the shortest phones are left with a thinner strip. */
 .color-sheet { display: grid; gap: 0.75rem; padding: 0.9rem; }
 .color-sheet .react-colorful { width: 100%; height: clamp(96px, calc(var(--sheet-max, 999px) - var(--sheet-clear, 48px) - 7rem), 180px); }
 .color-sheet .popover-row { justify-content: space-between; }
 .color-sheet .popover-row input { width: 7.5rem; }
+/* A phone on its side: the hex field and Use default stand beside the picker, one over the
+   other, so the sheet's chrome is its padding alone (1.8rem and the border; 2.5rem leaves a
+   margin) and the picker gets the height the row would have taken. The floor is the two 44 px
+   controls and their gap. */
+@media (max-height: 480px) {
+  .color-sheet { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  .color-sheet .react-colorful { height: clamp(96px, calc(var(--sheet-max, 999px) - var(--sheet-clear, 48px) - 2.5rem), 180px); }
+  .color-sheet .popover-row { flex-direction: column; align-items: stretch; }
+}
 .label-sheet-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: 100%; min-height: 48px; padding: 0; background: none; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; color: var(--text); font: inherit; font-size: 1rem; font-weight: 400; text-align: left; cursor: pointer; }
 .label-sheet-row:last-child { border-bottom: 0; }
 .label-sheet-row input, .label-sheet-row select { flex: 0 1 13rem; min-width: 0; min-height: 40px; font-size: 1rem; }
