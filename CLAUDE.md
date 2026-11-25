@@ -21,7 +21,8 @@ data/         (runtime, volume-mounted) sqlite db, uploads, renders, config. Nev
 ```
 make install      # backend venv (backend/.venv) from the pinned backend/requirements-dev.txt + frontend node_modules; run by make dev/test/lint as needed
 make lock         # re-pin backend/requirements.txt (image) and requirements-dev.txt (venv, CI) from pyproject.toml with uv; UPGRADE=1 moves every pin to its latest. Run it after editing pyproject deps: tests/test_lockfiles.py fails while the pins are stale
-make audit        # pip-audit over the pinned backend requirements + npm audit (network); audit.yml runs it weekly and fails loudly
+make audit        # pip-audit over the pinned backend requirements + npm audit + make runtime-eol (network); audit.yml runs it weekly and fails loudly
+make runtime-eol  # fails when the Node or Python in docker/Dockerfile is within 180 days of end of life (endoflife.date); Dependabot ignores Node majors, this is the reminder
 make dev          # backend on :8000 (uvicorn --reload) + vite on :5173 with proxy
 make dev-service  # the same at boot, as a systemd unit (Linux/WSL); stop it before running make dev by hand
 make test         # pytest + vitest
