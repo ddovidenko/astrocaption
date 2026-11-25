@@ -1,5 +1,6 @@
-# Weekly `make audit`: pip-audit over the pinned backend requirements and npm audit over the
-# frontend lockfile. A failed run is the loud signal #250 asked for (GitHub mails the owner),
+# Weekly `make audit`: pip-audit over the pinned backend requirements, npm audit over the
+# frontend lockfile, and the end-of-life check on the image's Node and Python (Dependabot is told
+# to ignore Node majors, so this is what says when to move). A failed run is the loud signal #250 asked for (GitHub mails the owner),
 # independent of whether Dependabot happens to open a PR that week. Run it by hand from the
 # Actions tab before cutting a release.
 name: audit

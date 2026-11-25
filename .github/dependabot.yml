@@ -50,5 +50,7 @@ updates:
     ignore:
       # The build stage tracks Node LTS by hand (odd majors never become LTS; even
       # majors only after their LTS date). Minor/patch alpine bumps still flow.
+      # Nothing here will propose the next LTS: `make audit` (weekly, audit.yml) fails once
+      # the pinned Node is within 180 days of its end of life (scripts/check_runtime_eol.py).
       - dependency-name: node
         update-types: ["version-update:semver-major"]

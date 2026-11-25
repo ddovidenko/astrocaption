@@ -13,7 +13,7 @@ NPM       := npm --prefix frontend
 DEV_UNIT_ACTIVE := [ -d /run/systemd/system ] && systemctl is-active --quiet astrocaption-dev \
   && [ "$$INVOCATION_ID" != "$$(systemctl show astrocaption-dev -p InvocationID --value)" ]
 
-.PHONY: help install lock audit dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors render-vectors names-vectors safari-probe names-catalog objects-catalog fonts record-fixtures favicons e2e-fixture e2e clean
+.PHONY: help install lock audit runtime-eol dev dev-backend dev-frontend dev-service dev-service-remove test test-backend test-frontend lint lint-backend lint-frontend format build up reset-password reset-password-dev placement-vectors render-vectors names-vectors safari-probe names-catalog objects-catalog fonts record-fixtures favicons e2e-fixture e2e clean
 
 help:
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -39,9 +39,13 @@ lock: $(VENV)/.installed ## Re-pin backend/requirements.txt and requirements-dev
 	cd backend && $(LOCK) -o requirements.txt pyproject.toml
 	cd backend && $(LOCK) --extra dev --constraint requirements.txt -o requirements-dev.txt pyproject.toml
 
-audit: $(VENV)/.installed ## Known vulnerabilities in the pinned backend requirements and the frontend lockfile (network)
+audit: $(VENV)/.installed ## Known vulnerabilities in the pinned backend requirements and the frontend lockfile, then runtime-eol (network)
 	cd backend && .venv/bin/pip-audit --require-hashes --disable-pip --progress-spinner off -r requirements-dev.txt
 	$(NPM) audit
+	$(MAKE) --no-print-directory runtime-eol
+
+runtime-eol: $(VENV)/.installed ## Fail when the image's Node or Python is within 180 days of its end of life (network; part of make audit)
+	cd backend && .venv/bin/python scripts/check_runtime_eol.py
 
 # `npm ci` wipes node_modules, including Vite's pre-bundle cache (node_modules/.vite/deps).
 # A Vite that is already serving keeps handing out the old bundle hashes and every React
