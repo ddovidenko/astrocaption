@@ -450,7 +450,11 @@ test('touch: the docked bar and its sheet do what the floating strip does', asyn
       const storedColor = async () => (await fetchAnnotations(page, imageId)).labels.find((x) => x.object_id === id)!.color
       const chip = toolbar.locator('.swatch-chip')
       const chipColor = () => chip.evaluate((el) => getComputedStyle(el).backgroundColor)
+      // The colour the canvas draws the label in: the store is only written by a commit or a
+      // preview, and a preview would be on the photo before the server heard of anything.
+      const drawnColor = async () => (await stageState(page)).labels.find((x) => x.id === id)!.color.toLowerCase()
       const before = await chipColor()
+      const drawnBefore = await drawnColor()
       await swatch.tap()
       await expect(picker).toBeVisible()
       await expect(picker).toBeInViewport({ ratio: 1 })
@@ -470,15 +474,17 @@ test('touch: the docked bar and its sheet do what the floating strip does', asyn
       const sat = (await picker.locator('.react-colorful__saturation').boundingBox())!
       await page.touchscreen.tap(sat.x + sat.width * 0.8, sat.y + sat.height * 0.2)
       await expect.poll(chipColor).not.toBe(before)
-      expect(await storedColor()).toBeNull()
+      expect(await drawnColor(), 'a pick is not drawn on the photo while the sheet is open').toBe(drawnBefore)
       await expect(undo).toBeDisabled()
       // A tap on the photo closes it and commits the pick (the hex field shows it) as one change.
       const pickedHex = await picker.locator('input').inputValue()
       await page.touchscreen.tap(photo.x, photo.y)
       await expect(picker).toBeHidden()
+      await expect.poll(drawnColor).toBe(pickedHex.toLowerCase())
       await expect.poll(async () => (await storedColor())?.toLowerCase() ?? null, { timeout: 5_000 }).toBe(pickedHex.toLowerCase())
       await expect(undo).toBeEnabled()
       await undo.tap()
+      await expect.poll(drawnColor).toBe(drawnBefore)
       await expect.poll(storedColor, { timeout: 5_000 }).toBeNull()
       await expect(undo).toBeDisabled()
       // That touch may have landed on anything; back to the label.

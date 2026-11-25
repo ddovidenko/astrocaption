@@ -14,6 +14,7 @@ import { primaryName } from './names'
 import { PAD_FACTOR } from './placement'
 import { CANVAS_SIZE_ERROR, blockedLeaderNotice, drawErrorNotice, previewErrorSentence, probeStatus } from './notices'
 import {
+  effectiveColor,
   labelText,
   leaderSegment,
   leaderVisible,
@@ -50,8 +51,9 @@ export interface EditorTestHook {
   /** How many enabled labels the canvas actually drew (orphaned ones are not counted). */
   labelCount: number
   /** Where the drawn labels sit and how big their text boxes are, in original image pixels —
-   *  what a drag has to move. */
-  labelPositions(): { id: number; x: number; y: number; w: number; h: number }[]
+   *  what a drag has to move — and the colour each one's text is drawn in, which is the document
+   *  as the canvas holds it, a preview included: nothing a spec reads from the server shows that. */
+  labelPositions(): { id: number; x: number; y: number; w: number; h: number; color: string }[]
   /** Where the leaders the canvas draws end, in original image pixels: the parity spec checks
    *  that one moved behind another marker was routed around its ring (#14). */
   leaders(): { id: number; to: [number, number] }[]
@@ -516,14 +518,19 @@ export default function EditorCanvas() {
       get labelCount() {
         return entriesRef.current.length
       },
-      labelPositions: () =>
-        entriesRef.current.map((e) => ({
+      labelPositions: () => {
+        // No style, no entries: the list is built from it.
+        const { style } = useEditor.getState()
+        if (!style) return []
+        return entriesRef.current.map((e) => ({
           id: e.label.object_id,
           x: e.label.x,
           y: e.label.y,
           w: e.box.width,
           h: e.box.height,
-        })),
+          color: effectiveColor(e.label, style),
+        }))
+      },
       leaders: () => entriesRef.current.flatMap((e) => (e.leader ? [{ id: e.label.object_id, to: e.leader.to }] : [])),
       selectedIds: () => [...useEditor.getState().selectedIds],
       renderAt,

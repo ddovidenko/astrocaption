@@ -43,6 +43,11 @@ export function effectiveFontSize(label: Label, style: StyleConfig): number {
   return label.font_size ?? style.font_size
 }
 
+/** The colour a label's text is drawn in: its own override, or the global text colour. */
+export function effectiveColor(label: Label, style: StyleConfig): string {
+  return label.color ?? style.text_color
+}
+
 export function aliasFontSize(size: number): number {
   return Math.max(MIN_FONT_SIZE, roundHalfEven(size * ALIAS_SCALE))
 }
