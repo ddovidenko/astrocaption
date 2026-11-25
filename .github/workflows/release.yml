@@ -28,7 +28,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version: "3.15"
       - name: the tag must match the version files
         run: cd backend && python scripts/check_release_version.py "$GITHUB_REF_NAME"
 
